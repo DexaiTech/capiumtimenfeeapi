@@ -25,7 +25,9 @@ class ServiceMappingRead(BaseModel):
     )
     code: str | None = Field(description="The service's code (null for the no-service row)")
     name: str | None = Field(description="The service's name (null for the no-service row)")
-    is_active: bool | None = Field(description="Whether the service is active (null: no-service row)")
+    is_active: bool | None = Field(
+        description="Whether the service is active (null: no-service row)"
+    )
     account_code: str | None = Field(description="The income account code; null: not mapped")
     account_name: str | None = Field(description="The income account's name")
 

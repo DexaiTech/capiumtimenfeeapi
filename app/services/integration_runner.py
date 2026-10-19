@@ -143,7 +143,9 @@ class IntegrationRunner:
             self.ctx, self.rctx
         )
         await self._record(
-            CENTRAL_USER, polled.available and polled.failed == 0, "The central user service failed."
+            CENTRAL_USER,
+            polled.available and polled.failed == 0,
+            "The central user service failed.",
         )
         return polled.available, {
             "events_applied": polled.applied,
@@ -153,7 +155,14 @@ class IntegrationRunner:
 
     async def _run_practice_management(self) -> tuple[bool, dict[str, int], RunSummary]:
         service = PmSyncService(self.session, get_practice_management_gateway())
-        totals = {"created": 0, "linked": 0, "updated": 0, "unchanged": 0, "skipped": 0, "failed": 0}
+        totals = {
+            "created": 0,
+            "linked": 0,
+            "updated": 0,
+            "unchanged": 0,
+            "skipped": 0,
+            "failed": 0,
+        }
         available, cursor = True, None
         for _ in range(MAX_IMPORT_PAGES):
             page = await service.import_jobs(self.ctx, self.rctx, cursor=cursor, limit=100)

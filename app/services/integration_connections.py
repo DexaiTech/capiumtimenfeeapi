@@ -281,7 +281,11 @@ class ConnectionService:
                 ctx.organization_id, key, enabled=info.default_enabled, new_id=new_id()
             )
             changes: dict[str, list[Any]] = {}
-            if "enabled" in fields and data.enabled is not None and data.enabled != connection.enabled:
+            if (
+                "enabled" in fields
+                and data.enabled is not None
+                and data.enabled != connection.enabled
+            ):
                 if not data.enabled and not info.can_disable:
                     raise ConflictError(
                         f"{info.name} is part of the client flow and cannot be switched off.",

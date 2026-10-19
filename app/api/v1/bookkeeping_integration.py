@@ -1,5 +1,6 @@
-"""The bookkeeping mappings: which income account each service is booked to and which tax code each VAT
-code is booked to. HTTP only; the rules are in ``app/services/bookkeeping_mappings.py``."""
+"""The bookkeeping mappings: which income account each service is booked to and which tax code
+each VAT code is booked to. HTTP only; the rules are in ``app/services/bookkeeping_mappings.py``.
+"""
 
 from fastapi import APIRouter
 
@@ -16,10 +17,11 @@ router = APIRouter(prefix="/organizations/{organization_id}", tags=["Integration
     "/integrations/bookkeeping/mappings",
     summary="Get the bookkeeping mappings",
     description=(
-        "Every service of the practice with the income account it is booked to, every VAT code with "
-        "its tax code, and one row each for invoice lines that have no service and for lines that "
-        "carry no VAT code (`service_id` / `vat_rate_id` null). A row with a null `account_code` "
-        "or `tax_code` is not mapped; `unmapped_services` and `unmapped_vat_rates` count them. "
+        "Every service of the practice with the income account it is booked to, every VAT code "
+        "with its tax code, and one row each for invoice lines that have no service and for "
+        "lines that carry no VAT code (`service_id` / `vat_rate_id` null). A row with a null "
+        "`account_code` or `tax_code` is not mapped; `unmapped_services` and `unmapped_vat_rates` "
+        "count them. "
         "A document with a line that has an unmapped service or VAT code is not sent: its sync "
         "item fails with `UNMAPPED` and says which. Requires `integration.read`."
     ),

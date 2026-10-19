@@ -1,11 +1,12 @@
 """Work in progress beyond invoices: the movement ledger, adjustments, transfers, credit-note WIP
 and the frozen as-at snapshots of historic WIP.
 
-* ``wip_movements``: the **immutable ledger**. A row is written when a movement takes effect and is
-  never changed or deleted (a trigger refuses it); a correction is a new ``reversal`` row that points
-  at the original (``reversal_of_id``). ``scope = 'amount'`` movements adjust the WIP *balance* of a
-  job (write-on, write-off by amount, transfer in/out); ``scope = 'items'`` movements are memos of a
-  change that already happened to the items themselves (an item write-off, a credit-note return).
+* ``wip_movements``: the **immutable ledger**. A row is written when a movement takes effect and
+  is never changed or deleted (a trigger refuses it); a correction is a new ``reversal`` row that
+  points at the original (``reversal_of_id``). ``scope = 'amount'`` movements adjust the WIP
+  *balance* of a job (write-on, write-off by amount, transfer in/out); ``scope = 'items'``
+  movements are memos of a change that already happened to the items themselves (an item
+  write-off, a credit-note return).
   The table keeps client and job as plain ids, without foreign keys, like the other history tables.
 * ``wip_adjustments``: a write-on or write-off request and its workflow (pending, approved,
   rejected, reversed). Only an effective adjustment has a ledger row.
@@ -315,7 +316,9 @@ class CreditNoteWip(Base, IdMixin, OrgScopedMixin, TimestampMixin):
     __tablename__ = "credit_note_wip"
     __table_args__ = (
         UniqueConstraint(
-            "organization_id", "credit_note_id", name="uq_credit_note_wip_organization_id_credit_note_id"
+            "organization_id",
+            "credit_note_id",
+            name="uq_credit_note_wip_organization_id_credit_note_id",
         ),
         ForeignKeyConstraint(
             ["organization_id", "credit_note_id"],

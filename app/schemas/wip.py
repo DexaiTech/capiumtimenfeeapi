@@ -58,7 +58,9 @@ class WipGroupTotals(BaseModel):
     ages: WipAges
     oldest_date: date | None
     item_count: int
-    over_90_bp: int | None = Field(description="Share of the total older than 90 days, basis points")
+    over_90_bp: int | None = Field(
+        description="Share of the total older than 90 days, basis points"
+    )
 
 
 class WipGroupRow(WipGroupTotals):
@@ -137,7 +139,9 @@ class AdjustmentRead(BaseModel):
     in_force: bool = Field(
         description="Approved and not reversed or settled: the amount is part of the job's WIP"
     )
-    movement_id: uuid.UUID | None = Field(description="The ledger row, once the adjustment is in effect")
+    movement_id: uuid.UUID | None = Field(
+        description="The ledger row, once the adjustment is in effect"
+    )
 
 
 class AdjustmentCounts(BaseModel):
@@ -169,7 +173,9 @@ class TransferCreate(RequestModel):
     reason: str = _REASON
     component: WipComponent | None = Field(
         default=None,
-        description="With `amount`: which WIP moves. Default: `fixed_fee` on a fixed-fee job, else `time`",
+        description=(
+            "With `amount`: which WIP moves. Default: `fixed_fee` on a fixed-fee job, else `time`"
+        ),
     )
     effective_date: date | None = Field(
         default=None, description="Default: today in the practice's time zone; never in the future"

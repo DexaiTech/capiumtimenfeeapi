@@ -1,5 +1,6 @@
-"""Queries for the sync-item outbox and the integration connections. Every method is scoped to one
-organization, except the ones that say they serve the worker (``due``, ``enabled_organizations``)."""
+"""Queries for the sync-item outbox and the integration connections. Every method is scoped to
+one organization, except the ones that say they serve the worker (``due``,
+``enabled_organizations``)."""
 
 import uuid
 from dataclasses import dataclass
@@ -100,7 +101,9 @@ class SyncItemRepository:
         if filters.q:
             stmt = stmt.where(
                 or_(
-                    IntegrationSyncItem.payload["label"].astext.icontains(filters.q, autoescape=True),
+                    IntegrationSyncItem.payload["label"].astext.icontains(
+                        filters.q, autoescape=True
+                    ),
                     IntegrationSyncItem.last_error.icontains(filters.q, autoescape=True),
                 )
             )
@@ -134,7 +137,10 @@ class SyncItemRepository:
                     IntegrationConnection.enabled.is_(True),
                 ),
             )
-            .where(IntegrationSyncItem.status == "pending", IntegrationSyncItem.next_attempt_at <= now)
+            .where(
+                IntegrationSyncItem.status == "pending",
+                IntegrationSyncItem.next_attempt_at <= now,
+            )
             .order_by(IntegrationSyncItem.next_attempt_at, IntegrationSyncItem.id)
             .limit(limit)
         )
@@ -217,7 +223,9 @@ class ConnectionRepository:
         (two requests creating it at once leave one row), locked until the transaction ends."""
         await self.session.execute(
             insert(IntegrationConnection)
-            .values(id=new_id, organization_id=organization_id, integration=integration, enabled=enabled)
+            .values(
+                id=new_id, organization_id=organization_id, integration=integration, enabled=enabled
+            )
             .on_conflict_do_nothing(index_elements=["organization_id", "integration"])
         )
         found = await self.get(organization_id, integration, lock=True)

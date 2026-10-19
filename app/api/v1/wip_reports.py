@@ -72,7 +72,9 @@ def _original_response(report: Any, fmt: str) -> Any:
             content=report_csv.render_report("wip", report),
             media_type="text/csv; charset=utf-8",
             headers={
-                "Content-Disposition": f'attachment; filename="{report_csv.filename("wip", report)}"'
+                "Content-Disposition": (
+                    f'attachment; filename="{report_csv.filename("wip", report)}"'
+                )
             },
         )
     return ok(report)

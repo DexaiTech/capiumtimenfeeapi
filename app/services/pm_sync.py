@@ -47,8 +47,8 @@ from app.services.integrations import (
     get_practice_management_gateway,
 )
 from app.services.job_tasks import LOCKED_JOB_STATUSES, TaskService
-from app.services.policy import OrgContext
 from app.services.pm_hooks import applying_pm_change
+from app.services.policy import OrgContext
 from app.services.time_jobs import JobService
 from app.services.time_rules import (
     CLIENT_WORK_STATUSES,
@@ -253,7 +253,9 @@ class PmSyncService:
         client: Client | None = None
         if job is None:
             if not create:
-                return _result(pm_job, "skipped", "This practice management job is not linked here.")
+                return _result(
+                    pm_job, "skipped", "This practice management job is not linked here."
+                )
             client = await self.links.client_by_central_id(org_id, pm_job.central_client_id)
             if client is None:
                 return _result(
@@ -262,7 +264,10 @@ class PmSyncService:
                     f"Client {pm_job.central_client_id} is not enabled in this practice: enable it "
                     "from the central client service first.",
                 )
-            if client.merged_into_client_id is not None or client.status not in CLIENT_WORK_STATUSES:
+            if (
+                client.merged_into_client_id is not None
+                or client.status not in CLIENT_WORK_STATUSES
+            ):
                 return _result(
                     pm_job, "skipped", f"Client {client.code} does not accept new work."
                 )
@@ -282,7 +287,9 @@ class PmSyncService:
             assert client is not None
             job = await self._create_job(ctx, rctx, pm_job, client, refs, start, due, target_status)
             await self._sync_tasks(ctx, rctx, job, pm_job.tasks, warnings)
-            return _result(pm_job, "created", f"Created job {job.number}.", job=job, warnings=warnings)
+            return _result(
+                pm_job, "created", f"Created job {job.number}.", job=job, warnings=warnings
+            )
 
         changes = apply_changes(
             job,
@@ -305,7 +312,11 @@ class PmSyncService:
                 rctx,
                 "job.pm_linked" if linked_now else "job.updated",
                 job,
-                {"changes": changes, "pm_job_id": pm_job.pm_job_id, "source": "practice_management"},
+                {
+                    "changes": changes,
+                    "pm_job_id": pm_job.pm_job_id,
+                    "source": "practice_management",
+                },
             )
         status_changed = False
         if target_status is not None and target_status != job.status:
@@ -628,7 +639,9 @@ class PmSyncService:
             if job is None:
                 raise NotFoundError("Job not found.")
             if job.pm_job_id is None:
-                raise ConflictError("This job is not linked to practice management.", code="JOB_NOT_LINKED")
+                raise ConflictError(
+                    "This job is not linked to practice management.", code="JOB_NOT_LINKED"
+                )
             previous = job.pm_job_id
             job.pm_job_id = None
             job.pm_linked_at = None
@@ -751,7 +764,9 @@ async def push_status_item(session: AsyncSession, item: IntegrationSyncItem) -> 
     if item.operation == "push_job_status":
         pm_status = JOB_TO_PM_STATUS.get(status)
         if pm_status is None:
-            raise ItemFailure(f"Practice management has no equivalent of {status}.", "UNKNOWN_STATUS")
+            raise ItemFailure(
+                f"Practice management has no equivalent of {status}.", "UNKNOWN_STATUS"
+            )
         receipt = await gateway.set_job_status(pm_job_id, pm_status, idempotency_key=key)
     else:
         pm_task_id = payload.get("pm_task_id")

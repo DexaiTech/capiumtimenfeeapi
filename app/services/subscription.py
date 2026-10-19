@@ -5,10 +5,10 @@
 practice's id still answers 404 and only a member sees 403 ``SUBSCRIPTION_UNAVAILABLE``.
 
 The answer of the subscription service is cached per practice for ``SUBSCRIPTION_CACHE_SECONDS``
-(60 by default), so a request costs a dictionary lookup, never a call, and no database query. When the
-service cannot be asked, the last answer is kept (an expired practice stays blocked, an active
-one stays open); a practice that was never verified is let through, because an outage of the
-subscription service must not lock every practice out, and the next attempt is made after
+(60 by default), so a request costs a dictionary lookup, never a call, and no database query.
+When the service cannot be asked, the last answer is kept (an expired practice stays blocked, an
+active one stays open); a practice that was never verified is let through, because an outage of
+the subscription service must not lock every practice out, and the next attempt is made after
 ``FAILURE_TTL_SECONDS``.
 """
 

@@ -391,14 +391,14 @@ async def test_a_bad_body_is_422(client, body):
 
 @pytest.mark.parametrize("role", ["owner", "admin", "partner"])
 async def test_who_manages_the_checklist(client, role):
-    owner, org = await practice(client)
+    _owner, org = await practice(client)
     person = await staff(org, role)
     assert (await mark(client, person, org, "period_lock", "skipped")).status_code == 200
 
 
 @pytest.mark.parametrize("role", ["manager", "staff", "billing", "viewer"])
 async def test_everybody_else_reads_but_cannot_mark(client, role):
-    owner, org = await practice(client)
+    _owner, org = await practice(client)
     person = await staff(org, role)
     assert (await checklist(client, person, org)).status_code == 200
     response = await mark(client, person, org, "period_lock", "skipped")
@@ -408,7 +408,7 @@ async def test_everybody_else_reads_but_cannot_mark(client, role):
 
 
 async def test_a_role_without_organization_read_sees_nothing(client):
-    owner, org = await practice(client)
+    _owner, org = await practice(client)
     await add_custom_role(org["id"], "Nothing")
     person = await staff(org, "Nothing")
     response = await checklist(client, person, org)
@@ -419,7 +419,7 @@ async def test_a_role_without_organization_read_sees_nothing(client):
 
 
 async def test_a_custom_role_can_hold_only_the_manage_permission(client):
-    owner, org = await practice(client)
+    _owner, org = await practice(client)
     await add_custom_role(org["id"], "Setup", ["organization.read", "onboarding.manage"])
     person = await staff(org, "Setup")
     assert (await mark(client, person, org, "period_lock", "done")).status_code == 200
@@ -454,7 +454,7 @@ async def test_the_data_counted_belongs_to_the_practice(client):
 
 
 async def test_sign_in_is_required(client):
-    owner, org = await practice(client)
+    _owner, org = await practice(client)
     assert (await client.get(org_url(org, "/onboarding"))).status_code == 401
     response = await client.put(
         org_url(org, "/onboarding/steps/period_lock"), json={"state": "done"}
@@ -466,7 +466,7 @@ async def test_sign_in_is_required(client):
 
 
 async def test_the_table_refuses_a_bad_state_a_bad_key_and_a_second_row(client):
-    owner, org = await practice(client)
+    _owner, org = await practice(client)
     insert = (
         "INSERT INTO onboarding_progress (id, organization_id, step_key, state) "
         "VALUES (gen_random_uuid(), :o, :k, :s)"

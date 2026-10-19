@@ -144,7 +144,9 @@ class BookkeepingRepository:
 
     # --- Reading a document -------------------------------------------------------------------
 
-    async def invoice(self, organization_id: uuid.UUID, invoice_id: uuid.UUID) -> DocumentData | None:
+    async def invoice(
+        self, organization_id: uuid.UUID, invoice_id: uuid.UUID
+    ) -> DocumentData | None:
         row = (
             await self.session.execute(
                 select(Invoice, Client.code, Client.name)

@@ -1,17 +1,18 @@
 """Central users: what the central user service tells the practice, applied to its staff.
 
-One handler serves both ways in: ``POST /integrations/central-user/events`` (the service pushes an
-event) and ``process-changes`` (the practice pulls the change feed). A person is found by their email
-address among the members of the practice; handlers run as the system (the audit entry has no actor;
-the person who triggered the call, the event id and the source are in its metadata).
+One handler serves both ways in: ``POST /integrations/central-user/events`` (the service pushes
+an event) and ``process-changes`` (the practice pulls the change feed). A person is found by
+their email address among the members of the practice; handlers run as the system (the audit
+entry has no actor; the person who triggered the call, the event id and the source are in its
+metadata).
 
 * ``renamed``: the person's name changes (``users.full_name``, the display data of every list).
-* ``deactivated``: an active member becomes ``inactive`` (their records stay, they can no longer open
-  the practice) and, when they belong to no other practice, their sessions end. **Never the practice's
-  last administrator**: the event is refused (and kept as a failed sync item with the reason) while
-  nobody else who can sign in holds the permissions to manage staff and roles.
-* ``reactivated``: an ``inactive`` member becomes ``active`` again (not one who ``left``, and not when
-  another active member already uses their work email).
+* ``deactivated``: an active member becomes ``inactive`` (their records stay, they can no longer
+  open the practice) and, when they belong to no other practice, their sessions end. **Never the
+  practice's last administrator**: the event is refused (and kept as a failed sync item with the
+  reason) while nobody else who can sign in holds the permissions to manage staff and roles.
+* ``reactivated``: an ``inactive`` member becomes ``active`` again (not one who ``left``, and not
+  when another active member already uses their work email).
 * An event about someone who is not a member of the practice is ``skipped``, never an error.
 """
 
@@ -134,9 +135,15 @@ class CentralUserService:
         old = user.full_name
         user.full_name = name
         await self.session.flush()
-        await self._audit(org_id, rctx, "staff.central_renamed", user, member, meta, {"full_name": [old, name]})
+        await self._audit(
+            org_id, rctx, "staff.central_renamed", user, member, meta, {"full_name": [old, name]}
+        )
         return Applied(
-            "applied", f"{old} is now {name}.", "member", user.id, {"changes": {"full_name": [old, name]}}
+            "applied",
+            f"{old} is now {name}.",
+            "member",
+            user.id,
+            {"changes": {"full_name": [old, name]}},
         )
 
     async def _deactivated(
@@ -179,7 +186,13 @@ class CentralUserService:
                 user.id, "admin", datetime.now(UTC)
             )
         await self._audit(
-            org_id, rctx, "staff.central_deactivated", user, member, meta, {"status": [old_status, "inactive"]}
+            org_id,
+            rctx,
+            "staff.central_deactivated",
+            user,
+            member,
+            meta,
+            {"status": [old_status, "inactive"]},
         )
         return Applied(
             "applied",
@@ -213,7 +226,13 @@ class CentralUserService:
         member.status = "active"
         await self.session.flush()
         await self._audit(
-            org_id, rctx, "staff.central_reactivated", user, member, meta, {"status": [old_status, "active"]}
+            org_id,
+            rctx,
+            "staff.central_reactivated",
+            user,
+            member,
+            meta,
+            {"status": [old_status, "active"]},
         )
         return Applied(
             "applied",

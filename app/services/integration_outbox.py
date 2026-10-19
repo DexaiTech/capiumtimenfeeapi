@@ -330,7 +330,9 @@ class OutboxProcessor:
             await self._log(item, attempt, failure)
         return item, summary
 
-    async def _call(self, item: IntegrationSyncItem) -> tuple[ItemOutcome | None, ItemFailure | None]:
+    async def _call(
+        self, item: IntegrationSyncItem
+    ) -> tuple[ItemOutcome | None, ItemFailure | None]:
         handler = self.handlers.get((item.integration, item.operation))
         if handler is None:
             failure = ItemFailure(f"Nothing handles {item.operation}.", "NO_HANDLER")
@@ -407,7 +409,9 @@ class OutboxProcessor:
                 "idempotency_key": item.idempotency_key,
                 "code": item.last_error_code,
                 "will_retry": item.status == "pending",
-                "next_attempt_at": item.next_attempt_at.isoformat() if item.next_attempt_at else None,
+                "next_attempt_at": (
+                    item.next_attempt_at.isoformat() if item.next_attempt_at else None
+                ),
             },
         )
 

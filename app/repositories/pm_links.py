@@ -82,7 +82,8 @@ class PmLinkRepository:
     async def active_member_id_by_email(
         self, organization_id: uuid.UUID, email: str
     ) -> uuid.UUID | None:
-        """The user id of the active member who signs in with, or has as work email, this address."""
+        """The user id of the active member who signs in with, or has as work email, this
+        address."""
         lowered = email.strip().lower()
         stmt = (
             select(OrganizationMember.user_id)

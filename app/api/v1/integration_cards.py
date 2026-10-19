@@ -5,7 +5,7 @@ switch of the mock services. HTTP only; the work is ``app/services/integration_*
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Path, Query
+from fastapi import APIRouter, Path, Query
 
 from app.core.exceptions import NotFoundError
 from app.db.session import unit_of_work
@@ -73,7 +73,9 @@ async def list_sync_items(
         Query(
             max_length=30,
             pattern=r"^[a-z_]{1,30}$",
-            description="Only this kind of record: `invoice`, `credit_note`, `job`, `task`, `member`",
+            description=(
+                "Only this kind of record: `invoice`, `credit_note`, `job`, `task`, `member`"
+            ),
         ),
     ] = None,
     entity_id: Annotated[

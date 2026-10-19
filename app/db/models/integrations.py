@@ -208,8 +208,12 @@ class IntegrationSyncItem(Base, IdMixin, OrgScopedMixin, TimestampMixin):
         CheckConstraint("length(idempotency_key) BETWEEN 1 AND 200", name="idempotency_key_length"),
         CheckConstraint("status IN ('pending', 'ok', 'failed', 'skipped')", name="status"),
         CheckConstraint("attempts >= 0", name="attempts"),
-        CheckConstraint("(status = 'pending') = (next_attempt_at IS NOT NULL)", name="next_attempt"),
-        CheckConstraint("last_error IS NULL OR length(last_error) <= 1000", name="last_error_length"),
+        CheckConstraint(
+            "(status = 'pending') = (next_attempt_at IS NOT NULL)", name="next_attempt"
+        ),
+        CheckConstraint(
+            "last_error IS NULL OR length(last_error) <= 1000", name="last_error_length"
+        ),
         Index(
             "ix_integration_sync_items_due",
             "next_attempt_at",

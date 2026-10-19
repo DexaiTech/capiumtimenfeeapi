@@ -201,7 +201,8 @@ class WipItemRead(BaseModel):
         default=None, description="Time only: its value at the charge-out rate"
     )
     selectable: bool | None = Field(
-        default=None, description="Billing may take this item by its id (time, disbursement, expense)"
+        default=None,
+        description="Billing may take this item by its id (time, disbursement, expense)",
     )
     claim_id: uuid.UUID | None = Field(default=None, description="Expense lines: the claim")
     fixed_fee: FixedFeeRead | None = None

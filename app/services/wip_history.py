@@ -1,4 +1,5 @@
-"""Historic WIP: the WIP of a closed day, frozen the first time it is reported, and the report on it.
+"""Historic WIP: the WIP of a closed day, frozen the first time it is reported, and the report
+on it.
 
 A closed day (before today in the practice's time zone) is built once, from the item dates and the
 allocations dated after it, and stored in ``wip_snapshots`` / ``wip_snapshot_items`` (append-only).

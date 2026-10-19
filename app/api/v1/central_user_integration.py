@@ -6,6 +6,8 @@ from datetime import UTC, datetime
 
 from fastapi import APIRouter, status
 
+from app.core.config import get_settings
+from app.core.exceptions import NotFoundError
 from app.dependencies.common import ContextDep, SessionDep
 from app.dependencies.integrations import IntegrationManager
 from app.schemas.common import ApiResponse, error_responses, ok
@@ -24,8 +26,6 @@ from app.services.integrations import (
     MockCentralUserGateway,
     get_central_user_gateway,
 )
-from app.core.config import get_settings
-from app.core.exceptions import NotFoundError
 
 router = APIRouter(prefix="/organizations/{organization_id}", tags=["Integrations"])
 
@@ -90,7 +90,9 @@ async def process_changes(
 ) -> ApiResponse[ProcessedFeed]:
     await ConnectionService(session).ensure_enabled(org.organization_id, CENTRAL_USER)
     service = CentralUserService(session, get_central_user_gateway())
-    return ok(ProcessedFeed.from_polled(await service.process_changes(org, ctx)), "Changes processed")
+    return ok(
+        ProcessedFeed.from_polled(await service.process_changes(org, ctx)), "Changes processed"
+    )
 
 
 @router.post(

@@ -1,12 +1,14 @@
-"""What happens to the WIP of a credit note: returned to WIP, or written off. Once per credit note.
+"""What happens to the WIP of a credit note: returned to WIP, or written off. Once per credit
+note.
 
 A credit note reduces what a client owes on an issued invoice; its lines are free text, so it does
 not say which WIP items it credits. ``return`` therefore reinstates **whole invoice items**, in the
 order of the invoice's lines, while their billed value fits in the credited net (a credit that
-completes the invoice's credit returns every item). Their allocations are released (``reversed_at``)
-and they are unbilled WIP again; a credit that fits no whole item returns nothing (409). ``write_off``
-leaves the items billed and records the credited net as a WIP write-off. Either way the ledger gets
-memo rows (``scope = 'items'``) and the invoice stays issued.
+completes the invoice's credit returns every item). Their allocations are released
+(``reversed_at``) and they are unbilled WIP again; a credit that fits no whole item returns
+nothing (409). ``write_off`` leaves the items billed and records the credited net as a WIP
+write-off. Either way the ledger gets memo rows (``scope = 'items'``) and the invoice stays
+issued.
 """
 
 import uuid

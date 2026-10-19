@@ -337,7 +337,18 @@ class WipAtomRepository:
             stmt = stmt.where(approved_timesheet())
         atoms: list[WipAtom] = []
         for row in (await self.session.execute(stmt)).all():
-            dims = _Dims(row[10], row[11], row[12], row[13], row[14], row[15], row[16], row[17], row[18], row[19])
+            dims = _Dims(
+                row[10],
+                row[11],
+                row[12],
+                row[13],
+                row[14],
+                row[15],
+                row[16],
+                row[17],
+                row[18],
+                row[19],
+            )
             job_id: uuid.UUID | None = row[2]
             component, value = "time", int(row[6])
             if dims.billing_basis == "fixed" and job_id is not None:
@@ -430,7 +441,18 @@ class WipAtomRepository:
                 row[0],
                 row[1],
                 row[2],
-                _Dims(row[8], row[9], row[10], row[11], row[12], row[13], row[14], row[15], row[16], row[17]),
+                _Dims(
+                    row[8],
+                    row[9],
+                    row[10],
+                    row[11],
+                    row[12],
+                    row[13],
+                    row[14],
+                    row[15],
+                    row[16],
+                    row[17],
+                ),
                 row[4],
                 "expense",
                 int(row[5]),
@@ -526,7 +548,18 @@ class WipAtomRepository:
                 row[0],
                 row[1],
                 row[2],
-                _Dims(row[9], row[10], row[11], row[12], row[13], row[14], row[15], row[16], row[17], row[18]),
+                _Dims(
+                    row[9],
+                    row[10],
+                    row[11],
+                    row[12],
+                    row[13],
+                    row[14],
+                    row[15],
+                    row[16],
+                    row[17],
+                    row[18],
+                ),
                 row[4],
                 "expense",
                 int(row[5]),
@@ -744,7 +777,9 @@ class WipAtomRepository:
                 j.id: j
                 for j in (
                     await self.session.execute(
-                        select(Job).where(Job.organization_id == organization_id, Job.id.in_(job_ids))
+                        select(Job).where(
+                            Job.organization_id == organization_id, Job.id.in_(job_ids)
+                        )
                     )
                 ).scalars()
             }
@@ -786,15 +821,21 @@ class WipAtomRepository:
         return atoms
 
     @staticmethod
-    def _matches(f: WipFilters, dims: _Dims, client_id: uuid.UUID, job_id: uuid.UUID | None) -> bool:
+    def _matches(
+        f: WipFilters, dims: _Dims, client_id: uuid.UUID, job_id: uuid.UUID | None
+    ) -> bool:
         if f.client_id is not None and client_id != f.client_id:
             return False
         if f.job_id is not None and job_id != f.job_id:
             return False
         if f.service_id is not None and dims.service_id != f.service_id:
             return False
-        partner = dims.client_partner if f.client_responsible else dims.job_partner or dims.client_partner
-        manager = dims.client_manager if f.client_responsible else dims.job_manager or dims.client_manager
+        partner = (
+            dims.client_partner if f.client_responsible else dims.job_partner or dims.client_partner
+        )
+        manager = (
+            dims.client_manager if f.client_responsible else dims.job_manager or dims.client_manager
+        )
         if f.partner_user_id is not None and partner != f.partner_user_id:
             return False
         return not (f.manager_user_id is not None and manager != f.manager_user_id)

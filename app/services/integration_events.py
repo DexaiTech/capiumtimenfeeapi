@@ -101,7 +101,9 @@ async def handle_event_once(
     in a transaction of its own)."""
     logs = SyncLogRepository(session)
     if await logs.event_processed(organization_id, integration, event_id):
-        return await _duplicate(session, organization_id, integration, event_id, event_type, external_id, source)
+        return await _duplicate(
+            session, organization_id, integration, event_id, event_type, external_id, source
+        )
     applied: Applied | None = None
     item_id: uuid.UUID | None = None
     try:
@@ -151,7 +153,9 @@ async def handle_event_once(
                     )
     except IntegrityError as exc:
         if integrity_constraint(exc) == EVENT_INDEX:
-            return await _duplicate(session, organization_id, integration, event_id, event_type, external_id, source)
+            return await _duplicate(
+            session, organization_id, integration, event_id, event_type, external_id, source
+        )
         await _failed(organization_id, integration, event_id, event_type, external_id, source, exc)
         raise
     except Exception as exc:

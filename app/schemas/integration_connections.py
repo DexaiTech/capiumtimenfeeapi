@@ -55,10 +55,14 @@ class IntegrationMock(BaseModel):
 
 
 class IntegrationCard(BaseModel):
-    key: IntegrationKey = Field(description="`central_client`, `central_user`, `practice_management` or `bookkeeping`")
+    key: IntegrationKey = Field(
+        description="`central_client`, `central_user`, `practice_management` or `bookkeeping`"
+    )
     name: str = Field(description="The integration's name")
     description: str = Field(description="What it does, in a sentence")
-    phase: str | None = Field(description="`2A` (practice management) or `2B` (bookkeeping), else null")
+    phase: str | None = Field(
+        description="`2A` (practice management) or `2B` (bookkeeping), else null"
+    )
     enabled: bool = Field(description="Switched on for this practice")
     always_on: bool = Field(description="Cannot be switched off (the central client service)")
     status: CardStatus = Field(

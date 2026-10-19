@@ -52,7 +52,9 @@ def _unmapped_message(accounts: list[str], taxes: list[str]) -> str:
     if taxes:
         parts.append("tax code for " + ", ".join(taxes))
     return (
-        "Not mapped: " + "; ".join(parts) + ". Add the mapping in the Bookkeeping settings, then retry."
+        "Not mapped: "
+        + "; ".join(parts)
+        + ". Add the mapping in the Bookkeeping settings, then retry."
     )
 
 
@@ -120,7 +122,9 @@ async def send_item(session: AsyncSession, item: IntegrationSyncItem) -> ItemOut
     if data is None:
         return ItemOutcome("skipped", message="The document no longer exists.")
     if data.voided:
-        return ItemOutcome("skipped", message=f"Invoice {data.number} was voided before it was sent.")
+        return ItemOutcome(
+            "skipped", message=f"Invoice {data.number} was voided before it was sent."
+        )
     document = build_document(data, await repo.mappings(organization_id))
     if item.operation == "send_invoice":
         receipt = await gateway.send_invoice(document, idempotency_key=item.idempotency_key)

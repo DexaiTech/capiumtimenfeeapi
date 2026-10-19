@@ -277,7 +277,10 @@ class WipTransferService:
             if row.out_movement_id not in live or row.in_movement_id not in live:
                 raise conflict(
                     "TRANSFER_SETTLED",
-                    "One of the jobs has been billed since: the transfer can no longer be reversed.",
+                    (
+                        "One of the jobs has been billed since: the transfer can no longer be "
+                        "reversed."
+                    ),
                 )
             for original_id, job_id, signed in (
                 (row.out_movement_id, row.from_job_id, row.amount),

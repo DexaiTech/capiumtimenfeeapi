@@ -6,7 +6,7 @@ details, the ageing, the client view and the historic report agree to the penny.
 """
 
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal
 
@@ -130,7 +130,7 @@ def item_read(atom: WipAtom, as_at: date, names: dict[uuid.UUID, str]) -> WipIte
 @dataclass(frozen=True, slots=True)
 class SummaryQuery:
     group_by: WipGroupBy = "client"
-    filters: WipFilters = WipFilters()
+    filters: WipFilters = field(default_factory=WipFilters)
     q: str | None = None
     sort: str = "name"
     descending: bool = False
@@ -276,7 +276,9 @@ class WipViewService:
     @staticmethod
     def _row(group: Group, group_by: WipGroupBy) -> WipGroupRow:
         client = (
-            ClientRef(id=group.client_id, code=group.client_code or "", name=group.client_name or "")
+            ClientRef(
+                id=group.client_id, code=group.client_code or "", name=group.client_name or ""
+            )
             if group_by == "job" and group.client_id
             else None
         )

@@ -82,7 +82,9 @@ async def list_adjustments(
     status_filter: Annotated[
         list[AdjustmentStatus] | None, Query(alias="status", description="Only these statuses")
     ] = None,
-    kind: Annotated[AdjustmentKind | None, Query(description="Only write-ons or write-offs")] = None,
+    kind: Annotated[
+        AdjustmentKind | None, Query(description="Only write-ons or write-offs")
+    ] = None,
     client_id: Annotated[uuid.UUID | None, Query(description="Only this client's")] = None,
     job_id: Annotated[uuid.UUID | None, Query(description="Only this job's")] = None,
     date_from: Annotated[date | None, Query(description="Effective on or after")] = None,

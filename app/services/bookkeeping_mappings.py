@@ -97,12 +97,22 @@ class MappingService:
         for index, row in enumerate(data.services):
             field = f"services.{index}.service_id"
             if row.service_id is not None and row.service_id not in service_ids:
-                details.append({"field": field, "code": "unknown", "message": "This service does not exist."})
+                details.append(
+                    {"field": field, "code": "unknown", "message": "This service does not exist."}
+                )
         for index, vat_row in enumerate(data.vat_rates):
             field = f"vat_rates.{index}.vat_rate_id"
             if vat_row.vat_rate_id is not None and vat_row.vat_rate_id not in vat_ids:
-                details.append({"field": field, "code": "unknown", "message": "This VAT code does not exist."})
-        details += _duplicates([r.service_id for r in data.services], "services", "service_id", "service")
+                details.append(
+                    {
+                        "field": field,
+                        "code": "unknown",
+                        "message": "This VAT code does not exist.",
+                    }
+                )
+        details += _duplicates(
+            [r.service_id for r in data.services], "services", "service_id", "service"
+        )
         details += _duplicates(
             [r.vat_rate_id for r in data.vat_rates], "vat_rates", "vat_rate_id", "VAT code"
         )
@@ -166,9 +176,17 @@ def _duplicates(
     found: list[dict[str, str]] = []
     for index, key in enumerate(keys):
         if key in seen:
-            what = f"A {noun} is mapped once" if key is not None else f"The row for no {noun} is mapped once"
+            what = (
+                f"A {noun} is mapped once"
+                if key is not None
+                else f"The row for no {noun} is mapped once"
+            )
             found.append(
-                {"field": f"{collection}.{index}.{field}", "code": "duplicate", "message": f"{what}."}
+                {
+                    "field": f"{collection}.{index}.{field}",
+                    "code": "duplicate",
+                    "message": f"{what}.",
+                }
             )
         seen.add(key)
     return found

@@ -56,7 +56,8 @@ class Group:
     ages: dict[str, int] = field(default_factory=empty_buckets)
     oldest: date | None = None
     count: int = 0
-    # The legacy figures of ``GET /wip``: all time at its charge value, disbursements, expense lines.
+    # The legacy figures of ``GET /wip``: all time at its charge value, disbursements, expense
+    # lines.
     time_value: int = 0
     disbursement_value: int = 0
     expense_value: int = 0
@@ -133,7 +134,9 @@ def new_group(atom: WipAtom, group_by: str, key: tuple[object, ...]) -> Group:
         )
     if group_by == "billing_type":
         basis = key[0] if isinstance(key[0], str) else None
-        return Group(group_by, None, BILLING_TYPE_LABELS.get(str(basis), "No job"), billing_type=basis)
+        return Group(
+            group_by, None, BILLING_TYPE_LABELS.get(str(basis), "No job"), billing_type=basis
+        )
     assert key[0] is None or isinstance(key[0], uuid.UUID)
     return Group(group_by, key[0], "")
 
@@ -229,4 +232,7 @@ def page_of[T](rows: list[T], params: PageParams) -> Page[T]:
         offset = value
     chunk = rows[offset : offset + params.limit]
     more = offset + params.limit < len(rows)
-    return Page(items=chunk, next_cursor=encode_cursor(offset + params.limit, _ZERO_ID) if more else None)
+    return Page(
+        items=chunk,
+        next_cursor=encode_cursor(offset + params.limit, _ZERO_ID) if more else None,
+    )

@@ -50,7 +50,11 @@ class IntegrationSummaryRepository:
             func.count().filter(Client.central_sync_state == "failed"),
         ).where(Client.organization_id == organization_id)
         linked, stale, failed = (await self.session.execute(stmt)).one()
-        return {"linked_clients": int(linked), "stale_clients": int(stale), "failed_clients": int(failed)}
+        return {
+            "linked_clients": int(linked),
+            "stale_clients": int(stale),
+            "failed_clients": int(failed),
+        }
 
     async def pm_links(self, organization_id: uuid.UUID) -> dict[str, int]:
         """Jobs and tasks linked to practice management."""

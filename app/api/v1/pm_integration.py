@@ -1,5 +1,5 @@
-"""The practice management integration (Phase 2A): import and link jobs and tasks, receive PM events,
-unlink a job, and the mock PM system's change feed. HTTP only; the rules are in
+"""The practice management integration (Phase 2A): import and link jobs and tasks, receive PM
+events, unlink a job, and the mock PM system's change feed. HTTP only; the rules are in
 ``app/services/pm_sync.py``."""
 
 import uuid
@@ -134,7 +134,9 @@ async def process_changes(
 ) -> ApiResponse[ProcessedFeed]:
     await ConnectionService(session).ensure_enabled(org.organization_id, PRACTICE_MANAGEMENT)
     service = PmSyncService(session, get_practice_management_gateway())
-    return ok(ProcessedFeed.from_polled(await service.process_changes(org, ctx)), "Changes processed")
+    return ok(
+        ProcessedFeed.from_polled(await service.process_changes(org, ctx)), "Changes processed"
+    )
 
 
 @router.post(

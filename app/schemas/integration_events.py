@@ -70,7 +70,9 @@ class ProcessedFeed(BaseModel):
     applied: int = Field(description="Events applied")
     skipped: int = Field(description="Events with nothing to do (or repeats)")
     failed: int = Field(
-        description="Events refused (kept as failed sync items) or that raised and stopped the batch"
+        description=(
+            "Events refused (kept as failed sync items) or that raised and stopped the batch"
+        )
     )
     has_more: bool = Field(description="More events are waiting: call again")
     cursor: str | None = Field(description="Where this practice has read the feed up to")
@@ -136,7 +138,9 @@ class CentralUserMockChange(RequestModel):
 class PmEventRequest(RequestModel):
     event_id: EventId
     type: PmEventType = Field(
-        description="`job_updated` (read the job again), `job_status_changed` or `task_status_changed`"
+        description=(
+            "`job_updated` (read the job again), `job_status_changed` or `task_status_changed`"
+        )
     )
     pm_job_id: PmId
     pm_task_id: PmId | None = Field(default=None, description="The task (`task_status_changed`)")
@@ -163,12 +167,18 @@ class PmMockChange(RequestModel):
     """A change someone makes in the mock practice management system."""
 
     type: PmEventType = Field(
-        description="`job_updated` (change the fields given), `job_status_changed`, `task_status_changed`"
+        description=(
+            "`job_updated` (change the fields given), `job_status_changed`, `task_status_changed`"
+        )
     )
     pm_job_id: PmId
-    pm_task_id: PmId | None = Field(default=None, description="The task (`task_status_changed`)")
+    pm_task_id: PmId | None = Field(
+        default=None, description="The task (`task_status_changed`)"
+    )
     status: str | None = Field(default=None, max_length=30, description="The new status")
-    name: str | None = Field(default=None, min_length=1, max_length=200, description="`job_updated`")
+    name: str | None = Field(
+        default=None, min_length=1, max_length=200, description="`job_updated`"
+    )
     service_code: str | None = Field(default=None, max_length=12, description="`job_updated`")
     manager_email: EmailStr | None = Field(default=None, description="`job_updated`")
     partner_email: EmailStr | None = Field(default=None, description="`job_updated`")

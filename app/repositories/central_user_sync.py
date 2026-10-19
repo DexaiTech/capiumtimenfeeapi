@@ -1,5 +1,5 @@
-"""Queries behind the central user integration. Every method is scoped to one organization except the
-lookup of a user by email (users belong to no practice)."""
+"""Queries behind the central user integration. Every method is scoped to one organization
+except the lookup of a user by email (users belong to no practice)."""
 
 import uuid
 
@@ -33,7 +33,9 @@ class CentralUserRepository:
                 Permission.code.in_(ADMINISTRATOR_PERMISSIONS),
             )
         )
-        return int((await self.session.execute(stmt)).scalar_one()) == len(ADMINISTRATOR_PERMISSIONS)
+        return int((await self.session.execute(stmt)).scalar_one()) == len(
+            ADMINISTRATOR_PERMISSIONS
+        )
 
     async def other_administrators(
         self, organization_id: uuid.UUID, exclude_user_id: uuid.UUID
