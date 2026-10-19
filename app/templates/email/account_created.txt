@@ -1,0 +1,11 @@
+Hi {{ name }},
+
+{{ added_by }} created an account for you at {{ organization_name }} on {{ app_name }}.
+
+Choose your password with this link. It is valid for 7 days and can be used once:
+
+{{ link }}
+
+After that, sign in at {{ frontend_url }}/login with this email address.
+
+If you were not expecting this, you can ignore this email.

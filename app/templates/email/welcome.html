@@ -1,0 +1,6 @@
+{% extends "_layout.html" %}{% from "_button.html" import button %}
+{% block content %}
+<h1 style="font-size:20px;margin:0 0 12px;">Welcome, {{ name }}</h1>
+<p>Your email is verified and your {{ app_name }} account is ready.</p>
+{{ button(frontend_url ~ "/login", "Open " ~ app_name) }}
+{% endblock %}

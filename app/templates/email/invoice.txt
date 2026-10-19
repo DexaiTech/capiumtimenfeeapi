@@ -1,0 +1,19 @@
+{% if name %}Dear {{ name }},{% else %}Hello,{% endif %}
+
+
+Please find attached invoice {{ invoice_number }} for {{ client_name }}.
+
+Invoice date: {{ issue_date }}
+Amount due:   {{ amount_due }}
+Due by:       {{ due_date }}
+{% if bank_details %}
+
+{{ bank_details }}
+{% endif %}
+
+Thank you,
+{{ practice_name }}
+{% if footer_text is defined and footer_text %}
+
+{{ footer_text }}
+{% endif %}

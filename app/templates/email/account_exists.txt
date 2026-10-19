@@ -1,0 +1,7 @@
+Hi {{ name }},
+
+Someone tried to sign up for {{ app_name }} with this email address, which already has an account. If that was you, sign in, or reset your password if you have forgotten it:
+
+{{ frontend_url }}/forgot-password
+
+If it was not you, no action is needed.

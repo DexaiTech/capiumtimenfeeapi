@@ -1,0 +1,91 @@
+# Local development stack for Capium Time & Fees. Every secret here is for local use only.
+# Not for deployment: deploy the API from the Dockerfile (see docs/deployment.md).
+#
+#   docker compose -f docker-compose.dev.yml up -d postgres mailpit       # database and mail catcher
+#   docker compose -f docker-compose.dev.yml --profile app up --build     # plus migrations, API, worker
+#
+# Postgres: localhost:5433, database "capium" (and "capium_test" for the test suite).
+# Mailpit inbox: http://localhost:8025. API: http://localhost:8000/docs.
+services:
+  postgres:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: capium
+      POSTGRES_PASSWORD: capium
+      POSTGRES_DB: capium
+    ports: ["5433:5432"]
+    volumes:
+      - pgdata:/var/lib/postgresql
+      - ./docker/init-test-db.sql:/docker-entrypoint-initdb.d/init-test-db.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U capium -d capium"]
+      interval: 5s
+      retries: 10
+
+  mailpit:
+    image: axllent/mailpit:latest # development-only mail catcher
+    ports: ["1025:1025", "8025:8025"] # SMTP, web inbox
+
+  migrate:
+    build:
+      context: .
+      target: api
+    command: alembic upgrade head
+    # .env is optional: the values below are enough for a local stack and override it.
+    env_file:
+      - path: .env
+        required: false
+    environment: &container_env
+      APP_ENV: development
+      DB_URL: postgresql://capium:capium@postgres:5432/capium
+      JWT_SECRET_KEY: local-development-only-secret-0123456789abcdef
+      FRONTEND_URL: http://localhost:5173
+      BACKEND_URL: http://localhost:8000
+      SMTP_HOST: mailpit
+      SMTP_PORT: "1025"
+      SMTP_FROM_ADDRESS: no-reply@capium.local
+    depends_on:
+      postgres: { condition: service_healthy }
+    profiles: [app]
+
+  api:
+    build:
+      context: .
+      target: api
+    env_file:
+      - path: .env
+        required: false
+    environment: *container_env
+    ports: ["8000:8000"]
+    # Uploaded files (ticket attachments); the image's STORAGE_DIR is /var/lib/capium/storage.
+    volumes:
+      - uploads:/var/lib/capium/storage
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready')"
+      interval: 10s
+      retries: 6
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      mailpit: { condition: service_started }
+    profiles: [app]
+
+  worker:
+    build:
+      context: .
+      target: worker
+    env_file:
+      - path: .env
+        required: false
+    environment: *container_env
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      mailpit: { condition: service_started }
+    profiles: [app]
+
+volumes:
+  pgdata:
+  uploads:

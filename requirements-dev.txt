@@ -1,0 +1,8 @@
+# Development and test dependencies.
+-r requirements.txt
+pytest==9.1.1
+pytest-asyncio==1.4.0
+httpx==0.28.1
+aiosmtpd==1.4.6
+ruff==0.16.10
+mypy==2.4.0

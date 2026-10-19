@@ -1,0 +1,171 @@
+"""Import every model so ``Base.metadata`` is complete for Alembic."""
+
+from app.db.models.billing import (
+    CreditNote,
+    CreditNoteLine,
+    Disbursement,
+    Invoice,
+    InvoiceLine,
+    Payment,
+    PaymentAllocation,
+    WipAllocation,
+    WipWriteOff,
+)
+from app.db.models.billing_workflow import InvoiceApproval, PaymentReminder, StatementSend
+from app.db.models.clients import Client, ClientContact, ClientService
+from app.db.models.data_import import DataImportBatch, DataImportRow
+from app.db.models.expenses import (
+    Expense,
+    ExpenseClaim,
+    ExpenseClaimEvent,
+    ExpenseReceipt,
+    ExpenseType,
+)
+from app.db.models.integrations import (
+    BookkeepingServiceMapping,
+    BookkeepingVatMapping,
+    CentralClientCache,
+    IntegrationConnection,
+    IntegrationCursor,
+    IntegrationSyncItem,
+    IntegrationSyncLog,
+)
+from app.db.models.invoice_templates import InvoiceTemplate
+from app.db.models.jobs import Job, JobAssignee, JobBudgetAlert, Task, TaskAssignee
+from app.db.models.notifications import (
+    EmailTemplate,
+    MessageLog,
+    Notification,
+    NotificationPreference,
+    NotificationSetting,
+)
+from app.db.models.onboarding import OnboardingProgress
+from app.db.models.organization import (
+    Organization,
+    OrganizationMember,
+    Permission,
+    Role,
+    RolePermission,
+)
+from app.db.models.period_locks import PeriodLock, PeriodLockEvent
+from app.db.models.platform import AuditLog, BackgroundJob, RateLimitCounter
+from app.db.models.practice import (
+    ActivityCode,
+    DocumentSequence,
+    Grade,
+    Service,
+    ServiceActivityCode,
+    VatRate,
+)
+from app.db.models.rates import RateChange, RateRerun, RateRerunItem, RateRule
+from app.db.models.tickets import (
+    Ticket,
+    TicketAttachment,
+    TicketComment,
+    TicketStatusHistory,
+    TicketTag,
+    TicketTagLink,
+)
+from app.db.models.time import TimeEntry, Timer, Timesheet
+from app.db.models.time_history import TimeEntryHistory, TimesheetReminder
+from app.db.models.user import (
+    EmailVerificationToken,
+    PasswordResetToken,
+    RefreshToken,
+    User,
+    UserSession,
+)
+from app.db.models.wip import (
+    CreditNoteWip,
+    WipAdjustment,
+    WipMovement,
+    WipSnapshot,
+    WipSnapshotItem,
+    WipTransfer,
+)
+
+__all__ = [
+    "ActivityCode",
+    "AuditLog",
+    "BackgroundJob",
+    "BookkeepingServiceMapping",
+    "BookkeepingVatMapping",
+    "CentralClientCache",
+    "Client",
+    "ClientContact",
+    "ClientService",
+    "CreditNote",
+    "CreditNoteLine",
+    "CreditNoteWip",
+    "DataImportBatch",
+    "DataImportRow",
+    "Disbursement",
+    "DocumentSequence",
+    "EmailTemplate",
+    "EmailVerificationToken",
+    "Expense",
+    "ExpenseClaim",
+    "ExpenseClaimEvent",
+    "ExpenseReceipt",
+    "ExpenseType",
+    "Grade",
+    "IntegrationConnection",
+    "IntegrationCursor",
+    "IntegrationSyncItem",
+    "IntegrationSyncLog",
+    "Invoice",
+    "InvoiceApproval",
+    "InvoiceLine",
+    "InvoiceTemplate",
+    "Job",
+    "JobAssignee",
+    "JobBudgetAlert",
+    "MessageLog",
+    "Notification",
+    "NotificationPreference",
+    "NotificationSetting",
+    "OnboardingProgress",
+    "Organization",
+    "OrganizationMember",
+    "PasswordResetToken",
+    "Payment",
+    "PaymentAllocation",
+    "PaymentReminder",
+    "PeriodLock",
+    "PeriodLockEvent",
+    "Permission",
+    "RateChange",
+    "RateLimitCounter",
+    "RateRerun",
+    "RateRerunItem",
+    "RateRule",
+    "RefreshToken",
+    "Role",
+    "RolePermission",
+    "Service",
+    "ServiceActivityCode",
+    "StatementSend",
+    "Task",
+    "TaskAssignee",
+    "Ticket",
+    "TicketAttachment",
+    "TicketComment",
+    "TicketStatusHistory",
+    "TicketTag",
+    "TicketTagLink",
+    "TimeEntry",
+    "TimeEntryHistory",
+    "Timer",
+    "Timesheet",
+    "TimesheetReminder",
+    "User",
+    "UserSession",
+    "VatRate",
+    "WipAdjustment",
+    "WipAllocation",
+    "WipMovement",
+    "WipSnapshot",
+    "WipSnapshotItem",
+    "WipTransfer",
+    "WipWriteOff",
+]

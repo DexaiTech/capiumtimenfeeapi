@@ -1,0 +1,10 @@
+{% extends "_layout.html" %}{% from "_button.html" import button %}
+{% block content %}
+<h1 style="font-size:20px;margin:0 0 12px;">You are invited</h1>
+<p>Hi {{ name }},</p>
+<p>{{ invited_by }} invited you to sign in to {{ organization_name }} on {{ app_name }}.</p>
+<p>Choose your password with the button below. The link is valid for 7 days and can be used once.</p>
+{{ button(link, "Accept the invitation") }}
+<p>After that, sign in at <a href="{{ frontend_url }}/login">{{ frontend_url }}/login</a> with this email address.</p>
+<p>If you were not expecting this, you can ignore this email.</p>
+{% endblock %}

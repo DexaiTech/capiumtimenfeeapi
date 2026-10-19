@@ -1,0 +1,5 @@
+Welcome, {{ name }}.
+
+Your email is verified and your {{ app_name }} account is ready.
+
+{{ frontend_url }}/login

@@ -1,0 +1,76 @@
+"""Application factory."""
+
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from app.api import health
+from app.api.router import api_router
+from app.core.config import get_settings
+from app.core.handlers import register_exception_handlers
+from app.core.logging import configure_logging, get_logger
+from app.db.session import dispose_engine
+from app.middleware.hardening import ApiRateLimitMiddleware, RequestSizeLimitMiddleware
+from app.middleware.request_context import REQUEST_ID_HEADER, RequestContextMiddleware
+from app.middleware.security_headers import SecurityHeadersMiddleware
+
+DESCRIPTION = """
+Time recording, work in progress, billing and fee accounting for accountancy practices.
+
+Money is always an integer number of minor units (pence) in the practice currency, VAT
+rates are basis points (2000 = 20%) and durations are whole minutes.
+
+Every response uses one envelope: `{success, data, message, meta}` on success and
+`{success: false, error: {code, message, details, request_id}}` on failure.
+"""
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    log = get_logger(__name__)
+    settings = get_settings()
+    log.info("api_started", env=settings.app_env)
+    yield
+    await dispose_engine()
+    log.info("api_stopped")
+
+
+def create_app() -> FastAPI:
+    settings = get_settings()
+    configure_logging(debug=settings.app_debug)
+    # Interactive docs are off in production unless explicitly debugging is allowed there,
+    # which the settings forbid; the schema itself is served everywhere else.
+    docs_enabled = not settings.is_production
+    app = FastAPI(
+        title=f"{settings.app_name} API",
+        version="0.1.0",
+        description=DESCRIPTION,
+        lifespan=lifespan,
+        docs_url="/docs" if docs_enabled else None,
+        redoc_url=None,
+        openapi_url="/openapi.json" if docs_enabled else None,
+    )
+    # Added last = outermost: the request id exists before anything else runs. The two
+    # guards sit innermost, so their answers still carry CORS and security headers.
+    app.add_middleware(RequestSizeLimitMiddleware)
+    app.add_middleware(ApiRateLimitMiddleware)
+    app.add_middleware(SecurityHeadersMiddleware, hsts=settings.cookies_secure)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.allowed_origins,
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+        allow_headers=["Authorization", "Content-Type", "X-Requested-With", REQUEST_ID_HEADER],
+        expose_headers=[REQUEST_ID_HEADER, "Retry-After"],
+        max_age=600,
+    )
+    app.add_middleware(RequestContextMiddleware)
+    register_exception_handlers(app)
+    app.include_router(health.router)
+    app.include_router(api_router)
+    return app
+
+
+app = create_app()
