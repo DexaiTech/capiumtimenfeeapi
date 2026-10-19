@@ -173,6 +173,11 @@ class TimeEntry(Base, IdMixin, OrgScopedMixin, TimestampMixin):
     rate_source: Mapped[str | None] = mapped_column(Text)
     billing_status: Mapped[str] = mapped_column(Text, nullable=False, server_default="unbilled")
     created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
+    # Set by the opening-balance import so historic time can be shown apart from new time; it
+    # otherwise behaves exactly like any other entry (same WIP and billing allocation).
+    is_opening_balance: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
 
 
 class Timer(Base, IdMixin, OrgScopedMixin, TimestampMixin):

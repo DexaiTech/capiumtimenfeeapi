@@ -23,8 +23,8 @@ from app.schemas.wip import (
     AdjustmentApprove,
     AdjustmentCounts,
     AdjustmentCreate,
-    AdjustmentReject,
     AdjustmentRead,
+    AdjustmentReject,
     AdjustmentReverse,
 )
 from app.services import period_locks, policy
@@ -170,15 +170,25 @@ class WipAdjustmentService:
                     )
             effective = effective_date_of(organization, data.effective_date)
             await period_locks.assert_open(self.session, ctx.organization_id, effective, "wip")
+            component = data.component or default_component(job)
             threshold = organization.wip_adjustment_approval_threshold
             required = data.amount > threshold
+            percent_threshold = organization.wip_write_off_approval_threshold_percent
+            if data.kind == "write_off" and percent_threshold is not None:
+                available = await self.ledger.scope_value(
+                    organization, client.id, job.id if job else None, component
+                )
+                # basis points: amount/available > percent_threshold/10000, cross-multiplied to
+                # avoid floating point.
+                if available > 0 and data.amount * 10000 > available * percent_threshold:
+                    required = True
             row = WipAdjustment(
                 id=new_id(),
                 organization_id=ctx.organization_id,
                 client_id=client.id,
                 job_id=job.id if job else None,
                 kind=data.kind,
-                component=data.component or default_component(job),
+                component=component,
                 amount=data.amount,
                 effective_date=effective,
                 reason=data.reason,

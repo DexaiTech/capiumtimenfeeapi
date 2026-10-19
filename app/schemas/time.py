@@ -82,6 +82,10 @@ class TimeEntryRead(BaseModel):
     is_locked: bool = Field(
         description="True when the sheet is submitted/approved or the entry is not unbilled"
     )
+    is_opening_balance: bool = Field(
+        default=False,
+        description="Set by the opening-balance import; shown apart from newly recorded time",
+    )
     created_by: uuid.UUID | None
     created_at: datetime
     updated_at: datetime
@@ -124,6 +128,7 @@ class TimeEntryRead(BaseModel):
                 view.timesheet_status not in EDITABLE_SHEET_STATUSES
                 or e.billing_status != "unbilled"
             ),
+            is_opening_balance=e.is_opening_balance,
             created_by=e.created_by,
             created_at=e.created_at,
             updated_at=e.updated_at,

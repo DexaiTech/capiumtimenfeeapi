@@ -51,6 +51,13 @@ class OrganizationRead(BaseModel):
     wip_adjustment_approval_threshold: int = Field(
         description="Pence: a WIP write-on or write-off above this needs approval (0: all do)"
     )
+    wip_write_off_approval_threshold_percent: int | None = Field(
+        description=(
+            "Basis points (1000 = 10%): a write-off above this share of the job's or client's "
+            "current WIP also needs approval, in addition to the pence threshold; null turns "
+            "the percentage rule off"
+        )
+    )
     receipt_required_threshold: int = Field(
         description="Pence (gross): an expense above this must carry a receipt"
     )
@@ -107,6 +114,9 @@ class OrganizationRead(BaseModel):
             require_timesheet_approval=organization.require_timesheet_approval,
             fixed_fee_wip_mode=organization.fixed_fee_wip_mode,
             wip_adjustment_approval_threshold=organization.wip_adjustment_approval_threshold,
+            wip_write_off_approval_threshold_percent=(
+                organization.wip_write_off_approval_threshold_percent
+            ),
             receipt_required_threshold=organization.receipt_required_threshold,
             invoice_approval_required=organization.invoice_approval_required,
             invoice_approval_threshold=organization.invoice_approval_threshold,
@@ -239,6 +249,7 @@ _NULLABLE_SETTINGS = (
     "postcode",
     "bank_details",
     "invoice_footer",
+    "wip_write_off_approval_threshold_percent",
 )
 
 
@@ -300,6 +311,14 @@ class OrganizationUpdate(RequestModel):
         description=(
             "Pence, 0 to 100000000: a WIP write-on or write-off above this needs approval "
             "(0: every adjustment does)"
+        ),
+    )
+    wip_write_off_approval_threshold_percent: Annotated[int, Field(ge=0, le=10000)] | None = Field(
+        default=None,
+        description=(
+            "Basis points (0-10000; 1000 = 10%): a write-off above this share of the job's or "
+            "client's current WIP also needs approval, in addition to the pence threshold; "
+            "null turns the percentage rule off"
         ),
     )
     receipt_required_threshold: Threshold | None = Field(

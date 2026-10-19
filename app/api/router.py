@@ -30,6 +30,7 @@ from app.api.v1 import (
     members,
     notifications,
     onboarding,
+    opening_balances,
     organizations,
     payments,
     people,
@@ -77,6 +78,7 @@ api_router.include_router(rate_rules.router)
 api_router.include_router(clients.router)
 api_router.include_router(client_overview.router)
 api_router.include_router(central_clients.router)
+api_router.include_router(opening_balances.router)
 api_router.include_router(integrations.router)
 # After the sync-log route: its static paths come before the /integrations/{key} routes inside.
 api_router.include_router(integration_routes.router)

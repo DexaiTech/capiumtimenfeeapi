@@ -63,6 +63,11 @@ class Organization(Base, IdMixin, TimestampMixin, SoftDeleteMixin):
         CheckConstraint(
             "wip_adjustment_approval_threshold >= 0", name="wip_adjustment_approval_threshold"
         ),
+        CheckConstraint(
+            "wip_write_off_approval_threshold_percent IS NULL OR "
+            "wip_write_off_approval_threshold_percent BETWEEN 0 AND 10000",
+            name="wip_write_off_approval_threshold_percent",
+        ),
         CheckConstraint("receipt_required_threshold >= 0", name="receipt_required_threshold"),
         CheckConstraint("invoice_approval_threshold >= 0", name="invoice_approval_threshold"),
         CheckConstraint(
@@ -120,6 +125,12 @@ class Organization(Base, IdMixin, TimestampMixin, SoftDeleteMixin):
     # A WIP write-on or write-off above this many pence needs approval (0: every adjustment does).
     wip_adjustment_approval_threshold: Mapped[int] = mapped_column(
         BigInteger, nullable=False, server_default=text("50000")
+    )
+    # A write-off above this percentage (basis points; 1000 = 10.00%) of the job's or client's
+    # current WIP also needs approval, in addition to the flat-pence threshold above. Null turns
+    # the percentage rule off, leaving only the flat-pence threshold.
+    wip_write_off_approval_threshold_percent: Mapped[int | None] = mapped_column(
+        Integer, nullable=True, server_default=text("1000")
     )
     # An expense above this many pence (gross) must carry a receipt.
     receipt_required_threshold: Mapped[int] = mapped_column(
