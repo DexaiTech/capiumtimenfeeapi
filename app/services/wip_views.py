@@ -216,9 +216,7 @@ class WipViewService:
         atoms, today = await self._live(
             ctx.organization, WipFilters(client_id=client.id, job_id=job_id)
         )
-        names = await self.refs.member_names(
-            ctx.organization_id, [a.person_user_id for a in atoms]
-        )
+        names = await self.refs.member_names(ctx.organization_id, [a.person_user_id for a in atoms])
         atoms.sort(key=lambda a: (a.item_date, a.kind != "time"))
         total = sum_groups(list(aggregate(atoms, "client", today).values()))
         return ClientWipRead(

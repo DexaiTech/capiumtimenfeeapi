@@ -268,9 +268,7 @@ class PmSyncService:
                 client.merged_into_client_id is not None
                 or client.status not in CLIENT_WORK_STATUSES
             ):
-                return _result(
-                    pm_job, "skipped", f"Client {client.code} does not accept new work."
-                )
+                return _result(pm_job, "skipped", f"Client {client.code} does not accept new work.")
             await ensure_client_accepts_work(self.session, client)
             job = await self.links.unlinked_job_named(org_id, client.id, pm_job.name)
             linked_now = job is not None
@@ -668,9 +666,7 @@ class PmSyncService:
                 )
             )
             await self.session.flush()
-            await self._audit_job(
-                ctx, rctx, "job.pm_unlinked", job, {"pm_job_id": previous}
-            )
+            await self._audit_job(ctx, rctx, "job.pm_unlinked", job, {"pm_job_id": previous})
             await record_sync(
                 self.session,
                 org_id,

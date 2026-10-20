@@ -308,9 +308,7 @@ class OpeningBalanceImportService:
             )
 
         async with unit_of_work(self.session):
-            views = await self.entries.bulk_create(
-                ctx, TimeEntryBulkCreate(entries=creates), rctx
-            )
+            views = await self.entries.bulk_create(ctx, TimeEntryBulkCreate(entries=creates), rctx)
             ids = [v.id for v in views]
             await self._tag_opening_balance(ids)
             await self._approve_fresh_sheets(org_id, set(touched))

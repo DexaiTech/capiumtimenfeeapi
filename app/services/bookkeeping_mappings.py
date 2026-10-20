@@ -87,9 +87,7 @@ class MappingService:
             unmapped_vat_rates=sum(1 for row in vat_rates if row.tax_code is None),
         )
 
-    async def put(
-        self, ctx: OrgContext, data: MappingsWrite, rctx: RequestContext
-    ) -> MappingsRead:
+    async def put(self, ctx: OrgContext, data: MappingsWrite, rctx: RequestContext) -> MappingsRead:
         org_id = ctx.organization_id
         details: list[dict[str, str]] = []
         service_ids = {service.id: service for service in await self.repo.services(org_id)}

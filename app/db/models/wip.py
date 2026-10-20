@@ -101,9 +101,7 @@ class WipMovement(Base, IdMixin, OrgScopedMixin):
         CheckConstraint(
             "(approval_state = 'approved') = (approved_by IS NOT NULL)", name="approval_fields"
         ),
-        CheckConstraint(
-            "approval_state IN ('not_required', 'approved')", name="approval_state"
-        ),
+        CheckConstraint("approval_state IN ('not_required', 'approved')", name="approval_state"),
         CheckConstraint(
             "(source_type IS NULL) = (source_id IS NULL) "
             "AND (source_type IS NULL OR " + _in("source_type", MOVEMENT_SOURCES) + ")",
@@ -147,9 +145,7 @@ class WipMovement(Base, IdMixin, OrgScopedMixin):
     effective_date: Mapped[date] = mapped_column(Date, nullable=False)
     reason: Mapped[str] = mapped_column(Text, nullable=False)
     actor_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
-    approval_state: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default="not_required"
-    )
+    approval_state: Mapped[str] = mapped_column(Text, nullable=False, server_default="not_required")
     approved_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     reversal_of_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
@@ -355,9 +351,7 @@ class WipSnapshot(Base, IdMixin, OrgScopedMixin):
     __tablename__ = "wip_snapshots"
     __table_args__ = (
         UniqueConstraint("organization_id", "id", name="uq_wip_snapshots_organization_id_id"),
-        UniqueConstraint(
-            "organization_id", "as_at", name="uq_wip_snapshots_organization_id_as_at"
-        ),
+        UniqueConstraint("organization_id", "as_at", name="uq_wip_snapshots_organization_id_as_at"),
         CheckConstraint(_in("source", SNAPSHOT_SOURCES), name="source"),
         CheckConstraint(
             "fixed_fee_wip_mode IN ('on_completion', 'by_budget_progress')",

@@ -172,9 +172,7 @@ class PmMockChange(RequestModel):
         )
     )
     pm_job_id: PmId
-    pm_task_id: PmId | None = Field(
-        default=None, description="The task (`task_status_changed`)"
-    )
+    pm_task_id: PmId | None = Field(default=None, description="The task (`task_status_changed`)")
     status: str | None = Field(default=None, max_length=30, description="The new status")
     name: str | None = Field(
         default=None, min_length=1, max_length=200, description="`job_updated`"

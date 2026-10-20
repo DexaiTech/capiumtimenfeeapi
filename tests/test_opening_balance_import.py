@@ -43,9 +43,10 @@ async def test_dry_run_validates_without_writing(client):
     assert data["dry_run"] is True
     assert data["errors"] == []
     assert data["total_rows"] == 1 and data["valid_rows"] == 1 and data["created"] == 0
-    assert await scalar(
-        "SELECT count(*) FROM time_entries WHERE organization_id = :o", o=org["id"]
-    ) == 0
+    assert (
+        await scalar("SELECT count(*) FROM time_entries WHERE organization_id = :o", o=org["id"])
+        == 0
+    )
     assert acme.code == "ACME"
 
 
@@ -109,9 +110,10 @@ async def test_unknown_client_and_staff_are_row_errors_and_nothing_is_written(cl
     assert body["code"] == "IMPORT_INVALID"
     fields = {d["field"] for d in body["details"]}
     assert fields == {"client", "staff"}
-    assert await scalar(
-        "SELECT count(*) FROM time_entries WHERE organization_id = :o", o=org["id"]
-    ) == 0
+    assert (
+        await scalar("SELECT count(*) FROM time_entries WHERE organization_id = :o", o=org["id"])
+        == 0
+    )
 
 
 async def test_job_must_belong_to_the_row_s_client(client):

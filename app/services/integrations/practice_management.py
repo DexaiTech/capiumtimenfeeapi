@@ -34,6 +34,7 @@ PM_EDITABLE_FIELDS = (
     "due_date",
 )
 
+
 @dataclass(frozen=True, slots=True)
 class PmTask:
     pm_task_id: str

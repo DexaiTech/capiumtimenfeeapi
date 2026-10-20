@@ -154,8 +154,8 @@ async def handle_event_once(
     except IntegrityError as exc:
         if integrity_constraint(exc) == EVENT_INDEX:
             return await _duplicate(
-            session, organization_id, integration, event_id, event_type, external_id, source
-        )
+                session, organization_id, integration, event_id, event_type, external_id, source
+            )
         await _failed(organization_id, integration, event_id, event_type, external_id, source, exc)
         raise
     except Exception as exc:

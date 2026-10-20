@@ -35,11 +35,7 @@ router = APIRouter(prefix="/organizations/{organization_id}", tags=["Integration
 
 KeyPath = Annotated[
     IntegrationKey,
-    Path(
-        description=(
-            "`central_client`, `central_user`, `practice_management` or `bookkeeping`"
-        )
-    ),
+    Path(description=("`central_client`, `central_user`, `practice_management` or `bookkeeping`")),
 ]
 ItemIdPath = Annotated[uuid.UUID, Path(description="The sync item's id")]
 

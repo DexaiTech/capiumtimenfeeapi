@@ -40,7 +40,5 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_constraint(
-        "wip_write_off_approval_threshold_percent", "organizations", type_="check"
-    )
+    op.drop_constraint("wip_write_off_approval_threshold_percent", "organizations", type_="check")
     op.drop_column("organizations", "wip_write_off_approval_threshold_percent")

@@ -55,9 +55,7 @@ class WipAdjustmentService:
 
     # --- Reads -------------------------------------------------------------------------
 
-    def _read(
-        self, row: WipAdjustment, lookup: Lookup, in_force: set[uuid.UUID]
-    ) -> AdjustmentRead:
+    def _read(self, row: WipAdjustment, lookup: Lookup, in_force: set[uuid.UUID]) -> AdjustmentRead:
         requested_by = lookup.person(row.requested_by)
         assert requested_by is not None
         return AdjustmentRead(
@@ -134,9 +132,7 @@ class WipAdjustmentService:
                 details={"available": max(available, 0), "requested": row.amount},
             )
 
-    async def _post(
-        self, ctx: OrgContext, row: WipAdjustment, *, approved: bool
-    ) -> uuid.UUID:
+    async def _post(self, ctx: OrgContext, row: WipAdjustment, *, approved: bool) -> uuid.UUID:
         movement = await self.ledger.post(
             ctx.organization_id,
             kind=row.kind,

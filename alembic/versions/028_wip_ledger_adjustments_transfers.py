@@ -74,9 +74,7 @@ def upgrade() -> None:
         sa.Column("effective_date", sa.Date(), nullable=False),
         sa.Column("reason", sa.Text(), nullable=False),
         sa.Column("actor_user_id", sa.UUID(), nullable=True),
-        sa.Column(
-            "approval_state", sa.Text(), server_default="not_required", nullable=False
-        ),
+        sa.Column("approval_state", sa.Text(), server_default="not_required", nullable=False),
         sa.Column("approved_by", sa.UUID(), nullable=True),
         sa.Column("approved_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("reversal_of_id", sa.UUID(), nullable=True),
@@ -103,9 +101,7 @@ def upgrade() -> None:
             name=op.f("ck_wip_movements_kind"),
         ),
         sa.CheckConstraint("scope IN ('amount', 'items')", name=op.f("ck_wip_movements_scope")),
-        sa.CheckConstraint(
-            f"component IN ({COMPONENTS})", name=op.f("ck_wip_movements_component")
-        ),
+        sa.CheckConstraint(f"component IN ({COMPONENTS})", name=op.f("ck_wip_movements_component")),
         sa.CheckConstraint("amount <> 0", name=op.f("ck_wip_movements_amount_not_zero")),
         sa.CheckConstraint(
             "kind = 'reversal' "
@@ -316,11 +312,11 @@ def upgrade() -> None:
         sa.Column("id", sa.UUID(), nullable=False),
         sa.Column("organization_id", sa.UUID(), nullable=False),
         *_timestamps(),
-        sa.CheckConstraint("from_job_id <> to_job_id", name=op.f("ck_wip_transfers_different_jobs")),
-        sa.CheckConstraint("amount > 0", name=op.f("ck_wip_transfers_amount")),
         sa.CheckConstraint(
-            f"component IN ({COMPONENTS})", name=op.f("ck_wip_transfers_component")
+            "from_job_id <> to_job_id", name=op.f("ck_wip_transfers_different_jobs")
         ),
+        sa.CheckConstraint("amount > 0", name=op.f("ck_wip_transfers_amount")),
+        sa.CheckConstraint(f"component IN ({COMPONENTS})", name=op.f("ck_wip_transfers_component")),
         sa.CheckConstraint(
             "status IN ('applied', 'reversed')", name=op.f("ck_wip_transfers_status")
         ),

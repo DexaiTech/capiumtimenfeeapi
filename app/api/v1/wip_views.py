@@ -123,9 +123,7 @@ async def wip_items(
     page: PageParamsDep,
     client_id: Annotated[uuid.UUID | None, Query(description="Only this client")] = None,
     job_id: Annotated[uuid.UUID | None, Query(description="Only this job")] = None,
-    kind: Annotated[
-        list[WipItemKind] | None, Query(description="Only these kinds of item")
-    ] = None,
+    kind: Annotated[list[WipItemKind] | None, Query(description="Only these kinds of item")] = None,
     partner_user_id: Annotated[uuid.UUID | None, Query(description="Responsible partner")] = None,
     manager_user_id: Annotated[uuid.UUID | None, Query(description="Responsible manager")] = None,
     service_id: Annotated[uuid.UUID | None, Query(description="Only jobs of this service")] = None,

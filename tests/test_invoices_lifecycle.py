@@ -97,7 +97,11 @@ async def test_issued_invoices_are_immutable(client):
         assert response.status_code == 409, (method, path)
         assert error(response)["code"] == "INVOICE_NOT_DRAFT"
     # Nothing on the header can change either, not even the notes or the reference.
-    for body in ({"issue_date": "2026-01-01"}, {"notes": "Paid by BACS please"}, {"reference": "X"}):
+    for body in (
+        {"issue_date": "2026-01-01"},
+        {"notes": "Paid by BACS please"},
+        {"reference": "X"},
+    ):
         locked = await client.patch(org_url(p.org, base), headers=p.owner.headers, json=body)
         assert locked.status_code == 409 and error(locked)["code"] == "INVOICE_NOT_EDITABLE", body
     assert (await get_invoice(client, p.owner, p.org, invoice["id"]))["notes"] is None
