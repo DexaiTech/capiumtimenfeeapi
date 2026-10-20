@@ -494,3 +494,46 @@ default). Client-facing email templates (category `system`, customisable under S
   `bounced` tell the reversals apart (the Payments report can split them).
 * Invoice `status` has three more stored values: anything that meant "not issued yet" by `status = 'draft'` should
   also consider `awaiting_approval` and `approved`.
+
+## Estimates and recurring invoices
+
+Both sit next to invoices and never touch WIP. Permissions: `estimate.read` / `estimate.manage` and
+`recurring.read` / `recurring.manage` (all in the catalogue and the default roles since migration 019). Tables from
+migration 046: `estimates`, `estimate_lines`, `recurring_schedules`, `recurring_lines`, `recurring_runs`.
+
+### Estimates
+
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/estimates` | filters `client_id`, `status` (repeat: `draft`, `sent`, `accepted`, `declined`, `expired`), `q` (number, reference, client); cursor-paginated, newest first |
+| GET | `/estimates/summary` | counts per display status and `open_gross` (value of estimates sent and still open); the status filter is ignored |
+| POST | `/estimates` | creates a **draft** with 1–200 lines; priced like invoice lines (net = round(qty × unit), VAT from the chosen rate, else service, client, practice default; 0 when not VAT-registered) |
+| GET / PATCH / DELETE | `/estimates/{id}` | PATCH and DELETE only on a draft (409 `ESTIMATE_NOT_DRAFT`); PATCH `lines` replaces every line |
+| POST | `/estimates/{id}/send` | takes the next `estimate` sequence number (`EST-00001`), sets `issue_date` (default today), keeps or sets `expiry_date`, status `sent` (409 `ESTIMATE_EMPTY`). **Email delivery is not wired yet** |
+| POST | `/estimates/{id}/accept`, `/decline` | only a `sent` estimate (409 `ESTIMATE_NOT_SENT`); an expired one can still be answered |
+| POST | `/estimates/{id}/convert` | needs `invoice.create` as well; copies the lines of a `sent` or `accepted` estimate into a new **draft** invoice (the estimate's job fills lines that have none) and stores `converted_invoice_id` (409 `ESTIMATE_NOT_CONVERTIBLE`, `ESTIMATE_ALREADY_CONVERTED`) |
+
+Stored status is `draft → sent → accepted | declined`. `display_status` adds `expired`: a `sent` estimate whose
+`expiry_date` is before today (practice time zone); it is derived, never stored. A numbered estimate cannot be deleted.
+Audit actions: `estimate.created|updated|sent|accepted|declined|converted|deleted`.
+
+### Recurring invoices
+
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/recurring` | filters `client_id`, `status` (repeat: `active`, `paused`, `ended`), `q` (name, client) |
+| POST | `/recurring` | `{client_id, name, frequency: weekly\|monthly\|quarterly\|annually, start_date, end_date?, reference?, notes?, lines}`; the lines are priced once at creation so a bad job, service or VAT rate is refused at once |
+| GET / PATCH / DELETE | `/recurring/{id}` | PATCH: name, frequency, end date, reference, notes, `lines` (replaces all); 409 `SCHEDULE_ENDED`. DELETE only when it never ran (409 `SCHEDULE_HAS_RUNS`) |
+| POST | `/recurring/{id}/pause`, `/resume` | 409 `SCHEDULE_NOT_ACTIVE` / `SCHEDULE_NOT_PAUSED`; resuming skips the dates missed while paused |
+| GET | `/recurring/{id}/runs` | newest run date first; each run has `status` (`succeeded` / `failed`), `invoice_id`, `invoice_number` (null while a draft), `error`, `attempts` |
+| POST | `/recurring/runs/{run_id}/retry` | tries a failed run again; answers 200 with the run even if it fails again (409 `RUN_NOT_FAILED`) |
+
+Dates are counted **from the start date** (31 January → 28 February → 31 March). The `run_recurring_invoices` job runs
+daily from the worker (`PERIODIC`): for every practice, each active schedule whose `next_run_date` is today or earlier
+gets one run row (unique per schedule and date) and a **draft** invoice of manual lines, priced again that day (a VAT
+change applies to the next invoice). It catches up at most 12 missed dates per day, never issues anything, and leaves a
+failed date alone until someone retries it. The draft's `created_by` is the schedule's creator. Audit actions:
+`recurring.created|updated|paused|resumed|deleted|run|run_failed`.
+
+Not built: auto-issuing and emailing the recurring invoice, recurring jobs from `client_services.frequency`, estimate
+PDF and email, converting an estimate to a job.

@@ -15,6 +15,7 @@ from app.api.v1 import (
     debtors,
     disbursements,
     email_templates,
+    estimates,
     expense_receipts,
     expense_types,
     expenses,
@@ -37,6 +38,7 @@ from app.api.v1 import (
     period_locks,
     rate_rules,
     rates,
+    recurring,
     reports,
     roles,
     settings,
@@ -103,6 +105,8 @@ api_router.include_router(wip_transfers.router)
 api_router.include_router(invoices.router)
 api_router.include_router(credit_notes.router)
 api_router.include_router(credit_note_wip.router)
+api_router.include_router(estimates.router)
+api_router.include_router(recurring.router)
 api_router.include_router(payments.router)
 api_router.include_router(debtors.router)
 api_router.include_router(statement_sends.router)

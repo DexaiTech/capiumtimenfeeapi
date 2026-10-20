@@ -22,6 +22,7 @@ from app.services.payment_reminders import (
     deliver_reminder_email,
     run_scheduled_reminders,
 )
+from app.services.recurring import run_due as run_due_recurring
 from app.services.statement_sends import StatementEmailError, deliver_statement_email
 from app.services.timesheet_reminders import run_for_all_practices
 
@@ -119,6 +120,14 @@ async def send_timesheet_reminders(
     return dict(await run_for_all_practices(session))
 
 
+async def run_recurring_invoices(
+    session: AsyncSession, settings: Settings, payload: dict[str, Any]
+) -> dict[str, Any] | None:
+    """Daily, for every practice: draft the invoice of each recurring schedule that is due
+    (never issuing it). Idempotent: one run row per schedule and date."""
+    return dict(await run_due_recurring(session))
+
+
 async def send_payment_reminders(
     session: AsyncSession, settings: Settings, payload: dict[str, Any]
 ) -> dict[str, Any] | None:
@@ -210,6 +219,7 @@ HANDLERS: dict[str, Handler] = {
     "send_notification": send_notification,
     "send_timesheet_reminders": send_timesheet_reminders,
     "send_payment_reminders": send_payment_reminders,
+    "run_recurring_invoices": run_recurring_invoices,
     "send_payment_reminder_email": send_payment_reminder_email,
     "send_statement_email": send_statement_email,
     "process_integration_items": process_integration_items,
@@ -223,5 +233,6 @@ PERIODIC: tuple[tuple[str, int], ...] = (
     ("purge_retention", 86_400),
     ("send_timesheet_reminders", 86_400),
     ("send_payment_reminders", 86_400),
+    ("run_recurring_invoices", 86_400),
     ("process_integration_items", 60),
 )

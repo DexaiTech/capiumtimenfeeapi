@@ -14,6 +14,13 @@ from app.db.models.billing import (
 from app.db.models.billing_workflow import InvoiceApproval, PaymentReminder, StatementSend
 from app.db.models.clients import Client, ClientContact, ClientService
 from app.db.models.data_import import DataImportBatch, DataImportRow
+from app.db.models.estimates import (
+    Estimate,
+    EstimateLine,
+    RecurringLine,
+    RecurringRun,
+    RecurringSchedule,
+)
 from app.db.models.expenses import (
     Expense,
     ExpenseClaim,
@@ -103,6 +110,8 @@ __all__ = [
     "DocumentSequence",
     "EmailTemplate",
     "EmailVerificationToken",
+    "Estimate",
+    "EstimateLine",
     "Expense",
     "ExpenseClaim",
     "ExpenseClaimEvent",
@@ -139,6 +148,9 @@ __all__ = [
     "RateRerun",
     "RateRerunItem",
     "RateRule",
+    "RecurringLine",
+    "RecurringRun",
+    "RecurringSchedule",
     "RefreshToken",
     "Role",
     "RolePermission",
