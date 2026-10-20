@@ -23,9 +23,9 @@ from app.schemas.dashboard_pages import (
     BillingTrend,
     BillingWindow,
     BucketKey,
+    DashboardDebtorRow,
     DashboardPeriod,
     DebtorAgeing,
-    DebtorRow,
     MissingTimesheetsWidget,
     MyTimesheet,
     MyTimesheetDay,
@@ -418,8 +418,8 @@ class DashboardWidgetsService:
         )
 
 
-def _debtor(row: RowMapping) -> DebtorRow:
-    return DebtorRow(
+def _debtor(row: RowMapping) -> DashboardDebtorRow:
+    return DashboardDebtorRow(
         client_id=row["client_id"],
         client_code=row["client_code"],
         client_name=row["client_name"],

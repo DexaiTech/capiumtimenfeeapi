@@ -5,6 +5,7 @@ import json
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
+from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import Select, tuple_
@@ -35,6 +36,10 @@ class Page[T]:
 def encode_cursor(value: Any, row_id: uuid.UUID) -> str:
     if isinstance(value, datetime):
         value = {"dt": value.isoformat()}
+    elif isinstance(value, Decimal):
+        # A SQL SUM() of an integer (pence) column comes back as a Decimal; it is always a
+        # whole number, so it round-trips through JSON as a plain int.
+        value = int(value)
     raw = json.dumps({"v": value, "id": str(row_id)}, separators=(",", ":"))
     return base64.urlsafe_b64encode(raw.encode()).decode().rstrip("=")
 

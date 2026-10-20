@@ -29,7 +29,7 @@ async def test_jobs_that_overlap_the_range_and_tasks_due_in_it(client: AsyncClie
         client, owner, org, acme, "Accounts", start_date="2026-03-01", due_date="2026-03-31"
     )
     await create_job(client, owner, org, acme, "VAT return", due_date="2026-03-15")
-    await create_job(client, owner, org, beta, "Payroll", start_date="2026-02-10")
+    payroll = await create_job(client, owner, org, beta, "Payroll", start_date="2026-02-10")
     before = await create_job(
         client, owner, org, beta, "Old", start_date="2026-01-01", due_date="2026-01-31"
     )
@@ -38,7 +38,8 @@ async def test_jobs_that_overlap_the_range_and_tasks_due_in_it(client: AsyncClie
     )
     await create_job(client, owner, org, beta, "No dates")
     await add_task(client, owner, org, both, "Bookkeeping", due_date="2026-03-10")
-    await add_task(client, owner, org, both, "Out of range", due_date="2026-04-10")
+    # Payroll has no due date, so a task due in April is valid there but falls outside March.
+    await add_task(client, owner, org, payroll, "Out of range", due_date="2026-04-10")
     await add_task(client, owner, org, before, "Early task", due_date="2026-01-15")
 
     calendar = await _calendar(client, owner, org, "2026-03-01", "2026-03-31")

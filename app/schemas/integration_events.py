@@ -184,7 +184,7 @@ class PmMockChange(RequestModel):
     due_date: date | None = Field(default=None, description="`job_updated`")
 
 
-class MockChanged(BaseModel):
+class IntegrationMockChanged(BaseModel):
     event_id: str = Field(description="The event the change appended to the mock's feed")
     type: str = Field(description="The event's type")
 

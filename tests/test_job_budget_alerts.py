@@ -6,9 +6,9 @@ import uuid
 
 import pytest
 from httpx import AsyncClient
-from sqlalchemy import update
+from sqlalchemy import func, select, update
 
-from app.db.models import OrganizationMember
+from app.db.models import Notification, OrganizationMember
 from app.db.session import get_sessionmaker
 from tests.domain_factories import make_client, make_time_entry, practice, staff
 from tests.factories import Actor, audit_entries
@@ -325,11 +325,16 @@ async def test_entries_edits_deletes_timers_and_copies_are_covered(client: Async
     fourth = await create_job(
         client, owner, org, acme, "Fourth", budget_minutes=600, hourly_rate=6000
     )
-    await log_on_job(client, owner, org, fourth, 300, entry_date=MONDAY.isoformat())
+    fourth_entry = await log_on_job(client, owner, org, fourth, 300, entry_date=MONDAY.isoformat())
     copied = await client.post(
         org_url(org, "/time-entries/copy-week"),
         headers=owner.headers,
-        json={"from_week_start": day(0), "to_week_start": day(7)},
+        json={
+            "from_week_start": day(0),
+            "to_week_start": day(7),
+            # Scope to this job's entry: the owner logged other entries in the same week above.
+            "entry_ids": [fourth_entry["id"]],
+        },
     )
     assert copied.status_code == 200, copied.text
     assert len(copied.json()["data"]["created"]) == 1
@@ -419,15 +424,24 @@ async def test_who_is_told(client: AsyncClient) -> None:
         )
         await session.commit()
     await log_on_job(client, owner, org, job, 480)
-    notices = await _notices(client, org, people)
+    # Bob is removed from the org now, so he can no longer call its endpoints at all (404);
+    # check his inbox straight from the database instead.
+    active = {name: person for name, person in people.items() if name != "bob"}
+    notices = await _notices(client, org, active)
     # The manager, who is also an assignee, is told once.
     assert {name: len(found) for name, found in notices.items()} == {
         "manager": 1,
         "partner": 1,
         "ann": 1,
-        "bob": 0,
         "carol": 0,
     }
+    async with get_sessionmaker()() as session:
+        bob_notices = await session.scalar(
+            select(func.count())
+            .select_from(Notification)
+            .where(Notification.user_id == people["bob"].id, Notification.type == "budget_alert")
+        )
+    assert bob_notices == 0
 
     # A job nobody is on still records its alerts.
     lonely = await create_job(

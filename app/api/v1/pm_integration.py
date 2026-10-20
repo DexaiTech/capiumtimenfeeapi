@@ -15,7 +15,7 @@ from app.dependencies.integrations import IntegrationManager
 from app.schemas.common import ApiResponse, error_responses, ok
 from app.schemas.integration_events import (
     EventResult,
-    MockChanged,
+    IntegrationMockChanged,
     PmEventRequest,
     PmImportRequest,
     PmImportResult,
@@ -153,7 +153,9 @@ async def process_changes(
     ),
     responses=error_responses(403, 404),
 )
-async def push_mock_change(body: PmMockChange, org: IntegrationManager) -> ApiResponse[MockChanged]:
+async def push_mock_change(
+    body: PmMockChange, org: IntegrationManager
+) -> ApiResponse[IntegrationMockChanged]:
     gateway = _mock_gateway()
     try:
         if body.type == "job_updated":
@@ -177,7 +179,7 @@ async def push_mock_change(body: PmMockChange, org: IntegrationManager) -> ApiRe
             event = gateway.change_task_status(body.pm_job_id, body.pm_task_id, body.status)
     except KeyError as exc:
         raise NotFoundError("Practice management job or task not found.") from exc
-    return ok(MockChanged(event_id=event.event_id, type=event.type), "Change pushed")
+    return ok(IntegrationMockChanged(event_id=event.event_id, type=event.type), "Change pushed")
 
 
 @router.delete(

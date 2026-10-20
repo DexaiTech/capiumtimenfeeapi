@@ -135,6 +135,36 @@ async def give_work(
         },
     )
     assert off.status_code == 201, off.text
+    write_on = await http.post(
+        org_url(org, "/wip/adjustments"),
+        headers=owner.headers,
+        json={
+            "client_id": str(client.id),
+            "job_id": str(accounts.id),
+            "kind": "write_on",
+            "amount": 500,
+            "reason": "Correction",
+        },
+    )
+    assert write_on.status_code == 201, write_on.text
+    transfer = await http.post(
+        org_url(org, "/wip/transfers"),
+        headers=owner.headers,
+        json={
+            "from_job_id": str(accounts.id),
+            "to_job_id": str(tax.id),
+            "component": "time",
+            "amount": 500,
+            "reason": "Rebalance",
+        },
+    )
+    assert transfer.status_code == 201, transfer.text
+    credit_note_wip = await http.post(
+        org_url(org, f"/credit-notes/{credit.json()['data']['id']}/wip"),
+        headers=owner.headers,
+        json={"mode": "write_off", "reason": "Not returning work"},
+    )
+    assert credit_note_wip.status_code == 201, credit_note_wip.text
     async with get_sessionmaker()() as session:
         session.add(
             StatementSend(

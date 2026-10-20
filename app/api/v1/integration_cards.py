@@ -17,10 +17,10 @@ from app.schemas.common import ApiResponse, error_responses, ok, ok_page
 from app.schemas.integration_connections import (
     IntegrationCard,
     IntegrationKey,
+    IntegrationMockAvailabilityUpdate,
     IntegrationUpdate,
     ItemStatus,
     MockAvailabilityRead,
-    MockAvailabilityUpdate,
     RetryFailedResult,
     SyncItemRead,
     SyncItemRetried,
@@ -215,7 +215,7 @@ async def retry_failed_items(
 )
 async def set_mock_availability(
     key: KeyPath,
-    body: MockAvailabilityUpdate,
+    body: IntegrationMockAvailabilityUpdate,
     org: IntegrationManager,
     session: SessionDep,
     ctx: ContextDep,

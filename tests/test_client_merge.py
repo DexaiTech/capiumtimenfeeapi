@@ -103,9 +103,17 @@ def test_every_table_that_refers_to_a_client_is_handled_by_the_merge():
         "payments",
         "payment_allocations",
         "statement_sends",
+        "wip_adjustments",
+        "wip_transfers",
+        "credit_note_wip",
     }
     assert set(CONFLICT_RULES) == {"client_contacts", "client_services", "rate_rules"}
-    assert set(HISTORY) == {"rate_changes", "rate_rerun_items"}
+    assert set(HISTORY) == {
+        "rate_changes",
+        "rate_rerun_items",
+        "wip_movements",
+        "wip_snapshot_items",
+    }
 
 
 def test_the_discovery_finds_a_table_added_later():
@@ -283,7 +291,9 @@ async def test_the_merge_keeps_money_and_allocations_consistent(client):
     # The WIP the source had (the open time and expense) is the survivor's now.
     wip = await client.get(org_url(team.org, "/wip"), headers=team.owner.headers)
     assert [row["client"]["id"] for row in wip.json()["data"]] == [target["id"]]
-    assert wip.json()["data"][0]["total"] == 45 * 12_000 // 60 + 2_500
+    # The time and expense WIP, plus the net +500 of give_work's write-on/transfer pair (the
+    # transfer only moves value between jobs; the write-on is what's left after it).
+    assert wip.json()["data"][0]["total"] == 45 * 12_000 // 60 + 2_500 + 500
 
 
 async def test_merging_clients_with_no_work_still_archives_the_source(client):

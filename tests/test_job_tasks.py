@@ -18,7 +18,8 @@ async def _job(client: AsyncClient, owner, org, **body):
     return await create_job(client, owner, org, await make_client(org), "Accounts", **body)
 
 
-async def test_add_and_list_tasks(client: AsyncClient) -> None:
+async def test_add_and_list_tasks(client: AsyncClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    pin_today(monkeypatch, date(2026, 5, 1))
     owner, org = await practice(client)
     job = await _job(client, owner, org, start_date="2026-04-01", due_date="2026-12-31")
     ada = await staff(org, full_name="Ada Lovelace")
@@ -502,7 +503,8 @@ async def test_the_cross_job_list(client: AsyncClient, monkeypatch: pytest.Monke
     assert await titles(status=["in_progress", "on_hold"], sort="title") == ["Pension", "Review"]
     assert await titles(due_from="2026-07-01", due_to="2026-08-31") == ["Bookkeeping"]
     assert await titles(due_to="2026-06-30") == ["Review"]
-    assert await titles(q="pay", sort="title") == ["Payslips"]
+    # "pay" also matches the job name "Payroll", which both Payslips and Pension belong to.
+    assert await titles(q="pay", sort="title") == ["Payslips", "Pension"]
     assert await titles(q="Beta", sort="title") == ["Payslips", "Pension"]
     assert await titles(q=j1["number"], sort="title") == ["Bookkeeping", "Review"]
     assert await titles(q="nothing like this") == []

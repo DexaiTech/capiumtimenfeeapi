@@ -43,12 +43,24 @@ REPOINTED: tuple[str, ...] = (
     "payments",
     "payment_allocations",
     "statement_sends",
+    "wip_adjustments",
+    "wip_transfers",
+    "credit_note_wip",
 )
 # Moved with a rule for the rows that cannot simply move.
 CONFLICT_RULES: tuple[str, ...] = ("client_contacts", "client_services", "rate_rules")
 # Append-only history that names a client without a foreign key: it keeps the client it was
-# written for. (The moved rate rules get a new history row.)
-HISTORY: tuple[str, ...] = ("rate_changes", "rate_rerun_items")
+# written for. (The moved rate rules get a new history row.) ``wip_movements`` cannot be moved at
+# all: the database enforces it append-only (no UPDATE), which is also why it has no foreign key.
+# The live WIP view resolves a movement's client through any merge chain instead (see
+# ``adjustment_atoms`` in ``app/repositories/wip_atoms.py``). ``wip_snapshot_items`` records the
+# client and job as they were on a past date and must not change after the fact.
+HISTORY: tuple[str, ...] = (
+    "rate_changes",
+    "rate_rerun_items",
+    "wip_movements",
+    "wip_snapshot_items",
+)
 MOVED_TABLES: tuple[str, ...] = (*REPOINTED, *CONFLICT_RULES)
 HANDLED_TABLES: frozenset[str] = frozenset((*MOVED_TABLES, *HISTORY))
 

@@ -15,7 +15,7 @@ from app.schemas.integration_events import (
     CentralUserEventRequest,
     CentralUserMockChange,
     EventResult,
-    MockChanged,
+    IntegrationMockChanged,
     ProcessedFeed,
 )
 from app.services.central_user_sync import CentralUserService
@@ -109,6 +109,6 @@ async def process_changes(
 )
 async def push_mock_change(
     body: CentralUserMockChange, org: IntegrationManager
-) -> ApiResponse[MockChanged]:
+) -> ApiResponse[IntegrationMockChanged]:
     event = _mock_gateway().push(body.type, str(body.email), full_name=body.full_name)
-    return ok(MockChanged(event_id=event.event_id, type=event.type), "Change pushed")
+    return ok(IntegrationMockChanged(event_id=event.event_id, type=event.type), "Change pushed")

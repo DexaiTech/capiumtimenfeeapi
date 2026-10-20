@@ -159,6 +159,36 @@ def _atom(
     )
 
 
+async def _survivor_clients(
+    session: AsyncSession, organization_id: uuid.UUID, client_ids: set[uuid.UUID]
+) -> dict[uuid.UUID, Client]:
+    """Map each id to the client that holds its work now, following ``merged_into_client_id``
+    (the WIP ledger is append-only, so a movement keeps the client it was written for)."""
+    loaded: dict[uuid.UUID, Client] = {}
+    pending = set(client_ids)
+    while pending:
+        rows = (
+            await session.execute(
+                select(Client).where(
+                    Client.organization_id == organization_id, Client.id.in_(pending)
+                )
+            )
+        ).scalars()
+        pending = set()
+        for row in rows:
+            loaded[row.id] = row
+            if row.merged_into_client_id is not None and row.merged_into_client_id not in loaded:
+                pending.add(row.merged_into_client_id)
+    result: dict[uuid.UUID, Client] = {}
+    for client_id in client_ids:
+        client = loaded.get(client_id)
+        while client is not None and client.merged_into_client_id is not None:
+            client = loaded.get(client.merged_into_client_id)
+        if client is not None:
+            result[client_id] = client
+    return result
+
+
 def _filter_conditions(f: WipFilters, client_col: Any, job_col: Any) -> list[ColumnElement[bool]]:
     """Filters on a query that has ``Client`` joined and ``Job`` outer-joined."""
     conditions: list[ColumnElement[bool]] = []
@@ -758,22 +788,16 @@ class WipAtomRepository:
         live = [m for m in roots.values() if m.id not in reversed_ids]
         if not live:
             return []
+        client_ids = {m.client_id for m in live}
+        # The ledger is append-only, so a movement keeps the client it was written for even
+        # across a merge: resolve it to the client that holds the work now before checking
+        # whether a later bill has settled it, and before grouping.
+        clients = await _survivor_clients(self.session, organization_id, client_ids)
         last_billed = await self._last_allocation(organization_id, as_at, today)
-        live = [m for m in live if not self._settled(m, last_billed)]
+        live = [m for m in live if not self._settled(m, last_billed, clients)]
         if not live:
             return []
-        client_ids = {m.client_id for m in live}
         job_ids = {m.job_id for m in live if m.job_id}
-        clients = {
-            c.id: c
-            for c in (
-                await self.session.execute(
-                    select(Client).where(
-                        Client.organization_id == organization_id, Client.id.in_(client_ids)
-                    )
-                )
-            ).scalars()
-        }
         jobs: dict[uuid.UUID, Job] = {}
         if job_ids:
             jobs = {
@@ -804,13 +828,13 @@ class WipAtomRepository:
                 job.partner_user_id if job else None,
                 job.manager_user_id if job else None,
             )
-            if not self._matches(f, dims, m.client_id, m.job_id):
+            if not self._matches(f, dims, client.id, m.job_id):
                 continue
             atoms.append(
                 _atom(
                     "adjustment",
                     m.id,
-                    m.client_id,
+                    client.id,
                     m.job_id,
                     dims,
                     m.effective_date,
@@ -845,9 +869,13 @@ class WipAtomRepository:
 
     @staticmethod
     def _settled(
-        movement: WipMovement, last_billed: dict[tuple[uuid.UUID, uuid.UUID | None], datetime]
+        movement: WipMovement,
+        last_billed: dict[tuple[uuid.UUID, uuid.UUID | None], datetime],
+        clients: dict[uuid.UUID, Client],
     ) -> bool:
-        latest = last_billed.get((movement.client_id, movement.job_id))
+        client = clients.get(movement.client_id)
+        client_id = client.id if client is not None else movement.client_id
+        latest = last_billed.get((client_id, movement.job_id))
         return latest is not None and latest > movement.created_at
 
     async def _last_allocation(

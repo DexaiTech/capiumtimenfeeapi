@@ -15,7 +15,7 @@ class OnboardingStepRead(BaseModel):
     key: str = Field(description="Stable identifier of the step")
     title: str = Field(description="Short name of the step")
     description: str = Field(description="What to do, in one or two sentences")
-    state: StepState
+    state: StepState = Field(description="`done`, `todo`, or `skipped`")
     source: StepSource = Field(
         description=(
             "`auto`: the state comes from the practice's data. `manual`: a person marked the "

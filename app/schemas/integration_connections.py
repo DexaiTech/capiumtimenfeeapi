@@ -179,7 +179,7 @@ class RetryFailedResult(BaseModel):
     remaining: int = Field(description="Failed items left for another call")
 
 
-class MockAvailabilityUpdate(RequestModel):
+class IntegrationMockAvailabilityUpdate(RequestModel):
     available: bool = Field(description="`false` makes the mock service answer as if it were down")
 
 

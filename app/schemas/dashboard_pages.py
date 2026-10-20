@@ -316,7 +316,7 @@ class AgeingBucket(BaseModel):
     share_bp: int | None = Field(description="Of the outstanding total, basis points")
 
 
-class DebtorRow(BaseModel):
+class DashboardDebtorRow(BaseModel):
     client_id: uuid.UUID
     client_code: str
     client_name: str
@@ -343,6 +343,6 @@ class DebtorAgeing(WidgetBase):
     invoice_count: int = Field(description="Invoices with a balance")
     debtor_count: int = Field(description="Clients with a balance")
     buckets: list[AgeingBucket] = Field(description="The five age buckets, current first")
-    top_debtors: list[DebtorRow] = Field(
+    top_debtors: list[DashboardDebtorRow] = Field(
         description="Largest overdue balance first (then largest balance), at most `limit`"
     )
