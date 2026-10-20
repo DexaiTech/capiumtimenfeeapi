@@ -196,7 +196,7 @@ class RecurringLine(Base, IdMixin, OrgScopedMixin, TimestampMixin):
         ForeignKeyConstraint(
             ["organization_id", "schedule_id"],
             ["recurring_schedules.organization_id", "recurring_schedules.id"],
-            name="fk_recurring_lines_organization_id_schedule_id_recurring_schedules",
+            name="fk_recurring_lines_schedule",
             ondelete="CASCADE",
         ),
         _job_fk("recurring_lines"),
@@ -226,7 +226,7 @@ class RecurringRun(Base, IdMixin, OrgScopedMixin, TimestampMixin):
         ForeignKeyConstraint(
             ["organization_id", "schedule_id"],
             ["recurring_schedules.organization_id", "recurring_schedules.id"],
-            name="fk_recurring_runs_organization_id_schedule_id_recurring_schedules",
+            name="fk_recurring_runs_schedule",
             ondelete="CASCADE",
         ),
         ForeignKeyConstraint(
