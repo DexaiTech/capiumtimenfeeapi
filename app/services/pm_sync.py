@@ -67,7 +67,7 @@ PM_TO_JOB_STATUS: dict[str, JobStatus] = {
     "closed": "closed",
     "cancelled": "cancelled",
 }
-JOB_TO_PM_STATUS = {job: pm for pm, job in PM_TO_JOB_STATUS.items()}
+JOB_TO_PM_STATUS: dict[str, str] = {job: pm for pm, job in PM_TO_JOB_STATUS.items()}
 MAX_IMPORT_PAGES = 10
 
 
@@ -320,6 +320,7 @@ class PmSyncService:
         if target_status is not None and target_status != job.status:
             status_changed = await self._change_job_status(ctx, rctx, job, target_status, warnings)
         tasks_changed = await self._sync_tasks(ctx, rctx, job, pm_job.tasks, warnings)
+        outcome: JobOutcome
         if linked_now:
             outcome, message = "linked", f"Linked to existing job {job.number}."
         elif changes or status_changed or tasks_changed:

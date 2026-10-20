@@ -103,7 +103,7 @@ class WipLedgerRepository:
             WipMovement.organization_id == organization_id,
             WipMovement.reversal_of_id.in_(list(movement_ids)),
         )
-        return {row[0] for row in (await self.session.execute(stmt)).all()}
+        return {row[0] for row in (await self.session.execute(stmt)).all() if row[0] is not None}
 
     async def list_movements(
         self, organization_id: uuid.UUID, f: MovementFilters, params: PageParams

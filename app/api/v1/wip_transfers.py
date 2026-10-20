@@ -81,7 +81,7 @@ async def list_transfers(
         date_from=date_from,
         date_to=date_to,
     )
-    result = await service.list(org, filters, page)
+    result = await service.list_transfers(org, filters, page)
     return ok_page(result.items, result.next_cursor)
 
 

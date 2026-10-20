@@ -2,6 +2,8 @@
 one organization, except the ones that say they serve the worker (``due``,
 ``enabled_organizations``)."""
 
+from __future__ import annotations
+
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
@@ -66,22 +68,23 @@ class SyncItemRepository:
     async def upsert_latest(self, values: dict[str, Any]) -> uuid.UUID:
         """Insert the item, or put the existing one with this key back to ``pending`` with the new
         payload (the latest change is what must reach the other system)."""
-        stmt = insert(IntegrationSyncItem).values(**values)
-        stmt = stmt.on_conflict_do_update(
+        insert_stmt = insert(IntegrationSyncItem).values(**values)
+        stmt = insert_stmt.on_conflict_do_update(
             index_elements=ITEM_KEY,
             set_={
-                "payload": stmt.excluded.payload,
-                "entity_id": stmt.excluded.entity_id,
+                "payload": insert_stmt.excluded.payload,
+                "entity_id": insert_stmt.excluded.entity_id,
                 "status": "pending",
                 "attempts": 0,
-                "next_attempt_at": stmt.excluded.next_attempt_at,
+                "next_attempt_at": insert_stmt.excluded.next_attempt_at,
                 "completed_at": None,
                 "last_error": None,
                 "last_error_code": None,
                 "external_ref": None,
             },
         ).returning(IntegrationSyncItem.id)
-        return (await self.session.execute(stmt)).scalar_one()
+        result: uuid.UUID = (await self.session.execute(stmt)).scalar_one()
+        return result
 
     async def list_page(
         self, organization_id: uuid.UUID, filters: SyncItemFilters, params: PageParams
@@ -198,7 +201,9 @@ class ConnectionRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
-    async def list(self, organization_id: uuid.UUID) -> dict[str, IntegrationConnection]:
+    async def list_by_organization(
+        self, organization_id: uuid.UUID
+    ) -> dict[str, IntegrationConnection]:
         stmt = select(IntegrationConnection).where(
             IntegrationConnection.organization_id == organization_id
         )

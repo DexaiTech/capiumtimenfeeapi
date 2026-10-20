@@ -122,7 +122,7 @@ class CreditNoteWipService:
             credit_note_id=row.credit_note_id,
             invoice_id=row.invoice_id,
             client=client,
-            mode=row.mode,  # type: ignore[arg-type]
+            mode=row.mode,
             reason=row.reason,
             net_credited=row.net_credited,
             wip_value=row.wip_value,

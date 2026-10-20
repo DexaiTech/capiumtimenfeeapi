@@ -11,7 +11,7 @@ import uuid
 from collections.abc import Collection
 from dataclasses import dataclass, field
 from datetime import date, datetime
-from typing import Any
+from typing import Any, cast
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import ColumnElement, and_, exists, false, func, or_, select, union_all
@@ -218,7 +218,7 @@ def _status_condition(
     item_id: Any,
 ) -> ColumnElement[bool]:
     if as_at >= today:
-        return status_col == "unbilled"
+        return cast(ColumnElement[bool], status_col == "unbilled")
     return or_(
         status_col == "unbilled",
         and_(
@@ -349,7 +349,9 @@ class WipAtomRepository:
                 row[18],
                 row[19],
             )
+            client_id: uuid.UUID | None = row[1]
             job_id: uuid.UUID | None = row[2]
+            assert client_id is not None
             component, value = "time", int(row[6])
             if dims.billing_basis == "fixed" and job_id is not None:
                 component = "fixed_fee"
@@ -363,7 +365,7 @@ class WipAtomRepository:
                 _atom(
                     "time",
                     row[0],
-                    row[1],
+                    client_id,
                     job_id,
                     dims,
                     row[4],
@@ -546,7 +548,7 @@ class WipAtomRepository:
             _atom(
                 "expense",
                 row[0],
-                row[1],
+                cast(uuid.UUID, row[1]),
                 row[2],
                 _Dims(
                     row[9],
@@ -637,6 +639,7 @@ class WipAtomRepository:
         )
         latest: dict[uuid.UUID, date] = {}
         for job_id, minutes, last in (await self.session.execute(logged)).all():
+            assert job_id is not None
             found[job_id].logged_minutes = int(minutes)
             latest[job_id] = last
         billed = await self.fixed_fee_billed(organization_id, list(found), as_at, today)

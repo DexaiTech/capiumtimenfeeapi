@@ -203,7 +203,7 @@ class ConnectionService:
 
     async def cards(self, ctx: OrgContext) -> list[IntegrationCard]:
         org_id = ctx.organization_id
-        connections = await self.connections.list(org_id)
+        connections = await self.connections.list_by_organization(org_id)
         counts = await self.items.counts(org_id)
         return [
             await self._card(org_id, key, connections.get(key), counts.get(key, {}))

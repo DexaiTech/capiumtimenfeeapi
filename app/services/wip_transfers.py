@@ -6,6 +6,8 @@ stay as they were recorded). Both jobs must be the client's and open. A reversal
 rows back. Like an adjustment, the moved amount counts until the job is next billed.
 """
 
+from __future__ import annotations
+
 import uuid
 from typing import Any
 
@@ -61,7 +63,7 @@ class WipTransferService:
             client=lookup.client(row.client_id),
             from_job=lookup.job(row.from_job_id),
             to_job=lookup.job(row.to_job_id),
-            component=row.component,  # type: ignore[arg-type]
+            component=row.component,
             amount=row.amount,
             effective_date=row.effective_date,
             reason=row.reason,
@@ -69,7 +71,7 @@ class WipTransferService:
                 TransferItemRead(kind=i["kind"], id=uuid.UUID(str(i["id"])), value=int(i["value"]))
                 for i in row.items
             ],
-            status=row.status,  # type: ignore[arg-type]
+            status=row.status,
             created_by=created_by,
             created_at=row.created_at,
             reversed_by=lookup.person(row.reversed_by),
@@ -93,7 +95,7 @@ class WipTransferService:
             raise NotFoundError("Transfer not found.")
         return (await self._reads(ctx, [row]))[0]
 
-    async def list(
+    async def list_transfers(
         self, ctx: OrgContext, f: TransferFilters, params: PageParams
     ) -> Page[TransferRead]:
         page = await self.repo.list_transfers(ctx.organization_id, f, params)

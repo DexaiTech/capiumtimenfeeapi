@@ -187,21 +187,21 @@ class WipMovementService:
             items=[
                 MovementRead(
                     id=m.id,
-                    kind=m.kind,  # type: ignore[arg-type]
-                    scope=m.scope,  # type: ignore[arg-type]
-                    component=m.component,  # type: ignore[arg-type]
+                    kind=m.kind,
+                    scope=m.scope,
+                    component=m.component,
                     client=lookup.client(m.client_id),
                     job=lookup.job(m.job_id),
                     amount=m.amount,
                     effective_date=m.effective_date,
                     reason=m.reason,
                     actor=lookup.person(m.actor_user_id),
-                    approval_state=m.approval_state,  # type: ignore[arg-type]
+                    approval_state=m.approval_state,
                     approved_by=lookup.person(m.approved_by),
                     approved_at=m.approved_at,
                     reversal_of_id=m.reversal_of_id,
                     reversed=m.id in cancelled,
-                    source_type=m.source_type,  # type: ignore[arg-type]
+                    source_type=m.source_type,
                     source_id=m.source_id,
                     item_count=m.item_count,
                     created_at=m.created_at,

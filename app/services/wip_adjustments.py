@@ -62,13 +62,13 @@ class WipAdjustmentService:
             id=row.id,
             client=lookup.client(row.client_id),
             job=lookup.job(row.job_id),
-            kind=row.kind,  # type: ignore[arg-type]
-            component=row.component,  # type: ignore[arg-type]
+            kind=row.kind,
+            component=row.component,
             amount=row.amount,
             signed_amount=_signed(row.kind, row.amount),
             effective_date=row.effective_date,
             reason=row.reason,
-            status=row.status,  # type: ignore[arg-type]
+            status=row.status,
             approval_required=row.approval_required,
             threshold=row.threshold,
             requested_by=requested_by,

@@ -227,7 +227,7 @@ async def poll_feed[E: FeedEvent](
     fetch: Callable[[str | None, int], Awaitable[FeedBatch[E]]],
     handle: Callable[[E], Awaitable[Handled]],
     service_name: str,
-) -> Polled[E]:
+) -> Polled:
     """Read the events after the practice's cursor and apply each through ``handle`` (the handler
     a pushed event goes through too). The cursor moves forward only when the whole batch was
     handled: an event whose handling raised stops the batch, the cursor stays, and the next call

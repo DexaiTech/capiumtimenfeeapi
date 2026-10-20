@@ -95,7 +95,7 @@ def item_read(atom: WipAtom, as_at: date, names: dict[uuid.UUID, str]) -> WipIte
     )
     info = atom.fixed_fee
     return WipItemRead(
-        kind=atom.kind,  # type: ignore[arg-type]
+        kind=atom.kind,
         id=atom.id,
         date=atom.item_date,
         job=_job_ref(atom),
@@ -109,7 +109,7 @@ def item_read(atom: WipAtom, as_at: date, names: dict[uuid.UUID, str]) -> WipIte
         supplier=atom.supplier,
         client=ClientRef(id=atom.client_id, code=atom.client_code, name=atom.client_name),
         age_days=age_days(atom.item_date, as_at),
-        component=atom.component,  # type: ignore[arg-type]
+        component=atom.component,
         charge_value=atom.charge_value,
         selectable=atom.kind in ("time", "disbursement", "expense"),
         claim_id=atom.claim_id,
@@ -181,7 +181,7 @@ class WipViewService:
             items=[
                 WipClientSummary(
                     client=ClientRef(
-                        id=g.client_id,  # type: ignore[arg-type]
+                        id=g.client_id,
                         code=g.client_code or "",
                         name=g.client_name or "",
                     ),
