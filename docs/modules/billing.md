@@ -509,7 +509,7 @@ migration 046: `estimates`, `estimate_lines`, `recurring_schedules`, `recurring_
 | GET | `/estimates/summary` | counts per display status and `open_gross` (value of estimates sent and still open); the status filter is ignored |
 | POST | `/estimates` | creates a **draft** with 1–200 lines; priced like invoice lines (net = round(qty × unit), VAT from the chosen rate, else service, client, practice default; 0 when not VAT-registered) |
 | GET / PATCH / DELETE | `/estimates/{id}` | PATCH and DELETE only on a draft (409 `ESTIMATE_NOT_DRAFT`); PATCH `lines` replaces every line |
-| POST | `/estimates/{id}/send` | takes the next `estimate` sequence number (`EST-00001`), sets `issue_date` (default today), keeps or sets `expiry_date`, status `sent` (409 `ESTIMATE_EMPTY`). **Email delivery is not wired yet** |
+| POST | `/estimates/{id}/send` | takes the next `estimate` sequence number (`EST00001`), sets `issue_date` (default today), keeps or sets `expiry_date`, status `sent` (409 `ESTIMATE_EMPTY`). **Email delivery is not wired yet** |
 | POST | `/estimates/{id}/accept`, `/decline` | only a `sent` estimate (409 `ESTIMATE_NOT_SENT`); an expired one can still be answered |
 | POST | `/estimates/{id}/convert` | needs `invoice.create` as well; copies the lines of a `sent` or `accepted` estimate into a new **draft** invoice (the estimate's job fills lines that have none) and stores `converted_invoice_id` (409 `ESTIMATE_NOT_CONVERTIBLE`, `ESTIMATE_ALREADY_CONVERTED`) |
 

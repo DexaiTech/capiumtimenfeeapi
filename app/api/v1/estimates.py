@@ -3,7 +3,7 @@
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, Response, status
+from fastapi import APIRouter, Depends, Query, status
 
 from app.dependencies.common import ContextDep, SessionDep
 from app.dependencies.organization import PageParamsDep, require
@@ -130,16 +130,15 @@ async def update_estimate(
 
 @router.delete(
     "/estimates/{estimate_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
     summary="Delete a draft estimate",
     description="Only a draft: a numbered estimate stays on record. Requires `estimate.manage`.",
     responses=error_responses(403, 404, 409),
 )
 async def delete_estimate(
     estimate_id: uuid.UUID, org: Manager, service: EstimateServiceDep, ctx: ContextDep
-) -> Response:
+) -> ApiResponse[None]:
     await service.delete(org, estimate_id, ctx)
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+    return ok(message="Estimate deleted")
 
 
 @router.post(

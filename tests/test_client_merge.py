@@ -106,6 +106,8 @@ def test_every_table_that_refers_to_a_client_is_handled_by_the_merge():
         "wip_adjustments",
         "wip_transfers",
         "credit_note_wip",
+        "estimates",
+        "recurring_schedules",
     }
     assert set(CONFLICT_RULES) == {"client_contacts", "client_services", "rate_rules"}
     assert set(HISTORY) == {

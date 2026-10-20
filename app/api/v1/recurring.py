@@ -3,7 +3,7 @@
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, Response, status
+from fastapi import APIRouter, Depends, Query, status
 
 from app.dependencies.common import ContextDep, SessionDep
 from app.dependencies.organization import PageParamsDep, require
@@ -125,7 +125,6 @@ async def update_schedule(
 
 @router.delete(
     "/recurring/{schedule_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
     summary="Delete a recurring schedule",
     description=(
         "Only one that has never run (409 `SCHEDULE_HAS_RUNS`); otherwise pause it or set an "
@@ -135,9 +134,9 @@ async def update_schedule(
 )
 async def delete_schedule(
     schedule_id: uuid.UUID, org: Manager, service: RecurringServiceDep, ctx: ContextDep
-) -> Response:
+) -> ApiResponse[None]:
     await service.delete(org, schedule_id, ctx)
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+    return ok(message="Schedule deleted")
 
 
 @router.post(

@@ -74,7 +74,7 @@ async def give_work(
 ) -> Work:
     """Rows in every table the merge moves: two jobs, three time entries (one billed, one
     written off), a timer, two disbursements, two expense claim lines, an issued and a draft
-    invoice, a credit note, two payments (one allocated), contacts, engagements and two charge
+    invoice, a credit note, two payments (one allocated), an estimate, a recurring schedule, contacts, engagements and two charge
     rates."""
     org, owner = team.org, team.owner
     client = await orm_client(client_id)
@@ -165,6 +165,30 @@ async def give_work(
         json={"mode": "write_off", "reason": "Not returning work"},
     )
     assert credit_note_wip.status_code == 201, credit_note_wip.text
+    # An estimate that names one of the client's jobs (the composite client + job key moves
+    # with the job) and a recurring schedule.
+    estimate = await http.post(
+        org_url(org, "/estimates"),
+        headers=owner.headers,
+        json={
+            "client_id": str(client.id),
+            "job_id": str(accounts.id),
+            "lines": [{"description": "Year-end accounts", "unit_amount": 80_000}],
+        },
+    )
+    assert estimate.status_code == 201, estimate.text
+    schedule = await http.post(
+        org_url(org, "/recurring"),
+        headers=owner.headers,
+        json={
+            "client_id": str(client.id),
+            "name": "Bookkeeping retainer",
+            "frequency": "monthly",
+            "start_date": "2099-01-01",
+            "lines": [{"description": "Monthly bookkeeping", "unit_amount": 25_000}],
+        },
+    )
+    assert schedule.status_code == 201, schedule.text
     async with get_sessionmaker()() as session:
         session.add(
             StatementSend(

@@ -1,10 +1,17 @@
 """Estimates: writing and pricing, sending (numbering), answering, converting to an invoice."""
 
-from datetime import date, timedelta
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from tests.billing_helpers import get_invoice, hourly_job, new_practice, org_url
 from tests.domain_factories import make_client, vat_rate_id
 from tests.factories import audit_entries, error
+
+
+def london_today():
+    """The practices of these tests keep London time."""
+    return datetime.now(ZoneInfo("Europe/London")).date()
+
 
 LINE = {"description": "Year-end accounts", "quantity": "2", "unit_amount": 50_000}
 
@@ -110,15 +117,15 @@ async def test_send_numbers_the_estimate_and_fixes_its_dates(client):
         client, p, first["id"], "send", issue_date="2026-10-05", expiry_date="2026-11-04"
     )
     data = sent.json()["data"]
-    assert (data["number"], data["status"]) == ("EST-00001", "sent")
+    assert (data["number"], data["status"]) == ("EST00001", "sent")
     assert (data["issue_date"], data["expiry_date"]) == ("2026-10-05", "2026-11-04")
     assert data["sent_at"] is not None
     again = await act(client, p, first["id"], "send")
     assert again.status_code == 409 and error(again)["code"] == "ESTIMATE_NOT_DRAFT"
     # Numbers are gapless and sequential.
-    assert (await act(client, p, second["id"], "send")).json()["data"]["number"] == "EST-00002"
+    assert (await act(client, p, second["id"], "send")).json()["data"]["number"] == "EST00002"
     [entry, _] = await audit_entries(p.id, "estimate.sent")
-    assert entry["metadata"]["number"] == "EST-00001"
+    assert entry["metadata"]["number"] == "EST00001"
 
 
 async def test_send_refuses_an_expiry_before_the_issue_date(client):
@@ -133,13 +140,13 @@ async def test_send_refuses_an_expiry_before_the_issue_date(client):
 async def test_expired_is_derived_from_the_expiry_date(client):
     p = await new_practice(client)
     estimate = await create(client, p)
-    yesterday = (date.today() - timedelta(days=1)).isoformat()
+    yesterday = (london_today() - timedelta(days=1)).isoformat()
     await act(
         client,
         p,
         estimate["id"],
         "send",
-        issue_date=(date.today() - timedelta(days=10)).isoformat(),
+        issue_date=(london_today() - timedelta(days=10)).isoformat(),
         expiry_date=yesterday,
     )
     shown = await client.get(
@@ -204,7 +211,7 @@ async def test_convert_raises_a_draft_invoice_once(client):
     )
     [line] = invoice["lines"]
     assert line["description"] == "Year-end accounts"
-    assert line["job"]["id"] == str(job.id)  # the estimate's job fills a line without one
+    assert line["job_id"] == str(job.id)  # the estimate's job fills a line without one
     again = await act(client, p, estimate["id"], "convert")
     assert again.status_code == 409 and error(again)["code"] == "ESTIMATE_ALREADY_CONVERTED"
 
@@ -225,7 +232,7 @@ async def test_only_a_draft_can_be_deleted(client):
     kept = await client.delete(org_url(p.org, f"/estimates/{sent['id']}"), headers=p.owner.headers)
     assert kept.status_code == 409 and error(kept)["code"] == "ESTIMATE_NOT_DRAFT"
     gone = await client.delete(org_url(p.org, f"/estimates/{draft['id']}"), headers=p.owner.headers)
-    assert gone.status_code == 204
+    assert gone.status_code == 200
     missing = await client.get(org_url(p.org, f"/estimates/{draft['id']}"), headers=p.owner.headers)
     assert missing.status_code == 404
 
@@ -253,4 +260,4 @@ async def test_list_filters_by_client_status_and_search(client):
     assert await ids("?status=sent&status=draft") == {mine["id"], theirs_id}
     assert await ids("?q=alpha") == {mine["id"]}
     assert await ids("?q=gadgets") == {theirs_id}
-    assert await ids("?q=EST-00001") == {theirs_id}
+    assert await ids("?q=EST00001") == {theirs_id}

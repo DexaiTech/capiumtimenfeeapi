@@ -1,7 +1,8 @@
 """Recurring invoice schedules: the template, pausing, and the daily job that drafts invoices."""
 
 import uuid
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import text
 
@@ -14,8 +15,13 @@ from tests.factories import audit_entries, error
 LINE = {"description": "Monthly bookkeeping", "unit_amount": 25_000}
 
 
+def london_today() -> date:
+    """The practices of these tests keep London time."""
+    return datetime.now(ZoneInfo("Europe/London")).date()
+
+
 def days_ago(n: int) -> str:
-    return (date.today() - timedelta(days=n)).isoformat()
+    return (london_today() - timedelta(days=n)).isoformat()
 
 
 async def create(client, p, **body):
@@ -130,7 +136,7 @@ async def test_the_job_drafts_an_invoice_and_moves_the_schedule_on(client):
         await client.get(org_url(p.org, f"/recurring/{schedule['id']}"), headers=p.owner.headers)
     ).json()["data"]
     assert after["last_run_on"] == days_ago(1)
-    assert after["next_run_date"] > date.today().isoformat()
+    assert after["next_run_date"] > london_today().isoformat()
     [entry] = await audit_entries(p.id, "recurring.run")
     assert entry["metadata"]["invoice_id"] == run["invoice_id"]
 
@@ -182,10 +188,10 @@ async def test_pause_and_resume_skip_the_dates_missed(client):
     assert twice.status_code == 409 and error(twice)["code"] == "SCHEDULE_NOT_ACTIVE"
     resumed = (await post(client, p, f"/recurring/{schedule['id']}/resume")).json()["data"]
     assert resumed["status"] == "active"
-    assert resumed["next_run_date"] >= date.today().isoformat()
+    assert resumed["next_run_date"] >= london_today().isoformat()
     await run_job()
     assert await runs(client, p, schedule["id"]) == [] or all(
-        r["run_date"] >= date.today().isoformat() for r in await runs(client, p, schedule["id"])
+        r["run_date"] >= london_today().isoformat() for r in await runs(client, p, schedule["id"])
     )
 
 
@@ -234,7 +240,7 @@ async def test_delete_only_a_schedule_that_never_ran(client):
     kept = await client.delete(org_url(p.org, f"/recurring/{used['id']}"), headers=p.owner.headers)
     assert kept.status_code == 409 and error(kept)["code"] == "SCHEDULE_HAS_RUNS"
     gone = await client.delete(org_url(p.org, f"/recurring/{fresh['id']}"), headers=p.owner.headers)
-    assert gone.status_code == 204
+    assert gone.status_code == 200
 
 
 async def set_rate_archived(rate_id, archived: bool) -> None:
@@ -281,7 +287,7 @@ async def test_a_failed_run_waits_for_a_retry(client):
         await client.get(org_url(p.org, f"/recurring/{schedule['id']}"), headers=p.owner.headers)
     ).json()["data"]
     assert (after["failed_runs"], after["last_run_on"]) == (0, days_ago(1))
-    assert after["next_run_date"] > date.today().isoformat()
+    assert after["next_run_date"] > london_today().isoformat()
     again = await post(client, p, f"/recurring/runs/{run['id']}/retry")
     assert again.status_code == 409 and error(again)["code"] == "RUN_NOT_FAILED"
     missing = await post(client, p, f"/recurring/runs/{uuid.uuid4()}/retry")

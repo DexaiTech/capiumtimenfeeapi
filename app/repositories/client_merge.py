@@ -1,8 +1,9 @@
 """Moving everything that belongs to one client onto another (a central merge).
 
 ``REPOINTED`` tables move in one statement. The composite foreign keys ``(organization_id,
-client_id, job_id)``, ``(organization_id, client_id, invoice_id)`` and ``(organization_id,
-client_id, payment_id)`` mean a job, an invoice or a payment and the rows that name it carry the
+client_id, job_id)`` (jobs, and the time, disbursements and estimates that name one),
+``(organization_id, client_id, invoice_id)`` and ``(organization_id, client_id, payment_id)``
+mean a job, an invoice or a payment and the rows that name it carry the
 client id twice over: changed one table at a time, each statement would leave a row pointing at
 a key that no longer exists. PostgreSQL checks these constraints at the end of a statement, so
 a single statement with one data-modifying ``WITH`` clause per table moves them all together.
@@ -46,6 +47,8 @@ REPOINTED: tuple[str, ...] = (
     "wip_adjustments",
     "wip_transfers",
     "credit_note_wip",
+    "estimates",
+    "recurring_schedules",
 )
 # Moved with a rule for the rows that cannot simply move.
 CONFLICT_RULES: tuple[str, ...] = ("client_contacts", "client_services", "rate_rules")
