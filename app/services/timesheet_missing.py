@@ -50,6 +50,7 @@ async def missing_timesheets(
     scope: MissingScope | None = None,
     *,
     organization: Organization | None = None,
+    with_reminders: bool = True,
 ) -> list[MissingTimesheet]:
     """Staff whose timesheet for the week of ``week_start`` (any day of it) is not submitted.
 
@@ -58,7 +59,8 @@ async def missing_timesheets(
     Their ``status`` is ``none`` (no timesheet for the week), ``open`` (not submitted) or
     ``rejected`` (returned); people with a ``submitted`` or ``approved`` sheet are not listed.
     ``expected_minutes`` is the person's target for the week, ``missing_days`` their working
-    days up to today with no time. Sorted by name.
+    days up to today with no time. Sorted by name. ``with_reminders=False`` leaves out
+    ``last_reminded_at`` (one query less) for callers that do not show it.
     """
     org = organization or await load_practice(session, organization_id)
     scope = scope or MissingScope()
@@ -77,8 +79,10 @@ async def missing_timesheets(
     people = [member.user_id for member, _ in staff]
     sheets = await overview.sheets_of_week(org.id, start, people)
     minutes = await overview.minutes_by_day(org.id, people, days[0], days[-1])
-    reminded = await TimesheetReminderRepository(session).last_reminded(
-        org.id, start, "timesheet", people
+    reminded = (
+        await TimesheetReminderRepository(session).last_reminded(org.id, start, "timesheet", people)
+        if with_reminders
+        else {}
     )
     today = practice_today(org)
 

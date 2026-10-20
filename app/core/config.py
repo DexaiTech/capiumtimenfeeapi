@@ -125,6 +125,10 @@ class Settings(BaseSettings):
     api_rate_limit_enabled: bool = True
     api_rate_limit_user_per_minute: int = Field(default=600, ge=1)
     api_rate_limit_ip_per_minute: int = Field(default=120, ge=1)
+    # Where the global ceiling is counted. "memory" costs no database round trip per request but
+    # is per API process; "database" is shared by every process, at one extra statement per
+    # request. (Sign-in, registration and reset limits always use the database.)
+    api_rate_limit_store: Literal["memory", "database"] = "memory"
     max_request_body_kb: int = Field(default=1024, ge=1)
     # Multiplies the authentication limits (register, login, reset, ...). Only for scratch
     # stacks that register many accounts, such as the end-to-end tests; production refuses it.

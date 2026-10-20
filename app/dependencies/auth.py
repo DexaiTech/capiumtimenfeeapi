@@ -15,7 +15,6 @@ from app.core.tokens import decode_access_token
 from app.db.models import User
 from app.dependencies.common import SessionDep, SettingsDep
 from app.repositories.sessions import SessionRepository
-from app.repositories.users import UserRepository
 
 # auto_error=False: a missing header is reported through our own envelope.
 _bearer = HTTPBearer(auto_error=False, description="Access token from /auth/login")
@@ -54,13 +53,14 @@ async def authenticate(
     if credentials is None or not credentials.credentials:
         raise AuthenticationError()
     claims = decode_access_token(settings, credentials.credentials)
-    user = await UserRepository(session).get(claims.user_id)
+    # One statement for the user and its session: immediate logout and session revocation
+    # without a second round trip.
+    found = await SessionRepository(session).get_caller(claims.user_id, claims.session_id)
+    user, active = found if found else (None, None)
     if user is None or not user.is_active:
         raise AuthenticationError("Invalid access token.", code="AUTH_TOKEN_INVALID")
     if claims.issued_at < int(user.password_changed_at.timestamp()):
         raise AuthenticationError("Invalid access token.", code="AUTH_TOKEN_INVALID")
-    # One primary-key lookup buys immediate logout and session revocation.
-    active = await SessionRepository(session).get_active_session(claims.session_id, user.id)
     if active is None:
         raise AuthenticationError("Your session has ended.", code="AUTH_TOKEN_INVALID")
     structlog.contextvars.bind_contextvars(user_id=str(user.id))

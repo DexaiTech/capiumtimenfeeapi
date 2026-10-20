@@ -148,6 +148,7 @@ class MyActionsService:
             week,
             MissingScope(user_ids=frozenset({ctx.user.id})),
             organization=org,
+            with_reminders=False,
         )
         if rows and rows[0].logged_minutes == 0:
             found.append(

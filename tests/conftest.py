@@ -70,6 +70,7 @@ from app.services.central_clients import (  # noqa: E402
     get_central_gateway,
     reset_central_gateway,
 )
+from app.services.rate_limit import memory_rate_limiter  # noqa: E402
 from app.workers.runner import Worker  # noqa: E402
 from tests.integration_fixtures import integration_gateways  # noqa: E402, F401
 
@@ -135,6 +136,12 @@ def mailbox() -> Iterator[Mailbox]:
     controller.start()
     yield box
     controller.stop()
+
+
+@pytest.fixture(autouse=True)
+def _fresh_memory_rate_limiter() -> None:
+    """The global ceiling is counted in this process: every test starts from zero."""
+    memory_rate_limiter.reset()
 
 
 @pytest.fixture(scope="session", autouse=True)

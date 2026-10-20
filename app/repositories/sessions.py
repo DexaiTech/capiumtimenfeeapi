@@ -1,11 +1,11 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import func, select, update
+from sqlalchemy import and_, func, select, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import RefreshToken, UserSession
+from app.db.models import RefreshToken, User, UserSession
 
 
 class SessionRepository:
@@ -35,6 +35,28 @@ class SessionRepository:
             UserSession.expires_at > func.now(),
         )
         return (await self.session.execute(stmt)).scalar_one_or_none()
+
+    async def get_caller(
+        self, user_id: uuid.UUID, session_id: uuid.UUID
+    ) -> tuple[User, UserSession | None] | None:
+        """The user and, when it is still live, the session of an access token: one statement
+        instead of two (every authenticated request pays this). ``None`` for an unknown or
+        deleted user; the session is ``None`` when it was revoked, expired or is someone else's."""
+        stmt = (
+            select(User, UserSession)
+            .outerjoin(
+                UserSession,
+                and_(
+                    UserSession.id == session_id,
+                    UserSession.user_id == User.id,
+                    UserSession.revoked_at.is_(None),
+                    UserSession.expires_at > func.now(),
+                ),
+            )
+            .where(User.id == user_id, User.deleted_at.is_(None))
+        )
+        row = (await self.session.execute(stmt)).one_or_none()
+        return (row[0], row[1]) if row else None
 
     async def list_active_sessions(self, user_id: uuid.UUID) -> list[UserSession]:
         stmt = (

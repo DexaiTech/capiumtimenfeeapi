@@ -4,7 +4,7 @@ import uuid
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import joinedload
 
 from app.db.models import Organization, OrganizationMember, Role
 
@@ -26,7 +26,9 @@ class MembershipRepository:
                 OrganizationMember.user_id == user_id,
                 OrganizationMember.status == "active",
             )
-            .options(selectinload(OrganizationMember.role).selectinload(Role.permissions))
+            # One statement: the role and its permissions come with the row (two more round
+            # trips as separate selectin loads).
+            .options(joinedload(OrganizationMember.role).joinedload(Role.permissions))
         )
-        row = (await self.session.execute(stmt)).one_or_none()
+        row = (await self.session.execute(stmt)).unique().one_or_none()
         return (row[0], row[1]) if row else None

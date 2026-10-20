@@ -16,7 +16,7 @@ from app.core.handlers import error_response
 from app.core.logging import get_logger
 from app.core.tokens import decode_access_token
 from app.db.session import get_sessionmaker
-from app.services.rate_limit import RateLimiter
+from app.services.rate_limit import RateLimiter, memory_rate_limiter
 
 log = get_logger(__name__)
 
@@ -76,9 +76,12 @@ class ApiRateLimitMiddleware:
             return
         key, limit = rate_limit_key(scope)
         try:
-            await RateLimiter(get_sessionmaker()).hit(
-                key, limit=limit, window_seconds=WINDOW_SECONDS
+            limiter = (
+                memory_rate_limiter
+                if settings.api_rate_limit_store == "memory"
+                else RateLimiter(get_sessionmaker())
             )
+            await limiter.hit(key, limit=limit, window_seconds=WINDOW_SECONDS)
         except RateLimitError as exc:
             log.warning("api_rate_limited", scope_key=key.split(":")[1])
             response = error_response(

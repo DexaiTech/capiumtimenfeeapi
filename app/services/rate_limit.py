@@ -8,6 +8,38 @@ from app.core.exceptions import RateLimitError
 from app.repositories.rate_limits import RateLimitRepository
 
 
+class MemoryRateLimiter:
+    """The same fixed window as ``RateLimiter``, counted in this process: no database round trip.
+
+    Used for the global per-request ceiling (``API_RATE_LIMIT_STORE=memory``), which runs before
+    every route. Each API process counts on its own, so with several processes the effective
+    ceiling is per process. Counters of past windows are dropped as the clock moves on.
+    """
+
+    def __init__(self) -> None:
+        self._counts: dict[str, int] = {}
+        self._window = -1
+
+    def reset(self) -> None:
+        self._counts.clear()
+        self._window = -1
+
+    async def hit(self, key: str, *, limit: int, window_seconds: int) -> None:
+        epoch = int(datetime.now(UTC).timestamp())
+        window = epoch // window_seconds
+        if window != self._window:
+            self._counts.clear()
+            self._window = window
+        count = self._counts.get(key, 0) + 1
+        self._counts[key] = count
+        if count > limit:
+            raise RateLimitError(retry_after=max(1, window_seconds - epoch % window_seconds))
+
+
+# The one counter of this process (see ``API_RATE_LIMIT_STORE``).
+memory_rate_limiter = MemoryRateLimiter()
+
+
 class ScaledRateLimiter:
     """A limiter whose limits are multiplied by a fixed factor (see ``auth_rate_limit_factor``)."""
 
