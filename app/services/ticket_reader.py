@@ -88,6 +88,7 @@ class TicketReader:
             {
                 **_base(row, tags.get(ticket_id, []), names),
                 "description": row.ticket.description,
+                "description_html": row.ticket.description_html,
                 "attachments": [AttachmentRead.from_model(a, names) for a in attachments],
             }
         )
@@ -109,6 +110,7 @@ class TicketReader:
                 ticket_id=c.ticket_id,
                 author=_person(c.author_user_id, names),
                 body=c.body,
+                body_html=c.body_html,
                 edited_at=c.edited_at,
                 created_at=c.created_at,
                 attachments=[AttachmentRead.from_model(a, names) for a in files.get(c.id, [])],

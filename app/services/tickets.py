@@ -143,6 +143,7 @@ class TicketService:
                     code=code,
                     subject=data.subject,
                     description=data.description,
+                    description_html=data.description_html,
                     status=data.status,
                     priority=data.priority,
                     assignee_user_id=data.assignee_id,
@@ -211,6 +212,14 @@ class TicketService:
                 if new != old:
                     changes[field] = [audit_excerpt(old), audit_excerpt(new)]
                     setattr(ticket, field, new)
+            # The formatted description goes with its text; a change of formatting alone is an
+            # edit too (the text is the same, the HTML is not).
+            if "description_html" in fields and data.description_html != ticket.description_html:
+                changes.setdefault(
+                    "description",
+                    [audit_excerpt(ticket.description), audit_excerpt(data.description)],
+                )
+                ticket.description_html = data.description_html
             if new_assignee != ticket.assignee_user_id:
                 changes["assignee_id"] = [plain(ticket.assignee_user_id), plain(new_assignee)]
                 ticket.assignee_user_id = new_assignee

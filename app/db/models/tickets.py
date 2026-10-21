@@ -91,6 +91,10 @@ class Ticket(Base, IdMixin, OrgScopedMixin, TimestampMixin):
         CheckConstraint(
             "description IS NULL OR length(description) <= 10000", name="description_length"
         ),
+        CheckConstraint(
+            "description_html IS NULL OR length(description_html) <= 40000",
+            name="description_html_length",
+        ),
         CheckConstraint(_in("status", TICKET_STATUSES), name="status"),
         CheckConstraint(_in("priority", TICKET_PRIORITIES), name="priority"),
         CheckConstraint("(status = 'closed') = (closed_at IS NOT NULL)", name="closed_at"),
@@ -119,6 +123,8 @@ class Ticket(Base, IdMixin, OrgScopedMixin, TimestampMixin):
     category: Mapped[str] = mapped_column(Text, nullable=False, server_default="application")
     subject: Mapped[str] = mapped_column(Text, nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
+    # The editor's sanitised HTML; ``description`` holds its text. Null for plain-text tickets.
+    description_html: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default="open")
     priority: Mapped[str] = mapped_column(Text, nullable=False, server_default="not_set")
     assignee_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
@@ -171,6 +177,7 @@ class TicketComment(Base, IdMixin, OrgScopedMixin, TimestampMixin):
         ),
         _member_fk("author_user_id", "fk_ticket_comments_organization_id_author_members"),
         CheckConstraint("length(body) <= 5000", name="body_length"),
+        CheckConstraint("body_html IS NULL OR length(body_html) <= 20000", name="body_html_length"),
         Index(
             "ix_ticket_comments_organization_id_ticket_id_created_at",
             "organization_id",
@@ -183,6 +190,8 @@ class TicketComment(Base, IdMixin, OrgScopedMixin, TimestampMixin):
     author_user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     # May be empty only when the comment carries attachments (a rule of the service).
     body: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
+    # The editor's sanitised HTML; ``body`` holds its text. Null for plain-text comments.
+    body_html: Mapped[str | None] = mapped_column(Text)
     edited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 

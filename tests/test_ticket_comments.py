@@ -9,7 +9,16 @@ from tests.factories import audit_entries, error
 from tests.ticket_helpers import make_ticket, new_team, stored_files, ticket_url, upload
 from tests.time_helpers import ok_data
 
-COMMENT_KEYS = {"id", "ticket_id", "author", "body", "edited_at", "created_at", "attachments"}
+COMMENT_KEYS = {
+    "id",
+    "ticket_id",
+    "author",
+    "body",
+    "body_html",
+    "edited_at",
+    "created_at",
+    "attachments",
+}
 
 
 def comments_url(t, ticket_id, comment_id=None) -> str:

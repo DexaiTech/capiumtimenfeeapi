@@ -81,6 +81,7 @@ class TicketCommentService:
                     ticket_id=ticket_id,
                     author_user_id=ctx.user.id,
                     body=data.body,
+                    body_html=data.body_html,
                 )
             )
             for attachment in loose:
@@ -113,7 +114,7 @@ class TicketCommentService:
                 raise NotFoundError("Comment not found.")
             if comment.author_user_id != ctx.user.id:
                 raise AuthorizationError("Only the author can edit a comment.")
-            if data.body != comment.body:
+            if (data.body, data.body_html) != (comment.body, comment.body_html):
                 if not data.body and not await self.files.count_comment_attachments(
                     org_id, comment.id
                 ):
@@ -122,6 +123,7 @@ class TicketCommentService:
                     )
                 old = comment.body
                 comment.body = data.body
+                comment.body_html = data.body_html
                 comment.edited_at = datetime.now(UTC)
                 comment = await self.files.save_comment(comment)
                 await record_audit(

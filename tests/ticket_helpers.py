@@ -58,6 +58,7 @@ XLSX_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 # The keys of a ticket in the detail and in the list, as documented.
 DETAIL_KEYS = {
+    "description_html",
     "id",
     "code",
     "number",
@@ -77,7 +78,9 @@ DETAIL_KEYS = {
     "description",
     "attachments",
 }
-ITEM_KEYS = (DETAIL_KEYS - {"description", "attachments"}) | {"description_excerpt"}
+ITEM_KEYS = (DETAIL_KEYS - {"description", "description_html", "attachments"}) | {
+    "description_excerpt"
+}
 # The keys of the dashboard.
 DASHBOARD_KEYS = {
     "date_from",

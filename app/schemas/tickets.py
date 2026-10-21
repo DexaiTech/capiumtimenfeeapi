@@ -13,6 +13,7 @@ from app.db.models import TicketAttachment, TicketTag
 from app.db.models.tickets import EXCERPT_LENGTH, TICKET_PRIORITIES, TICKET_STATUSES
 from app.schemas.common import RequestModel
 from app.schemas.settings import blank_is_null, reject_nulls
+from app.utils.rich_text import html_to_text, sanitize_html
 
 TicketStatus = Literal["open", "hold", "in_progress", "reopen", "closed"]
 TicketPriority = Literal["high", "medium", "low", "not_set"]
@@ -43,6 +44,50 @@ def _multi_line(value: str) -> str:
     text = value.replace("\r\n", "\n").replace("\r", "\n")
     _reject_controls(text, allowed="\n\t")
     return text
+
+
+# What the editor sends. Never stored as it came: ``_apply_rich_text`` rebuilds it.
+RichHtml = Annotated[
+    str,
+    Field(max_length=60_000, description="Sanitised by the server; its text fills the plain field"),
+]
+MAX_DESCRIPTION_HTML = 40_000
+MAX_COMMENT_HTML = 20_000
+
+
+def _apply_rich_text(
+    model: BaseModel,
+    *,
+    html_field: str,
+    text_field: str,
+    max_text: int,
+    max_html: int,
+    blank_text_is_null: bool,
+) -> None:
+    """Sanitise the editor's HTML and put its text in the plain field.
+
+    Without HTML nothing is derived, and a plain-text write replaces earlier rich text (the HTML
+    is cleared), so the two never disagree. Setting the fields as "set" lets updates see them."""
+    given = model.model_fields_set
+    html = getattr(model, html_field)
+    if html is None:
+        if text_field in given:
+            setattr(model, html_field, None)
+            given.add(html_field)
+        else:
+            # A bare null for the HTML changes nothing: the text would no longer match it.
+            given.discard(html_field)
+        return
+    clean = sanitize_html(html)
+    if len(clean) > max_html:
+        raise ValueError("The formatted text is too long.")
+    text = html_to_text(clean) if clean else ""
+    if len(text) > max_text:
+        raise ValueError(f"Use at most {max_text:,} characters.")
+    _reject_controls(text, allowed="\n\t")
+    setattr(model, html_field, clean or None)
+    setattr(model, text_field, (text or None) if blank_text_is_null else text)
+    given.update({html_field, text_field})
 
 
 Subject = Annotated[str, Field(min_length=1, max_length=200), AfterValidator(_single_line)]
@@ -128,6 +173,12 @@ class TicketListItem(TicketBase):
 
 class TicketDetail(TicketBase):
     description: str | None
+    description_html: str | None = Field(
+        default=None,
+        description=(
+            "Sanitised HTML of the description; null for a plain-text one (use `description`)"
+        ),
+    )
     attachments: list[AttachmentRead] = Field(
         description=(
             "Every file of the ticket, oldest first; the ticket's own have `comment_id` null"
@@ -140,6 +191,10 @@ class CommentRead(BaseModel):
     ticket_id: uuid.UUID
     author: TicketPerson
     body: str
+    body_html: str | None = Field(
+        default=None,
+        description="Sanitised HTML of the comment; null for a plain-text one (use `body`)",
+    )
     edited_at: datetime | None
     created_at: datetime
     attachments: list[AttachmentRead]
@@ -174,6 +229,7 @@ class TagDeleted(BaseModel):
 class TicketCreate(RequestModel):
     subject: Subject
     description: Description | None = None
+    description_html: RichHtml | None = None
     status: TicketStatus = "open"
     priority: TicketPriority = "not_set"
     tag_ids: list[uuid.UUID] = Field(default_factory=list, max_length=MAX_TAGS_PER_TICKET)
@@ -183,6 +239,18 @@ class TicketCreate(RequestModel):
 
     _description = field_validator("description")(blank_is_null)
 
+    @model_validator(mode="after")
+    def _rich_text(self) -> Self:
+        _apply_rich_text(
+            self,
+            html_field="description_html",
+            text_field="description",
+            max_text=10_000,
+            max_html=MAX_DESCRIPTION_HTML,
+            blank_text_is_null=True,
+        )
+        return self
+
 
 class TicketUpdate(RequestModel):
     """Every field optional. `description` and `assignee_id` accept null to clear them;
@@ -190,6 +258,7 @@ class TicketUpdate(RequestModel):
 
     subject: Subject | None = None
     description: Description | None = None
+    description_html: RichHtml | None = None
     status: TicketStatus | None = None
     priority: TicketPriority | None = None
     tag_ids: list[uuid.UUID] | None = Field(default=None, max_length=MAX_TAGS_PER_TICKET)
@@ -200,6 +269,18 @@ class TicketUpdate(RequestModel):
     @model_validator(mode="after")
     def _no_nulls(self) -> Self:
         reject_nulls(self, "subject", "status", "priority", "tag_ids")
+        return self
+
+    @model_validator(mode="after")
+    def _rich_text(self) -> Self:
+        _apply_rich_text(
+            self,
+            html_field="description_html",
+            text_field="description",
+            max_text=10_000,
+            max_html=MAX_DESCRIPTION_HTML,
+            blank_text_is_null=True,
+        )
         return self
 
 
@@ -256,15 +337,41 @@ class TagUpdate(RequestModel):
 
 class CommentCreate(RequestModel):
     body: CommentBody = ""
+    body_html: RichHtml | None = None
     attachment_ids: list[uuid.UUID] = Field(
         default_factory=list,
         max_length=25,
         description="Files uploaded to this ticket beforehand and not yet on a comment",
     )
 
+    @model_validator(mode="after")
+    def _rich_text(self) -> Self:
+        _apply_rich_text(
+            self,
+            html_field="body_html",
+            text_field="body",
+            max_text=5_000,
+            max_html=MAX_COMMENT_HTML,
+            blank_text_is_null=False,
+        )
+        return self
+
 
 class CommentUpdate(RequestModel):
     body: CommentBody
+    body_html: RichHtml | None = None
+
+    @model_validator(mode="after")
+    def _rich_text(self) -> Self:
+        _apply_rich_text(
+            self,
+            html_field="body_html",
+            text_field="body",
+            max_text=5_000,
+            max_html=MAX_COMMENT_HTML,
+            blank_text_is_null=False,
+        )
+        return self
 
 
 __all__ = [
