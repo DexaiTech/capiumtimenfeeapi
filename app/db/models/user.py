@@ -12,6 +12,11 @@ class User(Base, IdMixin, TimestampMixin, SoftDeleteMixin):
     __tablename__ = "users"
     __table_args__ = (
         CheckConstraint("length(full_name) BETWEEN 1 AND 120", name="full_name_length"),
+        CheckConstraint(
+            "(avatar_storage_key IS NULL) = (avatar_content_type IS NULL) "
+            "AND (avatar_storage_key IS NULL) = (avatar_updated_at IS NULL)",
+            name="avatar_all_or_none",
+        ),
         Index(
             "uq_users_email_lower",
             text("lower(email)"),
@@ -38,6 +43,11 @@ class User(Base, IdMixin, TimestampMixin, SoftDeleteMixin):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # The profile picture: a key in the file store (namespaced by the user's id), its content type
+    # and when it was set (also the cache-buster of the image). All three are set or all are null.
+    avatar_storage_key: Mapped[str | None] = mapped_column(Text)
+    avatar_content_type: Mapped[str | None] = mapped_column(Text)
+    avatar_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     @property
     def email_verified(self) -> bool:

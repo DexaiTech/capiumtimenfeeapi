@@ -24,11 +24,11 @@ WINDOW_SECONDS = 60
 _WRITES = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 # Probes, the interactive docs and CORS preflights are not counted.
 _RATE_EXEMPT = re.compile(r"^(/health/|/docs|/openapi\.json|/redoc)")
-# The only endpoints that accept large bodies: bulk imports (client lists), ticket attachments
-# and expense receipts, which enforce their own, larger limits.
+# The only endpoints that accept large bodies: bulk imports (client lists), ticket attachments,
+# expense receipts and the profile picture, which enforce their own, larger limits.
 _UPLOADS = re.compile(
-    r"^/api/v1/organizations/[^/]+/"
-    r"(?:imports/[a-z_]+|tickets/[^/]+/attachments|expenses/[^/]+/receipts)$"
+    r"^/api/v1/(?:organizations/[^/]+/"
+    r"(?:imports/[a-z_]+|tickets/[^/]+/attachments|expenses/[^/]+/receipts)|users/me/avatar)$"
 )
 
 

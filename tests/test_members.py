@@ -79,6 +79,7 @@ async def test_list_is_ordered_by_name_and_hides_removed_members_by_default(clie
         "initials",
         "must_change_password",
         "joined_at",
+        "avatar_updated_at",
     }
     assert first["status"] == "suspended" and first["weekly_capacity_minutes"] == 2250
     assert first["chargeable_target_bp"] == 7500 and first["initials"] is None

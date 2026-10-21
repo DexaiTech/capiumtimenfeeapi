@@ -18,6 +18,7 @@ async def test_me_returns_the_profile_without_secrets(client, verified_user):
         "email_verified",
         "must_change_password",
         "created_at",
+        "avatar_updated_at",
     }
     assert data["email"] == "ada@example.com" and data["timezone"] == "Europe/London"
     assert data["email_verified"] is True and data["must_change_password"] is False
@@ -124,13 +125,10 @@ async def test_profile_name_cannot_be_blanked(client, verified_user):
     assert kept.status_code == 200 and kept.json()["data"]["full_name"] == "Ada Lovelace"
 
 
-async def test_there_are_no_avatar_or_file_routes(client, verified_user):
-    """Avatars and file storage were not carried over from the sibling product."""
+async def test_pictures_are_never_served_from_a_public_route(client, verified_user):
+    """The picture is set with an authenticated upload and read with the caller's token (see
+    test_avatar); the sibling product's public avatar URL does not exist here."""
     headers = verified_user["headers"]
-    for method, url in (
-        ("post", f"{ME}/avatar"),
-        ("delete", f"{ME}/avatar"),
-        ("get", "/api/v1/public/avatars/00000000-0000-7000-8000-000000000000"),
-    ):
+    for method, url in (("get", "/api/v1/public/avatars/00000000-0000-7000-8000-000000000000"),):
         response = await getattr(client, method)(url, headers=headers)
         assert response.status_code in (404, 405), (method, url)

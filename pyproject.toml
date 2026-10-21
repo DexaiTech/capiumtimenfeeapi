@@ -31,7 +31,7 @@ plugins = ["pydantic.mypy"]
 exclude = ["alembic/", "tests/"]
 
 [[tool.mypy.overrides]]
-module = ["asyncpg.*", "aiosmtpd.*", "dateutil.*", "fpdf.*", "openpyxl.*"]
+module = ["asyncpg.*", "aiosmtpd.*", "boto3.*", "botocore.*", "dateutil.*", "fpdf.*", "openpyxl.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

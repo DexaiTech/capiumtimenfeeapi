@@ -16,6 +16,7 @@ class UserRead(BaseModel):
     email_verified: bool
     must_change_password: bool
     created_at: datetime
+    avatar_updated_at: datetime | None = None
 
     @classmethod
     def from_model(cls, user: User) -> "UserRead":
@@ -27,6 +28,7 @@ class UserRead(BaseModel):
             email_verified=user.email_verified,
             must_change_password=user.must_change_password,
             created_at=user.created_at,
+            avatar_updated_at=user.avatar_updated_at,
         )
 
 

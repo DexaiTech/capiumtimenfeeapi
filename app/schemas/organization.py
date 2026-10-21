@@ -178,6 +178,7 @@ class MemberRead(BaseModel):
     initials: str | None
     must_change_password: bool
     joined_at: datetime
+    avatar_updated_at: datetime | None = None
 
     @classmethod
     def from_model(cls, member: OrganizationMember) -> "MemberRead":
@@ -197,6 +198,7 @@ class MemberRead(BaseModel):
             initials=member.initials,
             must_change_password=member.user.must_change_password,
             joined_at=member.joined_at,
+            avatar_updated_at=user.avatar_updated_at,
         )
 
 

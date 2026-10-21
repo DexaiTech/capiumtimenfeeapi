@@ -117,6 +117,8 @@ python -c "import secrets; print(secrets.token_urlsafe(48))"   # a value for JWT
 | `API_RATE_LIMIT_ENABLED`, `API_RATE_LIMIT_USER_PER_MINUTE`, `API_RATE_LIMIT_IP_PER_MINUTE` | | Global request ceiling: 600 per signed-in user, 120 per address otherwise. |
 | `MAX_REQUEST_BODY_KB` | | Body cap for writes (1024), except bulk imports and ticket file uploads (which have their own 2 MB file limit). |
 | `STORAGE_DIR` | | Where uploaded files (ticket attachments) are kept. Empty: `storage` next to `app/` (git-ignored). A relative path is resolved against the project root. In Docker it is `/var/lib/capium/storage`: mount a persistent volume there and back it up with the database ([docs/deployment.md](docs/deployment.md)). |
+| `AWS_BUCKET_NAME` | | Amazon S3 bucket for every uploaded file: ticket attachments, expense receipts and profile pictures. When set, `STORAGE_DIR` is not used. The bucket stays private (the API checks permissions and streams each download) and the IAM user needs `s3:PutObject`, `s3:GetObject` and `s3:DeleteObject` on it. Objects are stored as `<practice id>/<2 characters>/<random key>` (profile pictures under the user's id) with server-side encryption. Files already in `STORAGE_DIR` are not copied: copy them into the bucket with the same paths before switching an existing deployment. |
+| `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | | The bucket's region and the IAM user's key pair. Leave the key pair empty to use the AWS default credential chain (an instance or task role). |
 | `AUTH_RATE_LIMIT_FACTOR` | | Multiplies the sign-in/registration limits for scratch stacks only; must be 1 in production. |
 | `WORKER_CONCURRENCY`, `WORKER_POLL_INTERVAL_SECONDS`, `WORKER_LEASE_SECONDS` | | Worker tuning (5, 2.0, 300). |
 

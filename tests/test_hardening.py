@@ -120,12 +120,14 @@ async def test_reads_and_upload_endpoints_are_not_capped(
     assert (
         await client.get("/api/v1/users/me", headers=verified_user["headers"])
     ).status_code == 200
-    # Only bulk imports carry big bodies; they enforce their own limit.
+    # Only bulk imports and file uploads carry big bodies; they enforce their own limit.
     assert _UPLOADS.match(
         "/api/v1/organizations/0198c1f2-6c7e-7d3a-9b1e-2f6f0a4d5e11/imports/clients"
     )
+    assert _UPLOADS.match("/api/v1/users/me/avatar")
     for path in (
-        "/api/v1/users/me/avatar",
+        "/api/v1/users/me/avatar/extra",
+        "/api/v1/users/someone-else/avatar",
         "/api/v1/organizations/x/imports",
         "/api/v1/organizations/x/imports/clients/extra",
         "/api/v1/organizations/x/invoices",

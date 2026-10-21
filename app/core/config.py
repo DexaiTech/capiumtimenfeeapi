@@ -108,6 +108,14 @@ class Settings(BaseSettings):
     # A relative path is resolved against the directory that holds ``app/``. Mount a volume here.
     storage_dir: str = ""
 
+    # Amazon S3 for uploaded files. With AWS_BUCKET_NAME set, every upload (ticket attachments,
+    # expense receipts, profile pictures) goes to that bucket instead of STORAGE_DIR. Leave the key
+    # pair empty to use the AWS default credential chain (an instance or task role).
+    aws_bucket_name: str = ""
+    aws_region: str = ""
+    aws_access_key_id: SecretStr = SecretStr("")
+    aws_secret_access_key: SecretStr = SecretStr("")
+
     # Which implementation of the central client service the API talks to. ``mock`` is an
     # in-memory catalogue of UK companies (state is per process: for development and demos).
     central_client_gateway: Literal["mock"] = "mock"
