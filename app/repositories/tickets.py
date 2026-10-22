@@ -415,31 +415,11 @@ class TicketRepository:
                 .execution_options(synchronize_session=False)
             )
 
-    # --- History and deletion ---------------------------------------------------------
+    # --- History ------------------------------------------------------------------------
 
     async def add_history(self, rows: Sequence[TicketStatusHistory]) -> None:
         """Record status changes (and the first status of new tickets) with one flush."""
         self.session.add_all(rows)
-        await self.session.flush()
-
-    async def attachment_keys(
-        self, organization_id: uuid.UUID, ticket_ids: Collection[uuid.UUID]
-    ) -> list[str]:
-        stmt = select(TicketAttachment.storage_key).where(
-            TicketAttachment.organization_id == organization_id,
-            TicketAttachment.ticket_id.in_(ticket_ids),
-        )
-        return list((await self.session.execute(stmt)).scalars())
-
-    async def delete_many(
-        self, organization_id: uuid.UUID, ticket_ids: Collection[uuid.UUID]
-    ) -> None:
-        """Delete the tickets; their comments, files, tag links and history go with them."""
-        await self.session.execute(
-            delete(Ticket)
-            .where(Ticket.organization_id == organization_id, Ticket.id.in_(ticket_ids))
-            .execution_options(synchronize_session=False)
-        )
         await self.session.flush()
 
 

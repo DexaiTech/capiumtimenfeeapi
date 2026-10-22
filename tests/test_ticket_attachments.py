@@ -396,29 +396,6 @@ async def test_the_last_file_of_a_comment_without_text_cannot_be_deleted(client)
     assert stored_files() == []
 
 
-async def test_deleting_a_ticket_removes_its_files_from_the_storage(client):
-    t = await new_team(client)
-    ticket, keep = await ticket_of(client, t), await ticket_of(client, t)
-    comment = ok_data(
-        await client.post(
-            files_url(t, ticket["id"]).replace("/attachments", "/comments"),
-            headers=t.owner.headers,
-            json={"body": "x"},
-        ),
-        201,
-    )
-    await up(client, t, t.owner, ticket["id"], "png")
-    await up(client, t, t.owner, ticket["id"], "pdf", comment_id=comment["id"])
-    kept = await up(client, t, t.owner, keep["id"], "csv")
-    assert len(stored_files()) == 3
-    assert (
-        await client.delete(ticket_url(t.org, ticket["id"]), headers=t.owner.headers)
-    ).status_code == 200
-    [file] = stored_files()
-    assert file.read_bytes() == SAMPLES["csv"].data
-    assert [str(r["id"]) for r in await attachment_rows()] == [kept["id"]]
-
-
 async def test_a_file_that_cannot_be_removed_does_not_fail_the_delete(client, monkeypatch):
     t = await new_team(client)
     ticket = await ticket_of(client, t)

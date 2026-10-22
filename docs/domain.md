@@ -46,7 +46,7 @@ permission code, with its group and description and the system roles that hold i
 | Reports | `report.read` (time, jobs, utilisation) | `report.financial` (WIP, debtors, billing, recoverability, profitability) |
 | Period lock | `period_lock.read` (Owner, Admin, Partner, Manager, Billing) | lock: `period_lock.manage` (Owner, Admin, Partner); reopen: `period_lock.reopen` (Owner, Admin) |
 | Notifications | own notifications and own settings: every member | the practice's switches and defaults, the email templates (read and write): `organization.update` or `settings.manage` |
-| Tickets (Application Testing) | `ticket.read` (every role, Viewer included) | raise: `ticket.create`; edit (status, priority, tags, assignee, text, comments, files, tags of the practice): `ticket.update`; delete tickets and tags, moderate comments and files: `ticket.delete` (Owner, Admin, Partner, Manager) |
+| Tickets (Application Testing) | `ticket.read` (every role, Viewer included) | raise: `ticket.create`; edit (status, priority, tags, assignee, text, comments, files, tags of the practice): `ticket.update`; delete tags, moderate comments and files: `ticket.delete` (Owner, Admin, Partner, Manager) |
 
 A person without `rate.read` never sees `cost_rate`, `cost_value` or margin figures in any
 response (they are `null`); the same goes for a staff member's rates (`GET /staff`) and a
@@ -563,7 +563,7 @@ Endpoints, shapes, the exact dashboard and the error codes are in `docs/modules/
 * A ticket has a **number** from the gapless `ticket` sequence (prefix `APT`, no padding) taken in
   the transaction that creates it, and a stored **code** (`APT271`, unique per practice); a later
   change of the prefix does not rename old tickets. A failed create leaves no gap; concurrent
-  creates never share a number. Deleted tickets leave a gap in the numbers.
+  creates never share a number.
 * **Status** is `open` (default), `hold`, `in_progress`, `reopen` or `closed`; **priority** is `high`,
   `medium`, `low` or `not_set` (default). Any status may follow any other. `closed_at` is set
   exactly while the status is `closed` (a database CHECK). The category is `application`.
@@ -577,10 +577,10 @@ Endpoints, shapes, the exact dashboard and the error codes are in `docs/modules/
   `?force=true` and takes it off them.
 * **Who may do what**: `ticket.read` sees everything (lists, detail, comments, files, the
   dashboard); `ticket.create` raises tickets; `ticket.update` edits tickets and tags, comments
-  and uploads; `ticket.delete` deletes tickets and tags and moderates. A comment is edited only
+  and uploads; `ticket.delete` deletes tags and moderates. A comment is edited only
   by its author; its author deletes it, and so does anyone with `ticket.delete`; a file is deleted
   by its uploader or by `ticket.delete`. A comment never ends up with neither text nor files.
-* **Bulk actions** (status, priority, add or remove a tag, delete) take 1 to 200 tickets in one
+* **Bulk actions** (status, priority, add or remove a tag) take 1 to 200 tickets in one
   transaction: all or nothing. An id that is not the practice's fails the whole call (404). Each
   ticket that actually changes gets its own history and audit row, like a single change.
 * **Files**: at most 2 MB and 25 per ticket. An upload is accepted only if its extension is on the
@@ -588,7 +588,7 @@ Endpoints, shapes, the exact dashboard and the error codes are in `docs/modules/
   extension says (magic bytes; never the name or the client's content type) and a declared
   content type fits. SVG, HTML and everything else are refused. Names are sanitised, storage keys
   are random and per practice, files are served with `nosniff`, `inline` only for images, and
-  deleting a ticket, comment or file removes the stored file once the transaction has committed.
+  deleting a comment or file removes the stored file once the transaction has committed.
   Files are reached only through the API with the caller's permission; they are not virus
   scanned. Where they live is the `STORAGE_DIR` setting (`docs/deployment.md`).
 * **Dashboard**: every figure is about the tickets **created** in the date range (practice calendar
@@ -599,8 +599,7 @@ Endpoints, shapes, the exact dashboard and the error codes are in `docs/modules/
   The trend shows, for the 14 days ending on the range's last day, the status each of those
   tickets had at the end of the day. Top assignees include an `Unassigned` row.
 * **Audit**: every write (`ticket.created`, `ticket.updated`, `ticket.status_changed`,
-  `ticket.deleted`, `ticket_comment.*`, `ticket_attachment.*`, `ticket_tag.*`) is audited in the
-  same transaction.
+  `ticket_comment.*`, `ticket_attachment.*`, `ticket_tag.*`) is audited in the same transaction.
 * Another practice's tickets, tags, comments and files answer 404.
 
 ## Audit log

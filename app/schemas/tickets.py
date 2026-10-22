@@ -18,7 +18,7 @@ from app.utils.rich_text import html_to_text, sanitize_html
 TicketStatus = Literal["open", "hold", "in_progress", "reopen", "closed"]
 TicketPriority = Literal["high", "medium", "low", "not_set"]
 TagColor = Literal["violet", "blue", "green", "red", "orange", "grey"]
-BulkActionName = Literal["set_status", "set_priority", "add_tag", "remove_tag", "delete"]
+BulkActionName = Literal["set_status", "set_priority", "add_tag", "remove_tag"]
 TicketSort = Literal["number", "code", "subject", "created_at", "status", "priority"]
 
 MAX_TAGS_PER_TICKET = 20
@@ -290,18 +290,14 @@ class BulkAction(RequestModel):
     value: str | None = Field(
         default=None,
         description=(
-            "`set_status`: a status; `set_priority`: a priority; `add_tag` / `remove_tag`: a "
-            "tag id; not allowed for `delete`"
+            "`set_status`: a status; `set_priority`: a priority; `add_tag` / `remove_tag`: a tag id"
         ),
     )
 
     @model_validator(mode="after")
     def _value_fits_the_action(self) -> Self:
         value = self.value
-        if self.action == "delete":
-            if value is not None:
-                raise ValueError("value: Not allowed for delete.")
-        elif value is None:
+        if value is None:
             raise ValueError("value: This field is required for this action.")
         elif self.action == "set_status" and value not in TICKET_STATUSES:
             raise ValueError(f"value: Use one of {', '.join(TICKET_STATUSES)}.")

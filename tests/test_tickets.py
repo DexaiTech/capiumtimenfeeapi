@@ -382,44 +382,17 @@ async def test_an_assignee_who_became_inactive_does_not_block_other_changes(clie
     assert refused.status_code == 422
 
 
-# --- Delete ---------------------------------------------------------------------------------
-
-
-async def test_delete_removes_the_ticket_and_everything_on_it(client):
-    t = await new_team(client)
-    ticket = await make_ticket(client, t.owner, t.org, tag_ids=[await tag_id(t.org, "Bug")])
-    url = ticket_url(t.org, ticket["id"])
-    ok_data(await client.post(url + "/comments", headers=t.owner.headers, json={"body": "Hi"}), 201)
-    response = await client.delete(url, headers=t.owner.headers)
-    assert response.status_code == 200 and response.json()["message"] == "Ticket deleted"
-    assert (await client.get(url, headers=t.owner.headers)).status_code == 404
-    for table in ("tickets", "ticket_comments", "ticket_tag_links", "ticket_status_history"):
-        assert await sql(f"SELECT 1 FROM {table}") == [], table  # noqa: S608
-    assert len(await sql("SELECT 1 FROM ticket_tags")) == 7  # the tag itself stays
-
-    [entry] = await audit_entries(t.id, "ticket.deleted")
-    assert entry["target_id"] == ticket["id"]
-    assert entry["metadata"] == {
-        "code": "APT1",
-        "subject": "Login page crashes",
-        "status": "open",
-        "comments": 1,
-        "attachments": 0,
-    }
-    assert (await client.delete(url, headers=t.owner.headers)).status_code == 404
-
-
 # --- Permissions ----------------------------------------------------------------------------
 
-# role -> (list, get, create, update, delete)
+# role -> (list, get, create, update)
 EXPECTED_BY_ROLE = {
-    "owner": (200, 200, 201, 200, 200),
-    "admin": (200, 200, 201, 200, 200),
-    "partner": (200, 200, 201, 200, 200),
-    "manager": (200, 200, 201, 200, 200),
-    "staff": (200, 200, 201, 200, 403),
-    "billing": (200, 200, 201, 200, 403),
-    "viewer": (200, 200, 403, 403, 403),
+    "owner": (200, 200, 201, 200),
+    "admin": (200, 200, 201, 200),
+    "partner": (200, 200, 201, 200),
+    "manager": (200, 200, 201, 200),
+    "staff": (200, 200, 201, 200),
+    "billing": (200, 200, 201, 200),
+    "viewer": (200, 200, 403, 403),
 }
 
 
@@ -436,11 +409,8 @@ async def test_ticket_permissions_per_system_role(client, role):
             await client.post(ticket_url(t.org), headers=actor.headers, json={"subject": "New"})
         ).status_code,
         (await client.patch(url, headers=actor.headers, json={"priority": "high"})).status_code,
-        (await client.delete(url, headers=actor.headers)).status_code,
     )
     assert got == EXPECTED_BY_ROLE[role]
-    still_there = await sql("SELECT 1 FROM tickets WHERE id = :t", t=ticket["id"])
-    assert bool(still_there) == (EXPECTED_BY_ROLE[role][4] == 403)
 
 
 async def test_a_custom_role_gets_exactly_the_permissions_it_is_given(client):
@@ -463,7 +433,6 @@ async def test_a_custom_role_gets_exactly_the_permissions_it_is_given(client):
     ).status_code == 200
     create = await client.post(ticket_url(t.org), headers=triager.headers, json={"subject": "x"})
     assert create.status_code == 403
-    assert (await client.delete(url, headers=triager.headers)).status_code == 403
 
 
 async def test_a_member_without_ticket_permissions_is_refused_everywhere(client):
@@ -483,14 +452,13 @@ async def test_a_member_without_ticket_permissions_is_refused_everywhere(client)
         client.get(ticket_url(t.org, tail="/dashboard"), headers=nobody.headers),
         client.post(ticket_url(t.org), headers=nobody.headers, json={"subject": "x"}),
         client.patch(url, headers=nobody.headers, json={"priority": "low"}),
-        client.delete(url, headers=nobody.headers),
         client.post(
             ticket_url(t.org, tail="/bulk"),
             headers=nobody.headers,
             json={"ticket_ids": [ticket["id"]], "action": "set_priority", "value": "low"},
         ),
     ]
-    assert [r.status_code for r in await asyncio.gather(*calls)] == [403] * 7
+    assert [r.status_code for r in await asyncio.gather(*calls)] == [403] * 6
 
 
 # --- Tenancy --------------------------------------------------------------------------------
@@ -508,7 +476,6 @@ async def test_another_practices_tickets_are_not_found(client):
     assert (
         await client.patch(on_mine, headers=mine.owner.headers, json={"priority": "low"})
     ).status_code == 404
-    assert (await client.delete(on_mine, headers=mine.owner.headers)).status_code == 404
 
     # Their practice's path is a practice I do not belong to: also not found, never 403.
     assert (await client.get(foreign_url, headers=mine.owner.headers)).status_code == 404

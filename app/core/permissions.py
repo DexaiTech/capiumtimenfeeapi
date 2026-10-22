@@ -65,7 +65,7 @@ CATALOGUE: tuple[PermissionDef, ...] = (
     ),
     PermissionDef("ticket.create", "Tickets", "Raise tickets"),
     PermissionDef("ticket.update", "Tickets", "Edit tickets, tags, comments and attachments"),
-    PermissionDef("ticket.delete", "Tickets", "Delete tickets and tags, and moderate comments"),
+    PermissionDef("ticket.delete", "Tickets", "Delete tags and moderate comments"),
     # Period lock
     PermissionDef("period_lock.read", "Period lock", "View period locks and their history"),
     PermissionDef("period_lock.manage", "Period lock", "Lock time, expenses and WIP up to a date"),

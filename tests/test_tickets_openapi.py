@@ -11,7 +11,6 @@ EXPECTED = {
     ("post", "/tickets/bulk"): "Tickets",
     ("get", "/tickets/{ticket_id}"): "Tickets",
     ("patch", "/tickets/{ticket_id}"): "Tickets",
-    ("delete", "/tickets/{ticket_id}"): "Tickets",
     ("get", "/tickets/{ticket_id}/comments"): "Tickets",
     ("post", "/tickets/{ticket_id}/comments"): "Tickets",
     ("patch", "/tickets/{ticket_id}/comments/{comment_id}"): "Tickets",

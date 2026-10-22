@@ -44,7 +44,6 @@ router = APIRouter(prefix="/organizations/{organization_id}", tags=["Tickets"])
 TicketViewer = Annotated[OrgContext, Depends(require("ticket.read"))]
 TicketCreator = Annotated[OrgContext, Depends(require("ticket.create"))]
 TicketEditor = Annotated[OrgContext, Depends(require("ticket.update"))]
-TicketDeleter = Annotated[OrgContext, Depends(require("ticket.delete"))]
 
 StorageDep = Annotated[FileStorage, Depends(get_storage)]
 
@@ -162,23 +161,20 @@ async def ticket_dashboard(
     "/tickets/bulk",
     summary="Bulk action on tickets",
     description=(
-        "Applies one `action` (`set_status`, `set_priority`, `add_tag`, `remove_tag`, `delete`) "
-        "to 1-200 tickets (`value`: the status, the priority or the tag id; none for `delete`) "
-        "in one transaction: all or nothing. 404 when any id is not the practice's, 422 for a "
-        "wrong `value`. `affected` is the number of distinct tickets selected and `changed` how "
-        "many of them actually changed (a ticket already in the wanted state does not). Each "
-        "ticket that changed gets its own audit row, as if it had been changed alone. `delete` "
-        "needs `ticket.delete` and removes comments and files too; the other actions need "
-        "`ticket.update`."
+        "Applies one `action` (`set_status`, `set_priority`, `add_tag`, `remove_tag`) to 1-200 "
+        "tickets (`value`: the status, the priority or the tag id) in one transaction: all or "
+        "nothing. 404 when any id is not the practice's, 422 for a wrong `value`. `affected` is "
+        "the number of distinct tickets selected and `changed` how many of them actually changed "
+        "(a ticket already in the wanted state does not). Each ticket that changed gets its own "
+        "audit row, as if it had been changed alone. Requires `ticket.update`."
     ),
     responses=error_responses(403, 404),
 )
 async def bulk_tickets(
-    body: BulkAction, org: OrgContextDep, service: TicketServiceDep, ctx: ContextDep
+    body: BulkAction, org: TicketEditor, service: TicketServiceDep, ctx: ContextDep
 ) -> ApiResponse[BulkResult]:
     result = await service.bulk(org, body, ctx)
-    verb = "deleted" if result.action == "delete" else "updated"
-    return ok(result, f"{result.changed} ticket{'s' if result.changed != 1 else ''} {verb}")
+    return ok(result, f"{result.changed} ticket{'s' if result.changed != 1 else ''} updated")
 
 
 # --- Tickets ----------------------------------------------------------------------------
@@ -296,22 +292,6 @@ async def update_ticket(
     ctx: ContextDep,
 ) -> ApiResponse[TicketDetail]:
     return ok(await service.update(org, ticket_id, body, ctx), "Ticket updated")
-
-
-@router.delete(
-    "/tickets/{ticket_id}",
-    summary="Delete a ticket",
-    description=(
-        "Deletes the ticket with its comments, files (also from the storage), tag links and "
-        "history. Requires `ticket.delete`."
-    ),
-    responses=error_responses(403, 404),
-)
-async def delete_ticket(
-    ticket_id: uuid.UUID, org: TicketDeleter, service: TicketServiceDep, ctx: ContextDep
-) -> ApiResponse[None]:
-    await service.delete(org, ticket_id, ctx)
-    return ok(message="Ticket deleted")
 
 
 # --- Comments ---------------------------------------------------------------------------

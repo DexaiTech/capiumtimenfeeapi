@@ -8,8 +8,9 @@ Tests: `tests/test_tickets.py`, `test_tickets_list.py`, `test_tickets_bulk.py`, 
 `test_ticket_dashboard.py`, `test_tickets_openapi.py`, `test_ticket_migration.py` (helpers in `tests/ticket_helpers.py`).
 Migration: `015` (tables `ticket_tags`, `tickets`, `ticket_tag_links`, `ticket_comments`, `ticket_attachments`,
 `ticket_status_history`; the `ticket` number sequence; the default tags; four permissions).
-**Permissions added**: `ticket.read`, `ticket.create`, `ticket.update`, `ticket.delete` (see [Permissions](#permissions)). The UI must add
-the four codes to `src/constants/permissions.ts` and to `OWNER_PERMISSIONS` in `src/test/orgFixtures.ts`.
+**Permissions added**: `ticket.read`, `ticket.create`, `ticket.update`, `ticket.delete` (tags and comment/file moderation
+only — see [Permissions](#permissions)). The UI must add the four codes to `src/constants/permissions.ts` and to
+`OWNER_PERMISSIONS` in `src/test/orgFixtures.ts`.
 
 "Application Testing" is the practice's own tracker for bugs and enhancements found while using the application: its people raise
 tickets, tag them, assign them, comment on them and attach screenshots and documents. Everything is scoped to one practice.
@@ -28,7 +29,7 @@ description and its error responses.
 | Lists | `GET /tickets` and `GET /tickets/{id}/comments` are cursor-paginated: query `limit` (1–100, default 25) and `cursor`; response `meta {next_cursor, has_more}`. Tags, a ticket's files and the dashboard are bounded and not paginated. |
 | Ids | UUIDs. A ticket also has a `number` and a `code` (`APT271`): show the code, address the ticket by `id`. |
 | Timestamps and days | Timestamps are UTC (`2026-10-18T02:53:47.804669Z`). Day filters (`created_from`, `created_to`, the dashboard range) are the practice's calendar days in its time zone. |
-| Write responses | Creates answer 201 with the record, updates 200 with the record, deletes 200 with `data: null` (tag: `{id, tickets_untagged}`; bulk: `{action, affected, changed}`). `message` is a short sentence (`Ticket created`). |
+| Write responses | Creates answer 201 with the record, updates 200 with the record, deletes 200 with `data: null` (tag: `{id, tickets_untagged}`), bulk 200 with `{action, affected, changed}`. `message` is a short sentence (`Ticket created`). |
 | Request bodies | JSON objects; unknown fields answer 422. Strings are trimmed. PATCH bodies hold any subset of the fields. An upload is `multipart/form-data`. |
 
 ## Endpoint index
@@ -36,12 +37,11 @@ description and its error responses.
 | Method | Path | Permission |
 |---|---|---|
 | GET | `/tickets/dashboard` | `ticket.read` |
-| POST | `/tickets/bulk` | `ticket.update` (action `delete`: `ticket.delete`) |
+| POST | `/tickets/bulk` | `ticket.update` |
 | GET | `/tickets` | `ticket.read` |
 | POST | `/tickets` | `ticket.create` |
 | GET | `/tickets/{ticket_id}` | `ticket.read` |
 | PATCH | `/tickets/{ticket_id}` | `ticket.update` |
-| DELETE | `/tickets/{ticket_id}` | `ticket.delete` |
 | GET | `/tickets/{ticket_id}/comments` | `ticket.read` |
 | POST | `/tickets/{ticket_id}/comments` | `ticket.update` |
 | PATCH | `/tickets/{ticket_id}/comments/{comment_id}` | `ticket.update`, and the caller is the author |
@@ -260,25 +260,20 @@ Permission `ticket.update`. Response `TicketDetail`. Partial: send only what cha
 
 A PATCH that changes nothing writes nothing (no audit row, no history row). 404 for an unknown or another practice's ticket.
 
-## DELETE /tickets/{ticket_id}
-
-Permission `ticket.delete`. Deletes the ticket with its comments, files (also from the storage), tag links and status history.
-Response 200, `data: null`, message `Ticket deleted`.
-
 ## POST /tickets/bulk
 
-Permission `ticket.update`, except the action `delete`, which needs `ticket.delete`. All or nothing, in one transaction.
+Permission `ticket.update`. All or nothing, in one transaction.
 
 | Field | Type | Notes |
 |---|---|---|
 | `ticket_ids` | uuid[] 1–200 | Duplicates count once. If **any** id is not the practice's: 404 `RESOURCE_NOT_FOUND` with `details: {"ticket_ids": [the missing ids]}` and nothing changes. |
-| `action` | `set_status`, `set_priority`, `add_tag`, `remove_tag`, `delete` | |
-| `value` | string or null | `set_status`: a status; `set_priority`: a priority; `add_tag` / `remove_tag`: a tag id (422 on `value` when the tag is not the practice's); **absent for `delete`** (422 on `value` when given). Required for the others. A wrong value is 422 on `value`. |
+| `action` | `set_status`, `set_priority`, `add_tag`, `remove_tag` | |
+| `value` | string | `set_status`: a status; `set_priority`: a priority; `add_tag` / `remove_tag`: a tag id (422 on `value` when the tag is not the practice's). Required for every action. A wrong value is 422 on `value`. |
 
-Response `{"action": "set_status", "affected": 2, "changed": 2}` with message `2 tickets updated` (`1 ticket deleted` for a delete):
-`affected` is the number of distinct tickets selected, `changed` how many of them actually changed (a ticket already in the wanted
-state, or already carrying the tag, does not count). Each ticket that changed gets **its own** history row and audit row, as if it had
-been changed alone, marked `bulk: true` in the audit meta.
+Response `{"action": "set_status", "affected": 2, "changed": 2}` with message `2 tickets updated`: `affected` is the number of
+distinct tickets selected, `changed` how many of them actually changed (a ticket already in the wanted state, or already carrying
+the tag, does not count). Each ticket that changed gets **its own** history row and audit row, as if it had been changed alone,
+marked `bulk: true` in the audit meta.
 
 ## Status history
 
@@ -599,8 +594,8 @@ and 14 all-zero trend entries.
 |---|---|
 | `ticket.read` | Lists, the detail, comments, the files (and downloading them), tags and the dashboard |
 | `ticket.create` | Raising tickets |
-| `ticket.update` | Editing tickets (status, priority, tags, assignee, text), bulk changes other than delete, commenting, uploading files, creating and editing tags, editing **one's own** comments and removing **one's own** comments and files |
-| `ticket.delete` | Deleting tickets (also in bulk) and tags, and removing **anyone's** comments and files (moderation) |
+| `ticket.update` | Editing tickets (status, priority, tags, assignee, text), bulk changes, commenting, uploading files, creating and editing tags, editing **one's own** comments and removing **one's own** comments and files |
+| `ticket.delete` | Deleting tags, and removing **anyone's** comments and files (moderation) |
 
 | Role | Codes |
 |---|---|
@@ -644,7 +639,6 @@ and the request id they share. A change that changes nothing writes nothing.
 | `ticket.created` | `ticket` | `code`, `subject`, `status`, `priority`, `assignee_id`, `tags` (names) |
 | `ticket.updated` | `ticket` | `code`, `subject`, `changes: {subject, description, priority, assignee_id, tags: [old, new]}` (only what changed; a long text is cut at 500 characters; `tags` are lists of names) |
 | `ticket.status_changed` | `ticket` | `code`, `subject`, `from`, `to`, `changes: {status: [from, to]}` |
-| `ticket.deleted` | `ticket` | `code`, `subject`, `status`, `comments`, `attachments` (bulk: without the counts, with `bulk: true`) |
 | `ticket_comment.created` | `ticket_comment` | `ticket_id`, `code`, `attachments` |
 | `ticket_comment.updated` | `ticket_comment` | `ticket_id`, `code`, `changes: {body: [old, new]}` |
 | `ticket_comment.deleted` | `ticket_comment` | `ticket_id`, `code`, `attachments` |
@@ -682,7 +676,7 @@ created with every practice (existing practices got it from migration `015`). Se
 | Screen | Calls |
 |---|---|
 | Application Testing Dashboard | `GET /tickets/dashboard?date_from=&date_to=` (send the picker's range; without it the last 19 days). KPI cards from `kpis`, donut from `by_status`, bars from `by_priority` and `by_tag`, line chart from `trend`, "Top Assignees" from `top_assignees`, "Recent Tickets" from `recent`. |
-| All Tickets | `GET /tickets` with `q`, `status`, `priority`, `tag_id`, `sort`, `order`, `cursor`; the tag filter from `GET /ticket-tags`. Inline status and priority: `PATCH /tickets/{id}`. "Add tags": `PATCH /tickets/{id}` with the full `tag_ids`, or `POST /tickets/bulk` `add_tag` for one. Selection: `POST /tickets/bulk`. "+ Application Testing": `POST /tickets`. Row menu delete: `DELETE /tickets/{id}`. |
+| All Tickets | `GET /tickets` with `q`, `status`, `priority`, `tag_id`, `sort`, `order`, `cursor`; the tag filter from `GET /ticket-tags`. Inline status and priority: `PATCH /tickets/{id}`. "Add tags": `PATCH /tickets/{id}` with the full `tag_ids`, or `POST /tickets/bulk` `add_tag` for one. Selection: `POST /tickets/bulk`. "+ Application Testing": `POST /tickets`. |
 | Ticket detail | `GET /tickets/{id}` and `GET /tickets/{id}/comments`; inline subject, description, status, priority, tags: `PATCH /tickets/{id}`; the files panel: upload `POST …/attachments`, show with the blob flow, remove `DELETE …/attachments/{id}`; comments: `POST/PATCH/DELETE …/comments`. |
 
 # Types at a glance
@@ -712,7 +706,7 @@ interface TicketComment {
   created_at: string; attachments: Attachment[]
 }
 interface TicketTag { id: string; name: string; color: TagColor; ticket_count: number; created_at: string; updated_at: string }
-interface BulkResult { action: 'set_status' | 'set_priority' | 'add_tag' | 'remove_tag' | 'delete'; affected: number; changed: number }
+interface BulkResult { action: 'set_status' | 'set_priority' | 'add_tag' | 'remove_tag'; affected: number; changed: number }
 
 interface Change { kind: 'new' | 'percent' | 'none'; percent: number | null }
 interface Kpi { value: number; previous: number; change: Change }

@@ -1,5 +1,5 @@
-"""Bulk actions on tickets: status, priority, tags and delete; limits, atomicity, permissions,
-one audit row per changed ticket."""
+"""Bulk actions on tickets: status, priority and tags; limits, atomicity, permissions, one audit
+row per changed ticket."""
 
 import uuid
 
@@ -7,16 +7,7 @@ import pytest
 
 from tests.clients_helpers import sql
 from tests.factories import audit_entries, error
-from tests.ticket_helpers import (
-    insert_ticket,
-    make_ticket,
-    new_team,
-    stored_files,
-    tag_id,
-    ticket_url,
-    upload,
-    utc,
-)
+from tests.ticket_helpers import insert_ticket, make_ticket, new_team, tag_id, ticket_url, utc
 from tests.time_helpers import ok_data
 
 
@@ -171,39 +162,6 @@ async def test_tags_are_checked_against_the_practice(client):
             assert error(response)["details"][0]["field"] == "value"
 
 
-# --- Delete ---------------------------------------------------------------------------------
-
-
-async def test_bulk_delete_removes_tickets_comments_and_files(client):
-    t = await new_team(client)
-    a, b, c = await three(client, t)
-    for ticket in (a, b):
-        assert (await upload(client, t.owner, t.org, ticket["id"])).status_code == 201
-    assert len(stored_files()) == 2
-    created = await client.post(
-        ticket_url(t.org, a["id"], "/comments"), headers=t.owner.headers, json={"body": "Hi"}
-    )
-    assert created.status_code == 201
-
-    response = await bulk(client, t, t.owner, [a["id"], b["id"]], "delete")
-    assert ok_data(response) == {"action": "delete", "affected": 2, "changed": 2}
-    assert response.json()["message"] == "2 tickets deleted"
-    assert stored_files() == []
-    remaining = await sql("SELECT id FROM tickets")
-    assert [str(r["id"]) for r in remaining] == [c["id"]]
-    for table in ("ticket_comments", "ticket_attachments"):
-        assert await sql(f"SELECT 1 FROM {table}") == [], table  # noqa: S608
-    assert len(await sql("SELECT 1 FROM ticket_status_history")) == 1
-
-    entries = await audit_entries(t.id, "ticket.deleted")
-    assert {e["target_id"] for e in entries} == {a["id"], b["id"]}
-    assert all(e["metadata"]["bulk"] is True for e in entries)
-    assert {e["metadata"]["code"] for e in entries} == {a["code"], b["code"]}
-    assert (
-        await client.get(ticket_url(t.org, a["id"]), headers=t.owner.headers)
-    ).status_code == 404
-
-
 # --- Limits and atomicity -------------------------------------------------------------------
 
 
@@ -263,10 +221,6 @@ async def test_one_foreign_id_refuses_the_whole_batch(client):
         await client.get(ticket_url(other.org, foreign["id"]), headers=other.owner.headers)
     )
     assert untouched["status"] == "open"
-    # A bulk delete of the same selection is refused alike, and deletes nothing.
-    refused = await bulk(client, t, t.owner, [a["id"], foreign["id"]], "delete")
-    assert refused.status_code == 404
-    assert len(await sql("SELECT 1 FROM tickets")) == 4
 
 
 # --- Validation -----------------------------------------------------------------------------
@@ -283,7 +237,6 @@ async def test_one_foreign_id_refuses_the_whole_batch(client):
         ({"action": "add_tag"}, "value"),
         ({"action": "add_tag", "value": "not-a-uuid"}, "value"),
         ({"action": "remove_tag", "value": "123"}, "value"),
-        ({"action": "delete", "value": "anything"}, "value"),
         ({"action": "archive"}, "action"),
         ({"action": "set_status", "value": "open", "extra": 1}, "extra"),
         ({"value": "open"}, "action"),
@@ -315,43 +268,22 @@ async def test_ticket_ids_must_be_a_list_of_ids(client):
 
 
 @pytest.mark.parametrize(
-    ("role", "can_update", "can_delete"),
+    ("role", "can_update"),
     [
-        ("owner", True, True),
-        ("admin", True, True),
-        ("partner", True, True),
-        ("manager", True, True),
-        ("staff", True, False),
-        ("billing", True, False),
-        ("viewer", False, False),
+        ("owner", True),
+        ("admin", True),
+        ("partner", True),
+        ("manager", True),
+        ("staff", True),
+        ("billing", True),
+        ("viewer", False),
     ],
 )
-async def test_bulk_permissions_per_role(client, role, can_update, can_delete):
+async def test_bulk_permissions_per_role(client, role, can_update):
     t = await new_team(client)
     actor = await t.member(role)
-    a, b, _ = await three(client, t)
+    a, *_ = await three(client, t)
     update = await bulk(client, t, actor, [a["id"]], "set_priority", "medium")
     assert update.status_code == (200 if can_update else 403)
     tagged = await bulk(client, t, actor, [a["id"]], "add_tag", await tag_id(t.org, "Bug"))
     assert tagged.status_code == (200 if can_update else 403)
-    delete = await bulk(client, t, actor, [b["id"]], "delete")
-    assert delete.status_code == (200 if can_delete else 403)
-    assert bool(await sql("SELECT 1 FROM tickets WHERE id = :t", t=b["id"])) != can_delete
-
-
-async def test_deleting_and_updating_are_separate_permissions(client):
-    t = await new_team(client)
-    created = await client.post(
-        t.url("/roles"),
-        headers=t.owner.headers,
-        json={
-            "name": "Deleter",
-            "permissions": ["organization.read", "ticket.read", "ticket.delete"],
-        },
-    )
-    assert created.status_code == 201, created.text
-    deleter = await t.member("Deleter")
-    a, b, _ = await three(client, t)
-    assert (await bulk(client, t, deleter, [a["id"]], "set_status", "closed")).status_code == 403
-    assert (await bulk(client, t, deleter, [a["id"]], "delete")).status_code == 200
-    assert (await current(client, t, b["id"]))["status"] == "hold"

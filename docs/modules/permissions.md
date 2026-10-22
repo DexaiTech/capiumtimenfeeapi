@@ -167,7 +167,7 @@ gave them.
 | Code | Description | Owner | Admin | Partner | Manager | Staff | Billing | Viewer |
 |---|---|---|---|---|---|---|---|---|
 | `ticket.create` | Raise tickets | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |  |
-| `ticket.delete` | Delete tickets and tags, and moderate comments | ✓ | ✓ | ✓ | ✓ |  |  |  |
+| `ticket.delete` | Delete tags and moderate comments | ✓ | ✓ | ✓ | ✓ |  |  |  |
 | `ticket.read` | View tickets, comments, attachments and the dashboard | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `ticket.update` | Edit tickets, tags, comments and attachments | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |  |
 

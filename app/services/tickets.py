@@ -5,14 +5,11 @@
 * Creating a ticket and every change of its status write a ``ticket_status_history`` row in the
   same transaction; ``closed_at`` is set exactly while the status is ``closed``.
 * The assignee must be an active member of the practice and the tags must be the practice's.
-* Reading needs ``ticket.read``, creating ``ticket.create``, changing ``ticket.update`` and
-  deleting ``ticket.delete`` (a bulk delete too, the other bulk actions need ``ticket.update``);
-  the router checks the single-ticket rules, ``bulk`` checks its own.
-* Every write is audited: ``ticket.created``, ``ticket.updated``, ``ticket.status_changed`` and
-  ``ticket.deleted``. A bulk action writes the same row for each ticket it changes, marked with
-  ``bulk`` in its meta, so a ticket's trail is complete whichever way it was changed.
-* Deleting a ticket removes its comments, files and history; the files leave the storage once
-  the transaction has committed.
+* Reading needs ``ticket.read``, creating ``ticket.create`` and changing ``ticket.update``
+  (bulk actions too); the router checks the single-ticket rules.
+* Every write is audited: ``ticket.created``, ``ticket.updated`` and ``ticket.status_changed``.
+  A bulk action writes the same row for each ticket it changes, marked with ``bulk`` in its
+  meta, so a ticket's trail is complete whichever way it was changed.
 """
 
 import uuid
@@ -47,7 +44,7 @@ from app.services.audit import AuditRow
 from app.services.common import audit_excerpt, plain, record_audit, record_audit_many
 from app.services.policy import OrgContext
 from app.services.sequences import take_number
-from app.services.storage import FileStorage, discard
+from app.services.storage import FileStorage
 from app.services.ticket_reader import TicketReader
 from app.utils.pagination import Page, PageParams
 from app.utils.practice_dates import end_of_day_utc, start_of_day_utc
@@ -275,32 +272,11 @@ class TicketService:
             result = await self.reader.detail(org_id, ticket.id)
         return result
 
-    async def delete(self, ctx: OrgContext, ticket_id: uuid.UUID, rctx: RequestContext) -> None:
-        org_id = ctx.organization_id
-        async with unit_of_work(self.session):
-            ticket = await self.tickets.get(org_id, ticket_id, lock=True)
-            if ticket is None:
-                raise NotFoundError("Ticket not found.")
-            row = await self.tickets.get_row(org_id, ticket_id)
-            assert row is not None
-            keys = await self.tickets.attachment_keys(org_id, [ticket_id])
-            meta = {
-                "code": ticket.code,
-                "subject": ticket.subject,
-                "status": ticket.status,
-                "comments": row.comment_count,
-                "attachments": row.attachment_count,
-            }
-            await self.tickets.delete_many(org_id, [ticket_id])
-            await record_audit(self.session, ctx, rctx, "ticket.deleted", "ticket", ticket_id, meta)
-        await discard(self.storage, org_id, keys)
-
     async def bulk(self, ctx: OrgContext, data: BulkAction, rctx: RequestContext) -> BulkResult:
         """One action on up to 200 tickets, all or nothing."""
-        policy.ensure(ctx, "ticket.delete" if data.action == "delete" else "ticket.update")
+        policy.ensure(ctx, "ticket.update")
         org_id = ctx.organization_id
         ids = list(dict.fromkeys(data.ticket_ids))
-        keys: list[str] = []
         async with unit_of_work(self.session):
             tickets = await self.tickets.lock_many(org_id, ids)
             if len(tickets) != len(ids):
@@ -322,26 +298,8 @@ class TicketService:
                     if tag is None:
                         raise ValidationError.for_field("value", "This tag does not exist.")
                     rows = await self._bulk_tag(org_id, tickets, tag, add=data.action == "add_tag")
-                case "delete":
-                    keys = await self.tickets.attachment_keys(org_id, ids)
-                    rows = [
-                        (
-                            "ticket.deleted",
-                            "ticket",
-                            t.id,
-                            {
-                                "code": t.code,
-                                "subject": t.subject,
-                                "status": t.status,
-                                "bulk": True,
-                            },
-                        )
-                        for t in tickets
-                    ]
-                    await self.tickets.delete_many(org_id, ids)
             await self.session.flush()
             await record_audit_many(self.session, ctx, rctx, rows)
-        await discard(self.storage, org_id, keys)
         return BulkResult(action=data.action, affected=len(ids), changed=len(rows))
 
     # --- Bulk actions: each returns the audit row of every ticket it changed -----------------
