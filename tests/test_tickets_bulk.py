@@ -25,7 +25,7 @@ async def bulk(client, t, actor, ids, action, value=None, **extra):
 async def three(client, t):
     """An open, a hold and a closed ticket."""
     a = await make_ticket(client, t.owner, t.org, "A", priority="high")
-    b = await make_ticket(client, t.owner, t.org, "B", status="hold")
+    b = await make_ticket(client, t.owner, t.org, "B", status="on_hold")
     c = await make_ticket(client, t.owner, t.org, "C", status="closed", priority="low")
     return a, b, c
 
@@ -57,7 +57,7 @@ async def test_set_status_moves_only_the_tickets_that_differ(client):
     )
     assert {(str(h["ticket_id"]), h["from_status"], h["to_status"]) for h in history} == {
         (a["id"], "open", "closed"),
-        (b["id"], "hold", "closed"),
+        (b["id"], "on_hold", "closed"),
     }
     entries = await audit_entries(t.id, "ticket.status_changed")
     assert {e["target_id"] for e in entries} == {a["id"], b["id"]}
@@ -72,11 +72,11 @@ async def test_set_status_moves_only_the_tickets_that_differ(client):
 async def test_set_status_away_from_closed_clears_closed_at(client):
     t = await new_team(client)
     *_, c = await three(client, t)
-    data = ok_data(await bulk(client, t, t.owner, [c["id"]], "set_status", "reopen"))
+    data = ok_data(await bulk(client, t, t.owner, [c["id"]], "set_status", "reopened"))
     assert data == {"action": "set_status", "affected": 1, "changed": 1}
     after = await current(client, t, c["id"])
-    assert after["status"] == "reopen" and after["closed_at"] is None
-    assert (await bulk(client, t, t.owner, [c["id"]], "set_status", "reopen")).json()[
+    assert after["status"] == "reopened" and after["closed_at"] is None
+    assert (await bulk(client, t, t.owner, [c["id"]], "set_status", "reopened")).json()[
         "message"
     ] == "0 tickets updated"
 
@@ -214,7 +214,7 @@ async def test_one_foreign_id_refuses_the_whole_batch(client):
     assert error(response)["code"] == "RESOURCE_NOT_FOUND"
     assert sorted(error(response)["details"]["ticket_ids"]) == sorted([foreign["id"], missing])
     assert (await current(client, t, a["id"]))["status"] == "open"
-    assert (await current(client, t, b["id"]))["status"] == "hold"
+    assert (await current(client, t, b["id"]))["status"] == "on_hold"
     assert len(await sql("SELECT 1 FROM ticket_status_history")) == 4  # 3 + the foreign one
     assert len(await audit_entries(t.id)) == before
     untouched = ok_data(

@@ -106,6 +106,14 @@ class AuditLog(Base):
             "created_at",
             postgresql_where=text("(metadata ->> 'client_id') IS NOT NULL"),
         ),
+        # The entries that name one ticket in ``ticket_id`` (its comments and files).
+        Index(
+            "ix_audit_logs_organization_id_ticket_ref_created_at",
+            "organization_id",
+            text("(metadata ->> 'ticket_id')"),
+            "created_at",
+            postgresql_where=text("(metadata ->> 'ticket_id') IS NOT NULL"),
+        ),
         # The entries about one record of any type (record history, entity filters).
         Index(
             "ix_audit_logs_organization_id_target_created_at",

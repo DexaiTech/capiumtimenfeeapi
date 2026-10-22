@@ -42,6 +42,7 @@ description and its error responses.
 | POST | `/tickets` | `ticket.create` |
 | GET | `/tickets/{ticket_id}` | `ticket.read` |
 | PATCH | `/tickets/{ticket_id}` | `ticket.update` |
+| GET | `/tickets/{ticket_id}/timeline` | `ticket.read` |
 | GET | `/tickets/{ticket_id}/comments` | `ticket.read` |
 | POST | `/tickets/{ticket_id}/comments` | `ticket.update` |
 | PATCH | `/tickets/{ticket_id}/comments/{comment_id}` | `ticket.update`, and the caller is the author |
@@ -62,11 +63,30 @@ description and its error responses.
 
 | Thing | Values |
 |---|---|
-| Status (`status`) | `open` (Open), `hold` (Hold), `in_progress` (In Progress), `reopen` (Reopen), `closed` (Closed). Default `open`. Any status may follow any other: there is no workflow. Lists and charts use this order. |
+| Status (`status`) | See the table below. Default `open`. Any status may follow any other: there is no enforced workflow, the list says what each is for. Lists and charts use the order of the table. |
 | Priority (`priority`) | `high` (High), `medium` (Medium), `low` (Low), `not_set` (Not Set). Default `not_set`. |
 | Category (`category`) | `application` (the badge "Application"). The only value today; every ticket has it. |
 | Tag colour (`color`) | `violet`, `blue`, `green`, `red`, `orange`, `grey` (default `grey`). Names of design-system tones: map each to the badge tone of the same name. The API carries no colour for status or priority: the UI chooses those tones. |
 | Default tags | Every practice starts with `Bug` (red), `Enhancement` (violet), `UI` (blue), `Reporting` (green), `Accounts` (blue), `Validation` (red), `Trial Balance` (violet). Anyone with `ticket.update` may add, rename, recolour them; `ticket.delete` removes them. |
+
+### The statuses
+
+| Status | Label | When to use |
+|---|---|---|
+| `open` | Open | Newly created ticket |
+| `in_progress` | In Progress | Developer is working on it |
+| `requirement_pending` | Requirement Pending | Waiting for BA to provide requirements or acceptance criteria |
+| `clarification_required` | Clarification Required | A question needs an answer from BA or developer |
+| `blocked` | Blocked | Work cannot proceed due to a dependency |
+| `ready_for_ba_review` | Ready for BA Review | Development completed; BA verification is pending |
+| `reopened` | Reopened | Issue returned for further work |
+| `closed` | Closed | Work completed and accepted |
+| `invalid` | Invalid | Incorrect, duplicate, or out-of-scope ticket |
+| `on_hold` | On Hold | Work intentionally paused |
+
+`closed_at` is set exactly while the status is `closed` (not for `invalid`). Migration 049 renamed
+`hold` to `on_hold` and `reopen` to `reopened` in the tickets and the status history; the audit
+log is append-only, so older entries keep the old codes (the timeline maps them).
 
 ## Limits
 
@@ -77,7 +97,7 @@ description and its error responses.
 | Comment | at most 5,000 characters, same rules as the description; may be empty only with files |
 | Tags | name 1–40 characters, unique in the practice ignoring case; at most 200 tags per practice; at most 20 per ticket |
 | Bulk | 1–200 distinct ticket ids per call |
-| List | `limit` 1–100 (default 25); `q` at most 200 characters; `status` at most 5 values, `priority` at most 4, `tag_id` at most 50 |
+| List | `limit` 1–100 (default 25); `q` at most 200 characters; `status` at most 10 values, `priority` at most 4, `tag_id` at most 50 |
 | File | at most **2 MB** (2,097,152 bytes) per file; at most 25 files per ticket; `file_name` is cut to 150 characters (the extension is kept) |
 | Dashboard | a range of at most 366 days; 7 tags (+ `Others`), 10 assignees (+ `Unassigned`), 7 recent tickets, 14 trend days |
 | Description excerpt | the list shows the first 200 characters of the description |
@@ -195,7 +215,7 @@ Permission `ticket.read`. Cursor-paginated. Query:
 | Param | Type | Meaning |
 |---|---|---|
 | `q` | string ≤ 200 | Case-insensitive substring of the **code**, the **subject** or the **description** (`%` and `_` are ordinary characters). Blank is no search. |
-| `status` | `open`, `hold`, `in_progress`, `reopen`, `closed`; repeat for several (≤ 5) | Any of them. `?status=open&status=reopen`. |
+| `status` | `open`, `in_progress`, `requirement_pending`, `clarification_required`, `blocked`, `ready_for_ba_review`, `reopened`, `closed`, `invalid`, `on_hold`; repeat for several (≤ 10) | Any of them. `?status=open&status=reopened`. |
 | `priority` | `high`, `medium`, `low`, `not_set`; repeatable (≤ 4) | Any of them. |
 | `tag_id` | uuid, repeatable (≤ 50) | Tickets that carry **any** of the tags. An unknown tag matches nothing. |
 | `assignee_id` | uuid | Assigned to this person. |
@@ -247,7 +267,7 @@ Permission `ticket.read`. Response `TicketDetail`. Comments come from `GET /tick
 
 ## PATCH /tickets/{ticket_id}
 
-Permission `ticket.update`. Response `TicketDetail`. Partial: send only what changes (the inline selects send `{"status": "hold"}`).
+Permission `ticket.update`. Response `TicketDetail`. Partial: send only what changes (the inline selects send `{"status": "on_hold"}`).
 
 | Field | Semantics |
 |---|---|
@@ -284,6 +304,27 @@ shows `ticket.created` and `ticket.status_changed` rows with the before and afte
 ---
 
 # Comments
+
+## GET /tickets/{ticket_id}/timeline
+
+Permission `ticket.read` (no `audit_log.read` needed). What happened to the ticket, **newest first**, cursor-paginated
+(`limit`, `cursor`; `meta {next_cursor, has_more}`; the limit counts audit entries, and one entry that changed several
+fields yields one event per field). Another practice's ticket, or an unknown id, answers 404. Response `TimelineEvent[]`:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `id` | string | Stable id (`<audit id>` or `<audit id>:<field>`) |
+| `kind` | string | `created`, `status_changed`, `priority_changed`, `assignee_changed`, `tags_changed`, `subject_changed`, `description_changed`, `comment_added`, `comment_edited`, `comment_deleted`, `file_added`, `file_removed` |
+| `at` | datetime | When it happened (UTC) |
+| `actor` | `{id, full_name}` or null | Who did it |
+| `before`, `after` | string or null | Old and new status or priority code, person name (`Unassigned` for none) or subject. `created` carries the first status in `after`. |
+| `added`, `removed` | string[] | Tag names (`tags_changed`) |
+| `detail` | string or null | Excerpt of a comment (comments written before the timeline have none), or a file name |
+| `comment_id` | uuid or null | The comment a comment event or a comment's file is about |
+| `bulk` | boolean | Made by a bulk action |
+
+The timeline is read from the audit log (partial index on `metadata ->> 'ticket_id'` finds the comment and file entries),
+so a ticket changed before auditing began has no history before that.
 
 ## GET /tickets/{ticket_id}/comments
 
@@ -482,8 +523,8 @@ immediately before the range: `previous_to` is the day before `date_from`, `prev
 
 | Field | Meaning |
 |---|---|
-| `kpis.total`, `.open`, `.hold`, `.in_progress`, `.reopen`, `.closed` | The six cards. `value`: tickets of the range (in that status). `previous`: the same for the previous period. `change`: how to show "vs last period" (below). |
-| `by_status` | Always the five statuses in the order `open, hold, in_progress, reopen, closed`. `percent`: the share of all tickets of the range to **one decimal, half up** (`Closed 251 (95.1%)`); `null` when the range holds no ticket. The rounded figures may add up to 99.9 or 100.1. |
+| `kpis.total` and `kpis.<status>` for each of the ten statuses | The cards: the total and one per status. `value`: tickets of the range (in that status). `previous`: the same for the previous period. `change`: how to show "vs last period" (below). |
+| `by_status` | Always the ten statuses in the order of the status table (`open, in_progress, requirement_pending, clarification_required, blocked, ready_for_ba_review, reopened, closed, invalid, on_hold`). `percent`: the share of all tickets of the range to **one decimal, half up** (`Closed 251 (95.1%)`); `null` when the range holds no ticket. The rounded figures may add up to 99.9 or 100.1. |
 | `by_priority` | Always the four, in the order `high, medium, low, not_set`, with `count` and `percent` as above. |
 | `by_tag` | The **7 most used** tags of the range, most used first, ties by name ignoring case; a ticket counts under each of its tags, so the counts can add up to more than the tickets. Tags no ticket of the range carries are not listed. When more than 7 tags are in use, a final entry `Others`: `{tag_id: null, name: "Others", color: null, count, is_other: true}` where `count` is the number of **distinct tickets** that carry at least one tag outside the seven (a ticket with two of them counts once). No `percent` here (the counts overlap): draw bars. |
 | `trend` | **14 entries**, the 14 days ending on `date_to`, oldest first: each ticket of the range counted in the status it had **at the end of that day** (practice time zone), rebuilt from the status history. A ticket created later than that day is not counted; `total` is the number counted. For a range that ends today, the last entry equals `by_status`; for an earlier `date_to` it shows the statuses at the end of that day. |
@@ -507,17 +548,27 @@ item, the endpoint returns up to 7):
   "kpis": {
     "total":       {"value": 16, "previous": 10, "change": {"kind": "percent", "percent": 60}},
     "open":        {"value": 6, "previous": 4, "change": {"kind": "percent", "percent": 50}},
-    "hold":        {"value": 2, "previous": 0, "change": {"kind": "new", "percent": null}},
     "in_progress": {"value": 3, "previous": 3, "change": {"kind": "percent", "percent": 0}},
-    "reopen":      {"value": 1, "previous": 2, "change": {"kind": "percent", "percent": -50}},
-    "closed":      {"value": 4, "previous": 1, "change": {"kind": "percent", "percent": 300}}
+    "requirement_pending":    {"value": 0, "previous": 0, "change": {"kind": "none", "percent": null}},
+    "clarification_required": {"value": 0, "previous": 0, "change": {"kind": "none", "percent": null}},
+    "blocked":     {"value": 0, "previous": 0, "change": {"kind": "none", "percent": null}},
+    "ready_for_ba_review":    {"value": 0, "previous": 0, "change": {"kind": "none", "percent": null}},
+    "reopened":    {"value": 1, "previous": 2, "change": {"kind": "percent", "percent": -50}},
+    "closed":      {"value": 4, "previous": 1, "change": {"kind": "percent", "percent": 300}},
+    "invalid":     {"value": 0, "previous": 0, "change": {"kind": "none", "percent": null}},
+    "on_hold":     {"value": 2, "previous": 0, "change": {"kind": "new", "percent": null}}
   },
   "by_status": [
     {"status": "open", "count": 6, "percent": 37.5},
-    {"status": "hold", "count": 2, "percent": 12.5},
     {"status": "in_progress", "count": 3, "percent": 18.8},
-    {"status": "reopen", "count": 1, "percent": 6.3},
-    {"status": "closed", "count": 4, "percent": 25.0}
+    {"status": "requirement_pending", "count": 0, "percent": 0.0},
+    {"status": "clarification_required", "count": 0, "percent": 0.0},
+    {"status": "blocked", "count": 0, "percent": 0.0},
+    {"status": "ready_for_ba_review", "count": 0, "percent": 0.0},
+    {"status": "reopened", "count": 1, "percent": 6.3},
+    {"status": "closed", "count": 4, "percent": 25.0},
+    {"status": "invalid", "count": 0, "percent": 0.0},
+    {"status": "on_hold", "count": 2, "percent": 12.5}
   ],
   "by_priority": [
     {"priority": "high", "count": 4, "percent": 25.0},
@@ -535,21 +586,21 @@ item, the endpoint returns up to 7):
     {"tag_id": "01a14cf2-1d74-715f-a7de-0ff8d2d01eb6", "name": "UI", "color": "blue", "count": 2, "is_other": false},
     {"tag_id": null, "name": "Others", "color": null, "count": 1, "is_other": true}
   ],
-  "trend": [
-    {"date": "2026-09-17", "open": 6, "hold": 2, "in_progress": 1, "reopen": 0, "closed": 0, "total": 9},
-    {"date": "2026-09-18", "open": 6, "hold": 2, "in_progress": 2, "reopen": 0, "closed": 0, "total": 10},
-    {"date": "2026-09-19", "open": 6, "hold": 2, "in_progress": 2, "reopen": 0, "closed": 0, "total": 10},
-    {"date": "2026-09-20", "open": 7, "hold": 2, "in_progress": 2, "reopen": 0, "closed": 0, "total": 11},
-    {"date": "2026-09-21", "open": 6, "hold": 2, "in_progress": 3, "reopen": 0, "closed": 0, "total": 11},
-    {"date": "2026-09-22", "open": 7, "hold": 2, "in_progress": 3, "reopen": 0, "closed": 0, "total": 12},
-    {"date": "2026-09-23", "open": 6, "hold": 2, "in_progress": 3, "reopen": 0, "closed": 1, "total": 12},
-    {"date": "2026-09-24", "open": 7, "hold": 2, "in_progress": 3, "reopen": 0, "closed": 1, "total": 13},
-    {"date": "2026-09-25", "open": 7, "hold": 2, "in_progress": 3, "reopen": 1, "closed": 0, "total": 13},
-    {"date": "2026-09-26", "open": 7, "hold": 2, "in_progress": 3, "reopen": 1, "closed": 1, "total": 14},
-    {"date": "2026-09-27", "open": 6, "hold": 2, "in_progress": 4, "reopen": 1, "closed": 1, "total": 14},
-    {"date": "2026-09-28", "open": 6, "hold": 2, "in_progress": 4, "reopen": 1, "closed": 2, "total": 15},
-    {"date": "2026-09-29", "open": 6, "hold": 2, "in_progress": 3, "reopen": 1, "closed": 3, "total": 15},
-    {"date": "2026-09-30", "open": 6, "hold": 2, "in_progress": 3, "reopen": 1, "closed": 4, "total": 16}
+  "trend": [  // every point also carries requirement_pending, clarification_required, blocked, ready_for_ba_review and invalid (all 0 here, left out for brevity)
+    {"date": "2026-09-17", "open": 6, "in_progress": 1, "on_hold": 2, "reopened": 0, "closed": 0, "total": 9},
+    {"date": "2026-09-18", "open": 6, "in_progress": 2, "on_hold": 2, "reopened": 0, "closed": 0, "total": 10},
+    {"date": "2026-09-19", "open": 6, "in_progress": 2, "on_hold": 2, "reopened": 0, "closed": 0, "total": 10},
+    {"date": "2026-09-20", "open": 7, "in_progress": 2, "on_hold": 2, "reopened": 0, "closed": 0, "total": 11},
+    {"date": "2026-09-21", "open": 6, "in_progress": 3, "on_hold": 2, "reopened": 0, "closed": 0, "total": 11},
+    {"date": "2026-09-22", "open": 7, "in_progress": 3, "on_hold": 2, "reopened": 0, "closed": 0, "total": 12},
+    {"date": "2026-09-23", "open": 6, "in_progress": 3, "on_hold": 2, "reopened": 0, "closed": 1, "total": 12},
+    {"date": "2026-09-24", "open": 7, "in_progress": 3, "on_hold": 2, "reopened": 0, "closed": 1, "total": 13},
+    {"date": "2026-09-25", "open": 7, "in_progress": 3, "on_hold": 2, "reopened": 1, "closed": 0, "total": 13},
+    {"date": "2026-09-26", "open": 7, "in_progress": 3, "on_hold": 2, "reopened": 1, "closed": 1, "total": 14},
+    {"date": "2026-09-27", "open": 6, "in_progress": 4, "on_hold": 2, "reopened": 1, "closed": 1, "total": 14},
+    {"date": "2026-09-28", "open": 6, "in_progress": 4, "on_hold": 2, "reopened": 1, "closed": 2, "total": 15},
+    {"date": "2026-09-29", "open": 6, "in_progress": 3, "on_hold": 2, "reopened": 1, "closed": 3, "total": 15},
+    {"date": "2026-09-30", "open": 6, "in_progress": 3, "on_hold": 2, "reopened": 1, "closed": 4, "total": 16}
   ],
   "top_assignees": [
     {"user_id": null, "full_name": "Unassigned", "count": 5},
@@ -682,7 +733,9 @@ created with every practice (existing practices got it from migration `015`). Se
 # Types at a glance
 
 ```ts
-type TicketStatus = 'open' | 'hold' | 'in_progress' | 'reopen' | 'closed'
+type TicketStatus =
+  | 'open' | 'in_progress' | 'requirement_pending' | 'clarification_required' | 'blocked'
+  | 'ready_for_ba_review' | 'reopened' | 'closed' | 'invalid' | 'on_hold'
 type TicketPriority = 'high' | 'medium' | 'low' | 'not_set'
 type TagColor = 'violet' | 'blue' | 'green' | 'red' | 'orange' | 'grey'
 

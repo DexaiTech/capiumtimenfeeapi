@@ -28,6 +28,7 @@ from app.schemas.tickets import (
     TicketSort,
     TicketStatus,
     TicketUpdate,
+    TimelineEvent,
 )
 from app.services import policy
 from app.services.attachment_files import MAX_UPLOAD_BODY_BYTES, AttachmentTooLargeError
@@ -36,6 +37,7 @@ from app.services.storage import FileStorage, get_storage
 from app.services.ticket_attachments import TicketAttachmentService
 from app.services.ticket_comments import TicketCommentService
 from app.services.ticket_dashboard import TicketDashboardService
+from app.services.ticket_timeline import TicketTimelineService
 from app.services.tickets import TicketListQuery, TicketService
 from app.utils.multipart import FormPart, parse_form_data
 
@@ -73,6 +75,11 @@ def get_dashboard_service(session: SessionDep) -> TicketDashboardService:
     return TicketDashboardService(session)
 
 
+def get_timeline_service(session: SessionDep) -> TicketTimelineService:
+    return TicketTimelineService(session)
+
+
+TimelineServiceDep = Annotated[TicketTimelineService, Depends(get_timeline_service)]
 TicketServiceDep = Annotated[TicketService, Depends(get_ticket_service)]
 CommentServiceDep = Annotated[TicketCommentService, Depends(get_comment_service)]
 AttachmentServiceDep = Annotated[TicketAttachmentService, Depends(get_attachment_service)]
@@ -137,11 +144,11 @@ def _content_disposition(disposition: str, file_name: str) -> str:
     description=(
         "Figures for the tickets created in the range (the practice's calendar days; "
         "`date_from`/`date_to` default to the last 19 days ending today; at most 366 days, "
-        "422 otherwise): the six KPI cards (`total`, `open`, `hold`, `in_progress`, `reopen`, "
-        "`closed`) each with the count, the count for the period of the same length just "
-        "before the range and the `change` (`new` when that was 0 and now it is not, a whole "
-        "`percent` otherwise, `none` when both are 0); tickets by status, by priority and by "
-        "tag (the seven most used, then `Others`: the tickets with any other tag, each once); "
+        "422 otherwise): the KPI cards (`total` and one per status) each with the count, "
+        "the count for the period of the same length just before the range and the `change` "
+        "(`new` when that was 0 and now it is not, a whole `percent` otherwise, `none` when "
+        "both are 0); tickets by status, by priority and by tag (the seven most used, then "
+        "`Others`: the tickets with any other tag, each once); "
         "the status trend of the 14 days ending on `date_to` (each ticket of the range in the "
         "status it had at the end of the day, from the status history); the top assignees "
         "with an `Unassigned` row; and the seven newest tickets. Requires `ticket.read`."
@@ -204,7 +211,7 @@ async def list_tickets(
     ] = None,
     statuses: Annotated[
         list[TicketStatus] | None,
-        Query(alias="status", max_length=5, description="Status; repeat for several"),
+        Query(alias="status", max_length=10, description="Status; repeat for several"),
     ] = None,
     priorities: Annotated[
         list[TicketPriority] | None,
@@ -295,6 +302,27 @@ async def update_ticket(
 
 
 # --- Comments ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/tickets/{ticket_id}/timeline",
+    summary="A ticket's timeline",
+    description=(
+        "What happened to the ticket, newest first, cursor-paginated: it was created, its "
+        "status, priority, assignee, tags, subject or description changed, a comment was added, "
+        "edited or deleted, a file was added or removed. Each event names who did it and when; "
+        "`before` and `after` carry the old and new status, priority, assignee or subject, "
+        "`added`/`removed` the tags. Read from the audit log, so a ticket changed before the "
+        "audit existed has no history; one change of several fields is several events. "
+        "Requires `ticket.read` (not `audit_log.read`)."
+    ),
+    responses=error_responses(403, 404),
+)
+async def ticket_timeline(
+    ticket_id: uuid.UUID, org: TicketViewer, service: TimelineServiceDep, page: PageParamsDep
+) -> ApiResponse[list[TimelineEvent]]:
+    result = await service.timeline(org, ticket_id, page)
+    return ok_page(result.items, result.next_cursor)
 
 
 @router.get(

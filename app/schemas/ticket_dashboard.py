@@ -30,10 +30,15 @@ class Kpi(BaseModel):
 class Kpis(BaseModel):
     total: Kpi
     open: Kpi
-    hold: Kpi
     in_progress: Kpi
-    reopen: Kpi
+    requirement_pending: Kpi
+    clarification_required: Kpi
+    blocked: Kpi
+    ready_for_ba_review: Kpi
+    reopened: Kpi
     closed: Kpi
+    invalid: Kpi
+    on_hold: Kpi
 
 
 class StatusCount(BaseModel):
@@ -66,10 +71,15 @@ class TagCount(BaseModel):
 class TrendPoint(BaseModel):
     date: dt.date
     open: int
-    hold: int
     in_progress: int
-    reopen: int
+    requirement_pending: int
+    clarification_required: int
+    blocked: int
+    ready_for_ba_review: int
+    reopened: int
     closed: int
+    invalid: int
+    on_hold: int
     total: int = Field(description="Tickets of the range that existed at the end of the day")
 
 

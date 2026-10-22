@@ -94,7 +94,12 @@ class TicketCommentService:
                 "ticket_comment.created",
                 "ticket_comment",
                 comment.id,
-                {"ticket_id": str(ticket_id), "code": code, "attachments": len(loose)},
+                {
+                    "ticket_id": str(ticket_id),
+                    "code": code,
+                    "attachments": len(loose),
+                    "excerpt": audit_excerpt(data.body[:200] or None),
+                },
             )
             [result] = await self.reader.comments(org_id, [comment])
         return result

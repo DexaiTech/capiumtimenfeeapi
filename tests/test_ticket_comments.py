@@ -59,7 +59,12 @@ async def test_add_a_comment(client):
     [entry] = await audit_entries(t.id, "ticket_comment.created")
     assert entry["target_type"] == "ticket_comment" and entry["target_id"] == data["id"]
     assert entry["actor_user_id"] == str(staff.id)
-    assert entry["metadata"] == {"ticket_id": ticket["id"], "code": "APT1", "attachments": 0}
+    assert entry["metadata"] == {
+        "ticket_id": ticket["id"],
+        "code": "APT1",
+        "attachments": 0,
+        "excerpt": "Reproduced on the staging site.\nSecond line",
+    }
 
     shown = ok_data(await client.get(ticket_url(t.org, ticket["id"]), headers=t.owner.headers))
     assert shown["comment_count"] == 1

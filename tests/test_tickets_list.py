@@ -46,14 +46,14 @@ async def seeded(client):
             1002,
             2,
             "beta report slow",
-            "hold",
+            "on_hold",
             "medium",
             bob,
             ["Reporting", "Bug"],
             "Slow when exporting the TRIAL BALANCE",
         ),
         1003: await make(1003, 3, "Gamma 100% wrong", "in_progress", "low", None, ["Accounts"]),
-        1004: await make(1004, 4, "delta_under score", "reopen", "not_set", alice, []),
+        1004: await make(1004, 4, "delta_under score", "reopened", "not_set", alice, []),
         1005: await make(
             1005, 5, "Epsilon trial balance", "closed", "high", None, ["Trial Balance"]
         ),
@@ -85,8 +85,8 @@ BY_NUMBER = [1001, 1002, 1003, 1004, 1005]
         ("code", "desc", BY_NUMBER[::-1]),
         ("subject", None, [1001, 1002, 1004, 1005, 1003]),
         ("subject", "desc", [1003, 1005, 1004, 1002, 1001]),
-        ("status", None, [1005, 1002, 1003, 1001, 1004]),
-        ("status", "desc", [1004, 1001, 1003, 1002, 1005]),
+        ("status", None, [1005, 1003, 1002, 1001, 1004]),
+        ("status", "desc", [1004, 1001, 1002, 1003, 1005]),
     ],
 )
 async def test_sorting(client, sort, order, expected):
@@ -242,8 +242,8 @@ async def test_a_good_cursor_continues_where_it_left_off(client):
 async def test_filter_by_status_and_priority(client):
     t, *_ = await seeded(client)
     assert await numbers(client, t, status="open") == [1001]
-    assert await numbers(client, t, status=["open", "hold"]) == [1002, 1001]
-    assert await numbers(client, t, status=["open", "closed", "reopen"]) == [1005, 1004, 1001]
+    assert await numbers(client, t, status=["open", "on_hold"]) == [1002, 1001]
+    assert await numbers(client, t, status=["open", "closed", "reopened"]) == [1005, 1004, 1001]
     assert await numbers(client, t, priority="high") == [1005, 1001]
     assert await numbers(client, t, priority=["low", "not_set"]) == [1004, 1003]
     assert await numbers(client, t, status="closed", priority="high") == [1005]
@@ -271,7 +271,7 @@ async def test_filter_by_assignee(client):
     assert await numbers(client, t, assignee_id=str(bob.id)) == [1002]
     assert await numbers(client, t, unassigned="true") == [1005, 1003]
     assert await numbers(client, t, assignee_id=str(uuid.uuid4())) == []
-    assert await numbers(client, t, assignee_id=str(alice.id), status="reopen") == [1004]
+    assert await numbers(client, t, assignee_id=str(alice.id), status="reopened") == [1004]
 
 
 async def test_filter_by_created_dates_is_inclusive(client):
@@ -347,7 +347,7 @@ async def test_search_treats_wildcards_and_quotes_as_plain_text(client):
         {"limit": 101},
         {"limit": "ten"},
         {"q": "x" * 201},
-        {"status": ["open"] * 6},
+        {"status": ["open"] * 11},
     ],
 )
 async def test_list_parameter_validation(client, params):

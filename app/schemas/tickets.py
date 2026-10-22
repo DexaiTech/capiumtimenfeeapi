@@ -15,7 +15,18 @@ from app.schemas.common import RequestModel
 from app.schemas.settings import blank_is_null, reject_nulls
 from app.utils.rich_text import html_to_text, sanitize_html
 
-TicketStatus = Literal["open", "hold", "in_progress", "reopen", "closed"]
+TicketStatus = Literal[
+    "open",
+    "in_progress",
+    "requirement_pending",
+    "clarification_required",
+    "blocked",
+    "ready_for_ba_review",
+    "reopened",
+    "closed",
+    "invalid",
+    "on_hold",
+]
 TicketPriority = Literal["high", "medium", "low", "not_set"]
 TagColor = Literal["violet", "blue", "green", "red", "orange", "grey"]
 BulkActionName = Literal["set_status", "set_priority", "add_tag", "remove_tag"]
@@ -397,3 +408,42 @@ __all__ = [
     "TicketStatus",
     "TicketUpdate",
 ]
+
+
+TimelineKind = Literal[
+    "created",
+    "status_changed",
+    "priority_changed",
+    "assignee_changed",
+    "tags_changed",
+    "subject_changed",
+    "description_changed",
+    "comment_added",
+    "comment_edited",
+    "comment_deleted",
+    "file_added",
+    "file_removed",
+]
+
+
+class TimelineEvent(BaseModel):
+    """One thing that happened to a ticket, read from the audit log."""
+
+    id: str = Field(description="Stable id of the event (an entry can hold several changes)")
+    kind: TimelineKind
+    at: datetime
+    actor: TicketPerson | None = Field(description="Who did it; null for the system")
+    before: str | None = Field(
+        description=(
+            "What it was: a status or priority code, a person's name (`Unassigned` for none) "
+            "or the old subject. Null when the event has no before."
+        )
+    )
+    after: str | None = Field(description="What it became (same forms as `before`)")
+    added: list[str] = Field(description="Tags added (`tags_changed`)")
+    removed: list[str] = Field(description="Tags removed (`tags_changed`)")
+    detail: str | None = Field(
+        description="An excerpt of the comment, or the name of the file; null otherwise"
+    )
+    comment_id: uuid.UUID | None = Field(description="The comment the event is about, if any")
+    bulk: bool = Field(description="True when it came from a bulk action on several tickets")

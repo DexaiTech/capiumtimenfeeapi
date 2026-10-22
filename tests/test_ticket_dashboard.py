@@ -21,7 +21,22 @@ from tests.ticket_helpers import (
 )
 from tests.time_helpers import ok_data
 
-STATUSES = ["open", "hold", "in_progress", "reopen", "closed"]
+# The five statuses the fixed dataset moves through, in the order of its hand-worked tuples.
+STATUSES = ["open", "on_hold", "in_progress", "reopened", "closed"]
+# Every status, in the order the API lists them; the dataset never uses the others.
+ALL_STATUSES = [
+    "open",
+    "in_progress",
+    "requirement_pending",
+    "clarification_required",
+    "blocked",
+    "ready_for_ba_review",
+    "reopened",
+    "closed",
+    "invalid",
+    "on_hold",
+]
+UNUSED = [s for s in ALL_STATUSES if s not in STATUSES]
 RANGE = {"date_from": "2026-09-01", "date_to": "2026-09-30"}
 
 
@@ -50,11 +65,11 @@ async def practice_today(zone="Europe/London") -> date:
 
 # The steps each September ticket took after it was created ``open``, as (status, when).
 SEP_STEPS = {
-    7: [("hold", utc(2026, 9, 13))],
-    8: [("hold", utc(2026, 9, 15))],
+    7: [("on_hold", utc(2026, 9, 13))],
+    8: [("on_hold", utc(2026, 9, 15))],
     9: [("in_progress", utc(2026, 9, 17))],
     11: [("in_progress", utc(2026, 9, 21))],
-    12: [("closed", utc(2026, 9, 23)), ("reopen", utc(2026, 9, 25))],
+    12: [("closed", utc(2026, 9, 23)), ("reopened", utc(2026, 9, 25))],
     13: [("closed", utc(2026, 9, 26))],
     14: [("in_progress", utc(2026, 9, 27)), ("closed", utc(2026, 9, 29))],
     16: [("closed", utc(2026, 9, 30, 18))],
@@ -135,8 +150,8 @@ AUG_CREATED = [
     (utc(2026, 8, 18), "in_progress"),
     (utc(2026, 8, 20), "in_progress"),
     (utc(2026, 8, 22), "in_progress"),
-    (utc(2026, 8, 25), "reopen"),
-    (utc(2026, 8, 28), "reopen"),
+    (utc(2026, 8, 25), "reopened"),
+    (utc(2026, 8, 28), "reopened"),
     (utc(2026, 8, 31, 12), "closed"),
 ]
 # Outside both periods: a minute before the previous period starts (London), the very instant
@@ -198,10 +213,11 @@ async def build_dataset(client):
 EXPECTED_KPIS = {
     "total": kpi(16, 10, "percent", 60),
     "open": kpi(6, 4, "percent", 50),
-    "hold": kpi(2, 0, "new"),
+    "on_hold": kpi(2, 0, "new"),
     "in_progress": kpi(3, 3, "percent", 0),
-    "reopen": kpi(1, 2, "percent", -50),
+    "reopened": kpi(1, 2, "percent", -50),
     "closed": kpi(4, 1, "percent", 300),
+    **{status: kpi(0, 0, "none") for status in UNUSED},
 }
 # The status each of the 16 tickets had at the end of each of the last 14 days (17-30 September),
 # worked out by hand from the steps above: (open, hold, in_progress, reopen, closed).
@@ -237,12 +253,16 @@ async def test_the_whole_dashboard_on_the_fixed_dataset(client):
     assert data["kpis"] == EXPECTED_KPIS
 
     # Tickets by status: counts and the share to one decimal, half up (18.75 -> 18.8, 6.25 -> 6.3).
+    shares = {
+        "open": (6, 37.5),
+        "on_hold": (2, 12.5),
+        "in_progress": (3, 18.8),
+        "reopened": (1, 6.3),
+        "closed": (4, 25.0),
+    }
     assert data["by_status"] == [
-        {"status": "open", "count": 6, "percent": 37.5},
-        {"status": "hold", "count": 2, "percent": 12.5},
-        {"status": "in_progress", "count": 3, "percent": 18.8},
-        {"status": "reopen", "count": 1, "percent": 6.3},
-        {"status": "closed", "count": 4, "percent": 25.0},
+        {"status": s, "count": shares.get(s, (0, 0.0))[0], "percent": shares.get(s, (0, 0.0))[1]}
+        for s in ALL_STATUSES
     ]
 
     # By priority: always the four, in the order of the bars.
@@ -299,7 +319,7 @@ async def test_the_whole_dashboard_on_the_fixed_dataset(client):
         assert point["total"] == sum(expected.values())
     # On the last day every ticket of the range is in its current status.
     last = data["trend"][-1]
-    assert {s: last[s] for s in STATUSES} == {
+    assert {s: last[s] for s in ALL_STATUSES} == {
         row["status"]: row["count"] for row in data["by_status"]
     }
     assert last["total"] == data["kpis"]["total"]["value"] == 16
@@ -378,13 +398,13 @@ async def test_every_kind_of_change_comes_through_the_api(client):
     tickets = [
         ((8, 5), "open"),
         ((8, 6), "open"),
-        ((8, 7), "hold"),
+        ((8, 7), "on_hold"),
         ((9, 2), "open"),
         ((9, 3), "open"),
         ((9, 4), "open"),
         ((9, 5), "closed"),
         ((9, 6), "closed"),
-        ((9, 7), "reopen"),
+        ((9, 7), "reopened"),
     ]
     for number, (day, status) in enumerate(tickets, start=1):
         created = utc(2026, *day)
@@ -393,10 +413,11 @@ async def test_every_kind_of_change_comes_through_the_api(client):
     assert data["kpis"] == {
         "total": kpi(6, 3, "percent", 100),
         "open": kpi(3, 2, "percent", 50),
-        "hold": kpi(0, 1, "percent", -100),
+        "on_hold": kpi(0, 1, "percent", -100),
         "in_progress": kpi(0, 0, "none"),
-        "reopen": kpi(1, 0, "new"),
+        "reopened": kpi(1, 0, "new"),
         "closed": kpi(2, 0, "new"),
+        **{status: kpi(0, 0, "none") for status in UNUSED},
     }
 
 
@@ -405,8 +426,8 @@ async def test_an_empty_range_is_all_zeros_and_nulls(client):
     await make_ticket(client, t.owner, t.org, "Created today, outside the range")
     data = await get_dashboard(client, t, date_from="2020-01-01", date_to="2020-01-31")
     assert set(data) == DASHBOARD_KEYS and data["days"] == 31
-    assert data["kpis"] == {name: kpi(0, 0, "none") for name in ("total", *STATUSES)}
-    assert data["by_status"] == [{"status": s, "count": 0, "percent": None} for s in STATUSES]
+    assert data["kpis"] == {name: kpi(0, 0, "none") for name in ("total", *ALL_STATUSES)}
+    assert data["by_status"] == [{"status": s, "count": 0, "percent": None} for s in ALL_STATUSES]
     assert [(p["priority"], p["count"], p["percent"]) for p in data["by_priority"]] == [
         ("high", 0, None),
         ("medium", 0, None),
@@ -415,7 +436,7 @@ async def test_an_empty_range_is_all_zeros_and_nulls(client):
     ]
     assert data["by_tag"] == [] and data["top_assignees"] == [] and data["recent"] == []
     assert len(data["trend"]) == 14
-    assert all(p[s] == 0 for p in data["trend"] for s in (*STATUSES, "total"))
+    assert all(p[s] == 0 for p in data["trend"] for s in (*ALL_STATUSES, "total"))
     assert data["trend"][-1]["date"] == "2020-01-31"
 
 
@@ -500,10 +521,11 @@ async def test_days_are_the_practices_calendar_days(client):
     assert auckland["kpis"] == {
         "total": kpi(16, 10, "percent", 60),
         "open": kpi(6, 5, "percent", 20),
-        "hold": kpi(2, 0, "new"),
+        "on_hold": kpi(2, 0, "new"),
         "in_progress": kpi(3, 3, "percent", 0),
-        "reopen": kpi(1, 2, "percent", -50),
+        "reopened": kpi(1, 2, "percent", -50),
         "closed": kpi(4, 0, "new"),
+        **{status: kpi(0, 0, "none") for status in UNUSED},
     }
     assert [i["number"] for i in auckland["recent"]] == [15, 14, 13, 12, 11, 10, 9]
 
@@ -528,7 +550,7 @@ async def test_the_trend_changes_day_at_the_practices_midnight(client):
         created_at=utc(2026, 9, 12, 8),
         timeline=[
             ("open", utc(2026, 9, 12, 8)),
-            ("hold", utc(2026, 9, 12, 9)),
+            ("on_hold", utc(2026, 9, 12, 9)),
             ("in_progress", utc(2026, 9, 12, 10)),
         ],
         number=3,
@@ -553,7 +575,7 @@ async def test_a_ticket_that_was_closed_and_reopened_shows_both_in_the_trend(cli
         timeline=[
             ("open", utc(2026, 9, 2)),
             ("closed", utc(2026, 9, 4)),
-            ("reopen", utc(2026, 9, 6)),
+            ("reopened", utc(2026, 9, 6)),
             ("closed", utc(2026, 9, 8)),
         ],
         number=1,
@@ -562,9 +584,10 @@ async def test_a_ticket_that_was_closed_and_reopened_shows_both_in_the_trend(cli
     by_day = {p["date"][-2:]: [s for s in STATUSES if p[s]] for p in data["trend"]}
     assert by_day["01"] == [] and by_day["02"] == ["open"] and by_day["03"] == ["open"]
     assert by_day["04"] == ["closed"] and by_day["05"] == ["closed"]
-    assert by_day["06"] == ["reopen"] and by_day["07"] == ["reopen"]
+    assert by_day["06"] == ["reopened"] and by_day["07"] == ["reopened"]
     assert by_day["08"] == ["closed"] and by_day["14"] == ["closed"]
-    assert data["by_status"][4]["count"] == 1  # closed now
+    closed = next(row for row in data["by_status"] if row["status"] == "closed")
+    assert closed["count"] == 1  # closed now
     # Only tickets created in the range are in it: the same ticket seen from October.
     later = await get_dashboard(client, t, date_from="2026-10-01", date_to="2026-10-14")
     assert all(p["total"] == 0 for p in later["trend"]) and later["kpis"]["total"]["value"] == 0
@@ -574,14 +597,14 @@ async def test_the_trend_ends_where_the_figures_stand_when_the_range_ends_today(
     t = await new_team(client)
     staff = await t.member("staff")
     a = await make_ticket(client, t.owner, t.org, "A")
-    await make_ticket(client, t.owner, t.org, "B", status="hold")
+    await make_ticket(client, t.owner, t.org, "B", status="on_hold")
     c = await make_ticket(client, staff, t.org, "C")
     d = await make_ticket(client, staff, t.org, "D", priority="high")
     moves = [
         (a["id"], "closed"),
         (c["id"], "in_progress"),
         (d["id"], "closed"),
-        (d["id"], "reopen"),
+        (d["id"], "reopened"),
     ]
     for ticket_id, status in moves:
         patched = await client.patch(
@@ -591,11 +614,17 @@ async def test_the_trend_ends_where_the_figures_stand_when_the_range_ends_today(
 
     data = await get_dashboard(client, t)  # the default range ends today
     counts = {row["status"]: row["count"] for row in data["by_status"]}
-    assert counts == {"open": 0, "hold": 1, "in_progress": 1, "reopen": 1, "closed": 1}
+    assert counts == {
+        **dict.fromkeys(ALL_STATUSES, 0),
+        "on_hold": 1,
+        "in_progress": 1,
+        "reopened": 1,
+        "closed": 1,
+    }
     last = data["trend"][-1]
-    assert {s: last[s] for s in STATUSES} == counts and last["total"] == 4
+    assert {s: last[s] for s in ALL_STATUSES} == counts and last["total"] == 4
     assert data["kpis"]["total"] == kpi(4, 0, "new")
-    assert [data["kpis"][s]["value"] for s in STATUSES] == [0, 1, 1, 1, 1]
+    assert {s: data["kpis"][s]["value"] for s in ALL_STATUSES} == counts
     # Nothing existed on the days before today.
     assert all(p["total"] == 0 for p in data["trend"][:-1])
     assert [row["count"] for row in data["by_priority"]] == [1, 0, 0, 3]

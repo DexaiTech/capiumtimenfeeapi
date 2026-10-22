@@ -38,7 +38,18 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, IdMixin, OrgScopedMixin, TimestampMixin
 
-TICKET_STATUSES = ("open", "hold", "in_progress", "reopen", "closed")
+TICKET_STATUSES = (
+    "open",
+    "in_progress",
+    "requirement_pending",
+    "clarification_required",
+    "blocked",
+    "ready_for_ba_review",
+    "reopened",
+    "closed",
+    "invalid",
+    "on_hold",
+)
 TICKET_PRIORITIES = ("high", "medium", "low", "not_set")
 TICKET_CATEGORIES = ("application",)
 TAG_COLORS = ("violet", "blue", "green", "red", "orange", "grey")

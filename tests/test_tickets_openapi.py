@@ -3,6 +3,18 @@ built from."""
 
 from tests.ticket_helpers import DASHBOARD_KEYS, DETAIL_KEYS, ITEM_KEYS
 
+STATUSES = [
+    "open",
+    "in_progress",
+    "requirement_pending",
+    "clarification_required",
+    "blocked",
+    "ready_for_ba_review",
+    "reopened",
+    "closed",
+    "invalid",
+    "on_hold",
+]
 PREFIX = "/api/v1/organizations/{organization_id}"
 EXPECTED = {
     ("get", "/tickets"): "Tickets",
@@ -11,6 +23,7 @@ EXPECTED = {
     ("post", "/tickets/bulk"): "Tickets",
     ("get", "/tickets/{ticket_id}"): "Tickets",
     ("patch", "/tickets/{ticket_id}"): "Tickets",
+    ("get", "/tickets/{ticket_id}/timeline"): "Tickets",
     ("get", "/tickets/{ticket_id}/comments"): "Tickets",
     ("post", "/tickets/{ticket_id}/comments"): "Tickets",
     ("patch", "/tickets/{ticket_id}/comments/{comment_id}"): "Tickets",
@@ -102,22 +115,12 @@ async def test_the_response_shapes_are_the_documented_ones(client):
     assert set(models["TicketDetail"]["properties"]) == DETAIL_KEYS
     assert set(models["Kpis"]["properties"]) == {
         "total",
-        "open",
-        "hold",
-        "in_progress",
-        "reopen",
-        "closed",
+        *STATUSES,
     }
     assert set(models["Kpi"]["properties"]) == {"value", "previous", "change"}
     assert set(models["Change"]["properties"]) == {"kind", "percent"}
     assert models["Change"]["properties"]["kind"]["enum"] == ["new", "percent", "none"]
-    assert models["TicketListItem"]["properties"]["status"]["enum"] == [
-        "open",
-        "hold",
-        "in_progress",
-        "reopen",
-        "closed",
-    ]
+    assert models["TicketListItem"]["properties"]["status"]["enum"] == STATUSES
     assert models["TicketListItem"]["properties"]["priority"]["enum"] == [
         "high",
         "medium",

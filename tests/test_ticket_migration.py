@@ -149,3 +149,45 @@ async def test_existing_practices_get_the_sequence_the_tags_and_the_permissions(
     assert (
         again.returncode == 0 and (await sql("SELECT count(*) AS n FROM ticket_tags"))[0]["n"] == 14
     )
+
+
+async def test_the_status_migration_renames_and_the_way_down_is_lossy_but_valid(client):
+    t = await new_team(client)
+    statuses = ["on_hold", "reopened", "invalid", "blocked", "closed", "open"]
+    made = {}
+    for status in statuses:
+        made[status] = await make_ticket(client, t.owner, t.org, f"In {status}", status=status)
+    try:
+        down = await migrate("downgrade", "048")
+        assert down.returncode == 0, down.stderr
+        rows = await sql("SELECT subject, status, closed_at IS NOT NULL AS closed FROM tickets")
+        old = {row["subject"]: (row["status"], row["closed"]) for row in rows}
+        assert old == {
+            "In on_hold": ("hold", False),
+            "In reopened": ("reopen", False),
+            "In invalid": ("closed", True),
+            "In blocked": ("in_progress", False),
+            "In closed": ("closed", True),
+            "In open": ("open", False),
+        }
+        history = await sql("SELECT DISTINCT to_status FROM ticket_status_history")
+        assert {row["to_status"] for row in history} == {
+            "hold",
+            "reopen",
+            "closed",
+            "in_progress",
+            "open",
+        }
+    finally:
+        up = await migrate("upgrade", "head")
+    assert up.returncode == 0, up.stderr
+    # Up again: the old names become the new ones (what was lost stays lost).
+    rows = await sql("SELECT subject, status FROM tickets")
+    assert {row["subject"]: row["status"] for row in rows} == {
+        "In on_hold": "on_hold",
+        "In reopened": "reopened",
+        "In invalid": "closed",
+        "In blocked": "in_progress",
+        "In closed": "closed",
+        "In open": "open",
+    }

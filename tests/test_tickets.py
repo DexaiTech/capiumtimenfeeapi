@@ -52,12 +52,12 @@ async def test_create_a_full_ticket(client):
         t.org,
         "Trial balance does not agree",
         description="Line one\r\nLine two",
-        status="hold",
+        status="on_hold",
         priority="high",
         tag_ids=[reporting, bug, bug],
         assignee_id=str(staff.id),
     )
-    assert (data["status"], data["priority"]) == ("hold", "high")
+    assert (data["status"], data["priority"]) == ("on_hold", "high")
     assert data["description"] == "Line one\nLine two"
     assert [tag["name"] for tag in data["tags"]] == ["Bug", "Reporting"]
     assert data["tags"][0] == {"id": bug, "name": "Bug", "color": "red"}
@@ -252,9 +252,11 @@ async def test_patch_status_writes_history_and_closed_at(client):
     url = ticket_url(t.org, ticket["id"])
     closed = ok_data(await client.patch(url, headers=t.owner.headers, json={"status": "closed"}))
     assert closed["status"] == "closed" and closed["closed_at"] is not None
-    reopened = ok_data(await client.patch(url, headers=t.owner.headers, json={"status": "reopen"}))
-    assert reopened["status"] == "reopen" and reopened["closed_at"] is None
-    ok_data(await client.patch(url, headers=t.owner.headers, json={"status": "reopen"}))  # no-op
+    reopened = ok_data(
+        await client.patch(url, headers=t.owner.headers, json={"status": "reopened"})
+    )
+    assert reopened["status"] == "reopened" and reopened["closed_at"] is None
+    ok_data(await client.patch(url, headers=t.owner.headers, json={"status": "reopened"}))  # no-op
 
     history = await sql(
         "SELECT from_status, to_status, changed_by FROM ticket_status_history "
@@ -264,14 +266,14 @@ async def test_patch_status_writes_history_and_closed_at(client):
     assert [(h["from_status"], h["to_status"]) for h in history] == [
         (None, "open"),
         ("open", "closed"),
-        ("closed", "reopen"),
+        ("closed", "reopened"),
     ]
     assert {str(h["changed_by"]) for h in history} == {str(t.owner.id)}
 
     changed = await audit_entries(t.id, "ticket.status_changed")
     assert [(e["metadata"]["from"], e["metadata"]["to"]) for e in changed] == [
         ("open", "closed"),
-        ("closed", "reopen"),
+        ("closed", "reopened"),
     ]
     assert changed[0]["metadata"]["changes"] == {"status": ["open", "closed"]}
     assert await audit_entries(t.id, "ticket.updated") == []
