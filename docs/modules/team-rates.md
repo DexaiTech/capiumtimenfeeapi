@@ -36,6 +36,7 @@ schema is `/openapi.json`; every route there has a summary, a description and it
 | GET | `/staff/{staff_id}` | `member.read` |
 | PATCH | `/staff/{staff_id}` | `member.update` |
 | DELETE | `/staff/{staff_id}` | `member.remove` |
+| POST | `/staff/bulk` | `member.update` (`deactivate` and `delete`: `member.remove`) |
 | POST | `/staff/{staff_id}/deactivate` | `member.remove` |
 | POST | `/staff/{staff_id}/reactivate` | `member.update` |
 | POST | `/staff/{staff_id}/invite` | `member.invite` |
@@ -150,6 +151,11 @@ Permission `member.invite`. Creates a staff member **without a login**. Response
 | `chargeable_target_bp` | int 0–10000 | no | Default: the grade's `default_chargeable_target_bp`, else 7500. |
 | `leaving_date` | date | no | Not before `start_date` (422). |
 | `role_id` | uuid | no | The role they get once they have a login. Default: the Staff role. 422 when unknown. |
+| `cost_rate` | integer pence/hour | no | Also creates the person's own **cost** rate (a `staff`-level rule) from `rate_effective_from`. Needs `rate.manage` besides `member.invite` (403 otherwise, and nothing is created). |
+| `charge_rate` | integer pence/hour | no | Same for the person's own **charge-out** rate. |
+| `rate_effective_from` | date | no | When those rates start; default `start_date`. A date in the future leaves the grade or practice default in force until then. |
+
+The person and their rates are written in **one transaction**; each rate writes the usual `rate.created` audit entry and a rate-history row (source `staff_rates`).
 
 `weekly_capacity_minutes` = `working_minutes_per_day` × number of working days (used by the utilisation
 reports). Example response (shortened, see `StaffDetail`):
@@ -193,6 +199,26 @@ Permission `member.update`. Every field optional; send only what changes. Respon
   another practice.
 * 409 `STAFF_CODE_TAKEN`, `STAFF_EMAIL_TAKEN`, `INITIALS_TAKEN` for duplicates; 422 for unknown ids.
 * Their **role** and V1 status are changed with `PATCH /members/{user_id}` (`member.update`).
+
+## POST /staff/bulk
+
+Permission `member.update`; `deactivate` and `delete` also need `member.remove` (403 otherwise). One action on 1-200 staff members
+(`staff_ids`, duplicates ignored), all or nothing. Body: `{"staff_ids": [...], "action": ..., "value": ..., "leaving_date": ...}`.
+
+| `action` | `value` | What it does |
+|---|---|---|
+| `set_grade` | grade id | `PATCH /staff/{id}` with that grade |
+| `set_approver` | staff id (someone who can sign in) | `PATCH` with that approver |
+| `clear_approver` | none | `PATCH` with `approver_id: null` |
+| `deactivate` | `inactive` (default) or `left` | as `POST /staff/{id}/deactivate`; `left` takes an optional `leaving_date` (default today) |
+| `reactivate` | none | as `POST /staff/{id}/reactivate` |
+| `delete` | none | as `DELETE /staff/{id}` |
+
+Each person goes through the **same service call** as the single endpoint, so every rule holds (the practice keeps an administrator, only an owner changes an
+owner, nobody deactivates or deletes themselves, a person that records refer to cannot be deleted). Response `{action, affected, changed}`: `affected` is the number
+of distinct people, `changed` those that actually changed (a person already in the wanted state is skipped). If any person is refused the whole batch answers
+**409 `BULK_REFUSED`** with `details = [{staff_id, number (the staff code), name, error_code, reason}]` for every one and **nothing changes**; an unknown or foreign id answers
+404 with `details.staff_ids`. Besides the usual per-person entries one `staff.bulk_changed` audit entry records `action`, `count`, `codes` (at most 100) and `bulk: true`.
 
 ## POST /staff/{staff_id}/deactivate
 

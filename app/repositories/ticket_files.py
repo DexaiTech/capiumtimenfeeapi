@@ -22,11 +22,6 @@ class TicketFileRepository:
         await self.session.refresh(comment)
         return comment
 
-    async def save_comment(self, comment: TicketComment) -> TicketComment:
-        await self.session.flush()
-        await self.session.refresh(comment)
-        return comment
-
     async def get_comment(
         self,
         organization_id: uuid.UUID,
@@ -63,11 +58,6 @@ class TicketFileRepository:
             id_column=TicketComment.id,
             params=params,
         )
-
-    async def delete_comment(self, comment: TicketComment) -> None:
-        """Delete the comment; its files' rows go with it."""
-        await self.session.delete(comment)
-        await self.session.flush()
 
     # --- Attachments ------------------------------------------------------------------
 
@@ -171,13 +161,6 @@ class TicketFileRepository:
             TicketAttachment.comment_id == comment_id,
         )
         return int((await self.session.execute(stmt)).scalar_one())
-
-    async def keys_of_comment(self, organization_id: uuid.UUID, comment_id: uuid.UUID) -> list[str]:
-        stmt = select(TicketAttachment.storage_key).where(
-            TicketAttachment.organization_id == organization_id,
-            TicketAttachment.comment_id == comment_id,
-        )
-        return list((await self.session.execute(stmt)).scalars())
 
     async def delete_attachment(self, attachment: TicketAttachment) -> None:
         await self.session.delete(attachment)

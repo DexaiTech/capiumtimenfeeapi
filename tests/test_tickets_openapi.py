@@ -26,8 +26,6 @@ EXPECTED = {
     ("get", "/tickets/{ticket_id}/timeline"): "Tickets",
     ("get", "/tickets/{ticket_id}/comments"): "Tickets",
     ("post", "/tickets/{ticket_id}/comments"): "Tickets",
-    ("patch", "/tickets/{ticket_id}/comments/{comment_id}"): "Tickets",
-    ("delete", "/tickets/{ticket_id}/comments/{comment_id}"): "Tickets",
     ("get", "/tickets/{ticket_id}/attachments"): "Tickets",
     ("post", "/tickets/{ticket_id}/attachments"): "Tickets",
     ("get", "/tickets/{ticket_id}/attachments/{attachment_id}"): "Tickets",

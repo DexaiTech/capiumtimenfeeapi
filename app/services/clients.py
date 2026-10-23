@@ -36,9 +36,11 @@ from app.repositories.invoice_templates import InvoiceTemplateRepository
 from app.repositories.rates import ClientRateRepository
 from app.repositories.settings import SequenceRepository, ServiceRepository
 from app.schemas.billing import ClientRef
+from app.schemas.bulk import BulkChangeResult, unique_ids
 from app.schemas.clients import (
     CENTRALLY_MANAGED_FIELDS,
     CLIENT_CODE_PATTERN,
+    ClientBulkAction,
     ClientCreate,
     ClientDetail,
     ClientFilters,
@@ -64,6 +66,7 @@ from app.schemas.clients import (
 )
 from app.schemas.rates import ClientRateRead
 from app.services import audit, policy
+from app.services.common import record_audit_many
 from app.services.policy import OrgContext
 from app.services.rates import practice_today
 from app.services.sequences import DEFAULT_SEQUENCES, format_number
@@ -712,6 +715,116 @@ class ClientsService:
                 client.id,
                 {"code": client.code, "name": client.name},
             )
+
+    # --- Bulk action --------------------------------------------------------------------
+
+    async def bulk(
+        self, ctx: OrgContext, data: ClientBulkAction, rctx: RequestContext
+    ) -> BulkChangeResult:
+        """One action on up to 200 clients, all or nothing: a client that breaks the rule of
+        the single operation (409) stops the whole action."""
+        policy.ensure(ctx, "client.delete" if data.action == "delete" else "client.update")
+        org_id = ctx.organization_id
+        ids = unique_ids(data.client_ids)
+        async with unit_of_work(self.session):
+            clients = await self.clients.lock_many(org_id, ids)
+            if len(clients) != len(ids):
+                found = {c.id for c in clients}
+                raise NotFoundError(
+                    "Some of the clients were not found.",
+                    details={"client_ids": [str(i) for i in ids if i not in found]},
+                )
+            rows: list[audit.AuditRow]
+            match data.action:
+                case "delete":
+                    rows = await self._bulk_delete(ctx, clients)
+                case "set_status":
+                    assert data.value is not None
+                    for client in clients:
+                        if client.status != data.value:
+                            self._check_archive_permission(ctx, client.status, data.value)
+                    rows = self._bulk_set(clients, "status", data.value)
+                case "set_manager" | "set_partner":
+                    field = "manager_user_id" if data.action == "set_manager" else "partner_user_id"
+                    person = data.user_id
+                    if person is not None:
+                        await self._check_people(ctx, {field: person})
+                    rows = self._bulk_set(clients, field, person)
+                case "set_segment":
+                    rows = self._bulk_set(clients, "segment", data.segment)
+            await self.session.flush()
+            await record_audit_many(self.session, ctx, rctx, rows)
+        return BulkChangeResult(action=data.action, affected=len(ids), changed=len(rows))
+
+    @staticmethod
+    def _bulk_set(clients: Sequence[Client], field: str, value: Any) -> list[audit.AuditRow]:
+        rows: list[audit.AuditRow] = []
+        for client in clients:
+            old = getattr(client, field)
+            if old == value:
+                continue
+            setattr(client, field, value)
+            action = "client.archived" if field == "status" and value == "archived" else None
+            rows.append(
+                (
+                    action or "client.updated",
+                    "client",
+                    client.id,
+                    {
+                        "code": client.code,
+                        "name": client.name,
+                        "changes": {field: [_jsonable(old), _jsonable(value)]},
+                        "bulk": True,
+                    },
+                )
+            )
+        return rows
+
+    async def _bulk_delete(
+        self, ctx: OrgContext, clients: Sequence[Client]
+    ) -> list[audit.AuditRow]:
+        refused = []
+        for client in clients:
+            usage = await self.clients.usage(ctx.organization_id, client.id)
+            if usage.in_use:
+                refused.append(
+                    {
+                        "client_id": str(client.id),
+                        "code": client.code,
+                        "name": client.name,
+                        "reason": "Has jobs, time, disbursements, expenses, invoices, credit "
+                        "notes or payments. Archive it instead.",
+                        "usage": {
+                            "jobs": usage.jobs,
+                            "time_entries": usage.time_entries,
+                            "disbursements": usage.disbursements,
+                            "expenses": usage.expenses,
+                            "invoices": usage.invoices,
+                            "credit_notes": usage.credit_notes,
+                            "payments": usage.payments,
+                        },
+                    }
+                )
+        if refused:
+            raise ConflictError(
+                f"{len(refused)} client{'s are' if len(refused) != 1 else ' is'} in use and "
+                "cannot be deleted. Nothing was deleted.",
+                code="CLIENT_IN_USE",
+                details=refused,
+            )
+        now = datetime.now(UTC)
+        rows: list[audit.AuditRow] = []
+        for client in clients:
+            client.deleted_at = now
+            rows.append(
+                (
+                    "client.deleted",
+                    "client",
+                    client.id,
+                    {"code": client.code, "name": client.name, "bulk": True},
+                )
+            )
+        return rows
 
     # --- Contacts -----------------------------------------------------------------------
 

@@ -9,11 +9,13 @@ from fastapi import APIRouter, Depends, Query, Response, status
 from app.dependencies.common import ContextDep, SessionDep
 from app.dependencies.organization import PageParamsDep, require
 from app.repositories.invoices import InvoiceFilters
+from app.schemas.bulk import BulkChangeResult
 from app.schemas.common import ApiResponse, error_responses, ok, ok_page
 from app.schemas.invoices import (
     DisplayStatus,
     InvoiceAddWip,
     InvoiceApprove,
+    InvoiceBulkAction,
     InvoiceCreate,
     InvoiceIssue,
     InvoiceListSummary,
@@ -141,6 +143,31 @@ async def create_invoice(
     body: InvoiceCreate, org: Drafter, service: InvoiceServiceDep, ctx: ContextDep
 ) -> ApiResponse[InvoiceRead]:
     return ok(await service.create_draft(org, body, ctx), "Draft invoice created")
+
+
+@router.post(
+    "/invoices/bulk",
+    summary="Bulk action on invoices",
+    description=(
+        "Deletes 1-200 draft invoices (`invoice_ids`, `action`: `delete`, no `value`) in one "
+        "transaction: all or nothing, each with the rule of `DELETE /invoices/{invoice_id}` "
+        "(its WIP items return to `unbilled`). An invoice that is not a draft (issued, paid, "
+        "void, awaiting approval...) answers 409 `INVOICE_NOT_DRAFT` and nothing is deleted: "
+        "`details` lists each one (`invoice_id`, `number`, `status`, `reason`); correct an "
+        "issued invoice with a credit note. 404 when any id is not the practice's "
+        "(`details.invoice_ids` lists them). Each deleted draft gets its own audit row "
+        "(`invoice.draft_deleted`, `bulk: true`). Requires `invoice.create`."
+    ),
+    responses=error_responses(403, 404, 409),
+)
+async def bulk_invoices(
+    body: InvoiceBulkAction,
+    org: Annotated[OrgContext, Depends(require())],
+    service: InvoiceServiceDep,
+    ctx: ContextDep,
+) -> ApiResponse[BulkChangeResult]:
+    result = await service.bulk(org, body, ctx)
+    return ok(result, f"{result.changed} draft{'s' if result.changed != 1 else ''} deleted")
 
 
 @router.get(

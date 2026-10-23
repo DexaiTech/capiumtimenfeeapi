@@ -1,4 +1,4 @@
-"""Ticket comments: writing, listing, editing (author only) and deleting (author or moderator)."""
+"""Ticket comments: writing and listing. A comment cannot be edited or deleted once posted."""
 
 import uuid
 
@@ -6,7 +6,7 @@ import pytest
 
 from tests.clients_helpers import sql
 from tests.factories import audit_entries, error
-from tests.ticket_helpers import make_ticket, new_team, stored_files, ticket_url, upload
+from tests.ticket_helpers import make_ticket, new_team, ticket_url, upload
 from tests.time_helpers import ok_data
 
 COMMENT_KEYS = {
@@ -248,178 +248,34 @@ async def test_comments_of_an_unknown_or_foreign_ticket_are_not_found(client):
     assert await sql("SELECT count(*) AS n FROM ticket_comments") == [{"n": 1}]
 
 
-# --- Edit -----------------------------------------------------------------------------------
+# --- A comment is a record -----------------------------------------------------------------
 
 
-async def test_the_author_edits_a_comment(client):
+async def test_a_comment_can_be_neither_edited_nor_deleted(client):
     t = await new_team(client)
-    staff = await t.member("staff")
     ticket = await ticket_of(client, t)
-    written = await comment(client, t, staff, ticket["id"], "Typo here")
+    written = await comment(client, t, t.owner, ticket["id"], "Written once")
     url = comments_url(t, ticket["id"], written["id"])
-    response = await client.patch(url, headers=staff.headers, json={"body": " Fixed text "})
-    data = ok_data(response)
-    assert set(data) == COMMENT_KEYS
-    assert data["body"] == "Fixed text" and data["edited_at"] is not None
-    assert data["created_at"] == written["created_at"]
-    assert response.json()["message"] == "Comment updated"
-    [entry] = await audit_entries(t.id, "ticket_comment.updated")
-    assert entry["target_id"] == written["id"] and entry["actor_user_id"] == str(staff.id)
-    assert entry["metadata"] == {
-        "ticket_id": ticket["id"],
-        "code": "APT1",
-        "changes": {"body": ["Typo here", "Fixed text"]},
-    }
-
-
-async def test_an_edit_that_changes_nothing_is_not_an_edit(client):
-    t = await new_team(client)
-    ticket = await ticket_of(client, t)
-    written = await comment(client, t, t.owner, ticket["id"], "Same")
-    data = ok_data(
-        await client.patch(
-            comments_url(t, ticket["id"], written["id"]),
-            headers=t.owner.headers,
-            json={"body": "Same"},
-        )
-    )
-    assert data["edited_at"] is None
+    # There is no route for either, whoever asks (the app answers 404 or 405).
+    edit = await client.patch(url, headers=t.owner.headers, json={"body": "Changed"})
+    assert edit.status_code in (404, 405)
+    assert (await client.delete(url, headers=t.owner.headers)).status_code in (404, 405)
+    listed = ok_data(await client.get(comments_url(t, ticket["id"]), headers=t.owner.headers))
+    assert [c["body"] for c in listed] == ["Written once"]
+    assert listed[0]["edited_at"] is None
     assert await audit_entries(t.id, "ticket_comment.updated") == []
+    assert await audit_entries(t.id, "ticket_comment.deleted") == []
 
 
-async def test_only_the_author_may_edit_even_a_moderator(client):
-    t = await new_team(client)
-    staff = await t.member("staff")
-    ticket = await ticket_of(client, t)
-    written = await comment(client, t, staff, ticket["id"], "Mine")
-    url = comments_url(t, ticket["id"], written["id"])
-    for role in ("owner", "admin", "manager", "billing", "viewer"):
-        actor = await t.member(role)
-        response = await client.patch(url, headers=actor.headers, json={"body": "Rewritten"})
-        assert response.status_code == 403, role
-    rows = await sql("SELECT body, edited_at FROM ticket_comments WHERE id = :c", c=written["id"])
-    assert rows == [{"body": "Mine", "edited_at": None}]
-
-
-@pytest.mark.parametrize(
-    ("body", "field"),
-    [
-        ({}, "body"),
-        ({"body": None}, "body"),
-        ({"body": "x" * 5001}, "body"),
-        ({"body": "nul\u0000"}, "body"),
-        ({"body": "ok", "attachment_ids": []}, "attachment_ids"),
-    ],
-)
-async def test_edit_validation(client, body, field):
-    t = await new_team(client)
-    ticket = await ticket_of(client, t)
-    written = await comment(client, t, t.owner, ticket["id"], "Original")
-    response = await client.patch(
-        comments_url(t, ticket["id"], written["id"]), headers=t.owner.headers, json=body
-    )
-    assert response.status_code == 422, response.text
-    assert error(response)["details"][0]["field"] == field
-
-
-async def test_the_text_may_be_emptied_only_while_the_comment_has_files(client):
-    t = await new_team(client)
-    ticket = await ticket_of(client, t)
-    bare = await comment(client, t, t.owner, ticket["id"], "Words only")
-    refused = await client.patch(
-        comments_url(t, ticket["id"], bare["id"]), headers=t.owner.headers, json={"body": ""}
-    )
-    assert refused.status_code == 422 and error(refused)["details"][0]["field"] == "body"
-    assert (
-        await upload(client, t.owner, t.org, ticket["id"], comment_id=bare["id"])
-    ).status_code == 201
-    emptied = await client.patch(
-        comments_url(t, ticket["id"], bare["id"]), headers=t.owner.headers, json={"body": ""}
-    )
-    assert ok_data(emptied)["body"] == ""
-
-
-async def test_a_comment_is_found_only_under_its_own_ticket(client):
-    t = await new_team(client)
-    ticket, other = await ticket_of(client, t), await ticket_of(client, t)
-    written = await comment(client, t, t.owner, ticket["id"])
-    for call in (
-        client.patch(
-            comments_url(t, other["id"], written["id"]), headers=t.owner.headers, json={"body": "x"}
-        ),
-        client.delete(comments_url(t, other["id"], written["id"]), headers=t.owner.headers),
-        client.patch(
-            comments_url(t, ticket["id"], uuid.uuid4()), headers=t.owner.headers, json={"body": "x"}
-        ),
-        client.delete(comments_url(t, ticket["id"], uuid.uuid4()), headers=t.owner.headers),
-    ):
-        assert (await call).status_code == 404
-
-
-# --- Delete ---------------------------------------------------------------------------------
-
-
-async def test_the_author_deletes_a_comment_and_its_files(client):
-    t = await new_team(client)
-    staff = await t.member("staff")
-    ticket = await ticket_of(client, t)
-    written = await comment(client, t, staff, ticket["id"], "Mine")
-    kept = ok_data(await upload(client, staff, t.org, ticket["id"], "kept.png"), 201)
-    assert (
-        await upload(client, staff, t.org, ticket["id"], "gone.png", comment_id=written["id"])
-    ).status_code == 201
-    assert len(stored_files()) == 2
-
-    response = await client.delete(
-        comments_url(t, ticket["id"], written["id"]), headers=staff.headers
-    )
-    assert response.status_code == 200 and response.json()["message"] == "Comment deleted"
-    assert len(stored_files()) == 1
-    rows = await sql("SELECT id FROM ticket_attachments")
-    assert [str(r["id"]) for r in rows] == [kept["id"]]
-    assert await sql("SELECT 1 FROM ticket_comments") == []
-    shown = ok_data(await client.get(ticket_url(t.org, ticket["id"]), headers=t.owner.headers))
-    assert shown["comment_count"] == 0 and shown["attachment_count"] == 1
-    [entry] = await audit_entries(t.id, "ticket_comment.deleted")
-    assert entry["metadata"] == {"ticket_id": ticket["id"], "code": "APT1", "attachments": 1}
-    assert (
-        await client.delete(comments_url(t, ticket["id"], written["id"]), headers=staff.headers)
-    ).status_code == 404
-
-
-async def test_a_moderator_deletes_anyones_comment_but_staff_only_their_own(client):
-    t = await new_team(client)
-    alice = await t.member("staff")
-    ticket = await ticket_of(client, t)
-    theirs = await comment(client, t, t.owner, ticket["id"], "By the owner")
-    mine = await comment(client, t, alice, ticket["id"], "By alice")
-    assert (
-        await client.delete(comments_url(t, ticket["id"], theirs["id"]), headers=alice.headers)
-    ).status_code == 403
-    manager = await t.member("manager")
-    assert (
-        await client.delete(comments_url(t, ticket["id"], mine["id"]), headers=manager.headers)
-    ).status_code == 200
-    assert (
-        await client.delete(comments_url(t, ticket["id"], theirs["id"]), headers=alice.headers)
-    ).status_code == 403
-    remaining = await sql("SELECT id FROM ticket_comments")
-    assert [str(r["id"]) for r in remaining] == [theirs["id"]]
-    [entry] = await audit_entries(t.id, "ticket_comment.deleted")
-    assert entry["actor_user_id"] == str(manager.id) and entry["target_id"] == mine["id"]
-
-
-# --- Permissions ----------------------------------------------------------------------------
-
-# role -> (list, create, edit own, delete own, delete the owner's)
+# (listed, created) per system role.
 EXPECTED_BY_ROLE = {
-    "owner": (200, 201, 200, 200, 200),
-    "admin": (200, 201, 200, 200, 200),
-    "partner": (200, 201, 200, 200, 200),
-    "manager": (200, 201, 200, 200, 200),
-    "staff": (200, 201, 200, 200, 403),
-    "billing": (200, 201, 200, 200, 403),
-    "viewer": (200, 403, None, None, 403),
+    "owner": (200, 201),
+    "admin": (200, 201),
+    "partner": (200, 201),
+    "manager": (200, 201),
+    "staff": (200, 201),
+    "billing": (200, 201),
+    "viewer": (200, 403),
 }
 
 
@@ -428,24 +284,8 @@ async def test_comment_permissions_per_system_role(client, role):
     t = await new_team(client)
     actor = await t.member(role)
     ticket = await ticket_of(client, t)
-    by_owner = await comment(client, t, t.owner, ticket["id"], "Owner's")
     listed = (await client.get(comments_url(t, ticket["id"]), headers=actor.headers)).status_code
     created = await client.post(
         comments_url(t, ticket["id"]), headers=actor.headers, json={"body": "Mine"}
     )
-    edited = deleted = None
-    if created.status_code == 201:
-        own = created.json()["data"]["id"]
-        edited = (
-            await client.patch(
-                comments_url(t, ticket["id"], own), headers=actor.headers, json={"body": "Edited"}
-            )
-        ).status_code
-        deleted = (
-            await client.delete(comments_url(t, ticket["id"], own), headers=actor.headers)
-        ).status_code
-    others = (
-        await client.delete(comments_url(t, ticket["id"], by_owner["id"]), headers=actor.headers)
-    ).status_code
-    expected = EXPECTED_BY_ROLE[role]
-    assert (listed, created.status_code, edited, deleted, others) == expected
+    assert (listed, created.status_code) == EXPECTED_BY_ROLE[role]

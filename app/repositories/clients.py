@@ -225,6 +225,23 @@ class ClientRepository:
         await self.session.refresh(client)
         return client
 
+    async def lock_many(
+        self, organization_id: uuid.UUID, client_ids: Sequence[uuid.UUID]
+    ) -> list[Client]:
+        """Live clients among ``client_ids`` locked ``FOR UPDATE`` in id order (no deadlocks)."""
+        stmt = (
+            select(Client)
+            .where(
+                Client.organization_id == organization_id,
+                Client.id.in_(list(client_ids)),
+                Client.deleted_at.is_(None),
+            )
+            .order_by(Client.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        return list((await self.session.execute(stmt)).scalars())
+
     async def get(
         self, organization_id: uuid.UUID, client_id: uuid.UUID, *, lock: str | None = None
     ) -> Client | None:

@@ -47,6 +47,7 @@ unless marked bounded.
 | POST | `/invoices` | `invoice.create` | Draft from WIP (below). 201, returns the detail. |
 | GET | `/invoices/{id}` | `invoice.read` | Detail (below). |
 | PATCH | `/invoices/{id}` | `invoice.create` (+ `invoice.issue` when issued) | Draft: `issue_date`, `due_date`, `reference`, `notes`. Issued: `notes`, `reference` only. |
+| POST | `/invoices/bulk` | `invoice.create` | Delete 1-200 drafts, all or nothing (below). Declared before `/invoices/{id}`. |
 | DELETE | `/invoices/{id}` | `invoice.create` | Delete a draft; its WIP returns to `unbilled`. |
 | POST | `/invoices/{id}/lines` | `invoice.create` | Manual line `{description, quantity=1, unit_amount, net_amount?, vat_rate_id?, service_id?, job_id?, position?}`. 201. |
 | PATCH | `/invoices/{id}/lines/{line_id}` | `invoice.create` | `{description, quantity, unit_amount, net_amount, vat_rate_id (null = default resolution), position}`. |
@@ -128,7 +129,7 @@ unallocated_cash`.
 | 422 | `OVERRIDE_NO_LINE` / `OVERRIDE_AMBIGUOUS` / `OVERRIDE_DUPLICATE` | An override matches no line / several lines / a line already overridden. |
 | 422 | `NEGATIVE_WIP_LINE` | A line that bills WIP set below zero (use a manual discount line). |
 | 422 | `INVOICE_TOTAL_NEGATIVE` | A change would take the invoice gross below zero. |
-| 409 | `INVOICE_NOT_DRAFT` | Line/WIP changes, delete or issue on a non-draft. |
+| 409 | `INVOICE_NOT_DRAFT` | Line/WIP changes, delete or issue on a non-draft (bulk delete: `details` lists each such invoice). |
 | 409 | `INVOICE_LOCKED` | Changing dates of an issued invoice, or anything on a void one. |
 | 409 | `INVOICE_EMPTY` | Issuing a draft without lines. |
 | 409 | `INVOICE_NOT_ISSUED` | Void/send/credit note/payment allocation on a draft or void invoice. |
@@ -140,6 +141,17 @@ unallocated_cash`.
 | 409 | `NOTHING_TO_ALLOCATE` | `auto_allocate` on an existing payment found nothing to do. |
 | 409 | `PAYMENT_VOID` / `PAYMENT_ALLOCATED` | Allocating/voiding a void payment / voiding an allocated one. |
 | 422 | `VALIDATION_ERROR` | Body/query validation (unknown fields, amounts ≤ 0, bad dates, …). |
+
+### Bulk delete of drafts: `POST /invoices/bulk`
+
+Body `{invoice_ids, action: "delete"}` (1-200 distinct ids; `value` is not accepted). Permission `invoice.create`, as for
+`DELETE /invoices/{id}`, whose rule applies to every invoice: only a draft can be deleted, and its WIP items return to `unbilled`.
+All or nothing in one transaction (the invoices are locked in id order, the same order every writer uses). Any id that is not the
+practice's: 404 `RESOURCE_NOT_FOUND`, `details: {"invoice_ids": [...]}`. Any invoice that is not a draft (issued, part-paid, paid,
+void, awaiting approval, approved, credited): 409 `INVOICE_NOT_DRAFT`, `details` one entry per such invoice (`invoice_id`,
+`number`, `status`, `reason`), and nothing is deleted. Issued invoices stay locked by design: they are corrected with a credit
+note, so delete is the only bulk action. Response `{"action": "delete", "affected", "changed"}` (always equal). Each deleted draft
+gets the `invoice.draft_deleted` audit row of a single delete with `bulk: true`.
 
 ## Locking (deadlock-free order)
 

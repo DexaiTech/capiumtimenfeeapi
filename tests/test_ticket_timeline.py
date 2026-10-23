@@ -50,8 +50,6 @@ async def test_every_kind_of_change_is_an_event(client):
     await patch(priority="high")
     await patch(assignee_id=str(staff.id))
     await patch(assignee_id=None)
-    await patch(subject="Crash on login")
-    await patch(description="It crashes")
     await patch(tag_ids=[await tag_id(t.org, "Bug")])
     await patch(tag_ids=[await tag_id(t.org, "Docs")])
     await patch(status="ready_for_ba_review")
@@ -63,8 +61,6 @@ async def test_every_kind_of_change_is_an_event(client):
         "priority_changed",
         "assignee_changed",
         "assignee_changed",
-        "subject_changed",
-        "description_changed",
         "tags_changed",
         "tags_changed",
         "status_changed",
@@ -74,10 +70,9 @@ async def test_every_kind_of_change_is_an_event(client):
     assert (story[2]["before"], story[2]["after"]) == ("not_set", "high")
     assert (story[3]["before"], story[3]["after"]) == ("Unassigned", staff.full_name)
     assert (story[4]["before"], story[4]["after"]) == (staff.full_name, "Unassigned")
-    assert (story[5]["before"], story[5]["after"]) == ("Crash", "Crash on login")
-    assert (story[7]["added"], story[7]["removed"]) == (["Bug"], [])
-    assert (story[8]["added"], story[8]["removed"]) == (["Docs"], ["Bug"])
-    assert (story[9]["before"], story[9]["after"]) == ("requirement_pending", "ready_for_ba_review")
+    assert (story[5]["added"], story[5]["removed"]) == (["Bug"], [])
+    assert (story[6]["added"], story[6]["removed"]) == (["Docs"], ["Bug"])
+    assert (story[7]["before"], story[7]["after"]) == ("requirement_pending", "ready_for_ba_review")
     assert len({e["id"] for e in found}) == len(found)
     # Newest first, each with the person who did it.
     assert found[0]["kind"] == "status_changed"
@@ -86,18 +81,19 @@ async def test_every_kind_of_change_is_an_event(client):
 
 async def test_one_edit_of_several_fields_is_several_events(client):
     t = await new_team(client)
+    staff = await t.member("staff")
     ticket = await make_ticket(client, t.owner, t.org, "Crash")
     patched = await client.patch(
         ticket_url(t.org, ticket["id"]),
         headers=t.owner.headers,
-        json={"status": "invalid", "priority": "low", "subject": "Not a bug"},
+        json={"status": "invalid", "priority": "low", "assignee_id": str(staff.id)},
     )
     assert patched.status_code == 200
     story = list(reversed(await events(client, t, ticket["id"])))
     assert sorted(kinds(story[::-1])[1:]) == [
+        "assignee_changed",
         "priority_changed",
         "status_changed",
-        "subject_changed",
     ]
 
 
@@ -109,10 +105,6 @@ async def test_comments_and_files_are_events(client):
     made = ok_data(
         await client.post(comments, headers=staff.headers, json={"body": "Seen on Safari too"}), 201
     )
-    edit = await client.patch(
-        f"{comments}/{made['id']}", headers=staff.headers, json={"body": "Seen on Safari and Edge"}
-    )
-    assert edit.status_code == 200
     uploaded = await upload(client, staff, t.org, ticket["id"], "shot.png", comment_id=made["id"])
     assert uploaded.status_code == 201, uploaded.text
     file_id = uploaded.json()["data"]["id"]
@@ -120,23 +112,18 @@ async def test_comments_and_files_are_events(client):
         ticket_url(t.org, ticket["id"], f"/attachments/{file_id}"), headers=staff.headers
     )
     assert removed.status_code in (200, 204)
-    gone = await client.delete(f"{comments}/{made['id']}", headers=staff.headers)
-    assert gone.status_code in (200, 204)
 
     found = await events(client, t, ticket["id"])
     assert kinds(found) == [
         "created",
         "comment_added",
-        "comment_edited",
         "file_added",
         "file_removed",
-        "comment_deleted",
     ]
     story = list(reversed(found))
     assert story[1]["detail"] == "Seen on Safari too" and story[1]["comment_id"] == made["id"]
-    assert story[2]["detail"] == "Seen on Safari and Edge"
-    assert story[3]["detail"] == "shot.png" and story[3]["comment_id"] == made["id"]
-    assert story[4]["detail"] == "shot.png"
+    assert story[2]["detail"] == "shot.png" and story[2]["comment_id"] == made["id"]
+    assert story[3]["detail"] == "shot.png"
     assert all(e["actor"]["id"] == str(staff.id) for e in story[1:])
 
 

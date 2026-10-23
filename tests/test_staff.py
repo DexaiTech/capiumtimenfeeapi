@@ -1047,6 +1047,101 @@ async def test_staff_show_their_standard_rates_with_the_level_that_prices_them(
     assert (await detail(client, owner, org, person["id"]))["charge_rate"] == 4_000
 
 
+async def test_a_new_person_can_get_their_rates_in_the_same_request(client: AsyncClient) -> None:
+    owner, org = await practice(client)
+    person = await new_staff(client, owner, org, "Sam Staff", cost_rate=4_800, charge_rate=8_500)
+    assert (
+        person["charge_rate"],
+        person["charge_rate_source"],
+        person["cost_rate"],
+        person["cost_rate_source"],
+    ) == (8_500, "staff", 4_800, "staff")
+    rules = await sql(
+        "SELECT kind, level, rate, effective_from::text AS starts, effective_to FROM rate_rules "
+        "WHERE user_id = :u ORDER BY kind",
+        u=person["id"],
+    )
+    assert rules == [
+        {
+            "kind": "charge",
+            "level": "staff",
+            "rate": 8_500,
+            "starts": "2026-01-05",
+            "effective_to": None,
+        },
+        {
+            "kind": "cost",
+            "level": "staff",
+            "rate": 4_800,
+            "starts": "2026-01-05",
+            "effective_to": None,
+        },
+    ]
+    assert len(await audit_entries(org["id"], "rate.created")) == 2
+    [created] = await audit_entries(org["id"], "staff.created")
+    assert created["metadata"]["staff_code"] == person["code"]
+    history = await sql(
+        "SELECT action, source FROM rate_changes WHERE user_id = :u", u=person["id"]
+    )
+    assert {(row["action"], row["source"]) for row in history} == {("created", "staff_rates")}
+    assert len(history) == 2
+
+
+async def test_the_rates_of_a_new_person_start_when_asked_and_either_may_be_left_out(
+    client: AsyncClient,
+) -> None:
+    owner, org = await practice(client)
+    await set_practice(org, default_charge_rate=2_000)
+    only_cost = await new_staff(client, owner, org, "Cost Only", cost_rate=3_000)
+    assert only_cost["cost_rate"] == 3_000 and only_cost["charge_rate_source"] == "default"
+    later = await new_staff(
+        client, owner, org, "Starts Later", charge_rate=9_000, rate_effective_from="2099-01-01"
+    )
+    # Not in force yet: the practice default still prices them.
+    assert (later["charge_rate"], later["charge_rate_source"]) == (2_000, "default")
+    [rule] = await sql(
+        "SELECT effective_from::text AS starts FROM rate_rules WHERE user_id = :u", u=later["id"]
+    )
+    assert rule["starts"] == "2099-01-01"
+    plain = await new_staff(client, owner, org, "No Rates")
+    assert await sql("SELECT 1 FROM rate_rules WHERE user_id = :u", u=plain["id"]) == []
+
+
+async def test_rates_with_a_new_person_need_rate_manage_and_nothing_is_created_without_it(
+    client: AsyncClient,
+) -> None:
+    owner, org = await practice(client)
+    created = await client.post(
+        org_url(org, "/roles"),
+        headers=owner.headers,
+        json={"name": "Recruiter", "permissions": ["member.read", "member.invite"]},
+    )
+    assert created.status_code == 201, created.text
+    recruiter = await add_member(org["id"], "Recruiter")
+    body = {"full_name": "Sam Staff", "grade_id": await grade_id(org), "start_date": "2026-01-05"}
+    refused = await client.post(
+        staff_url(org), headers=recruiter.headers, json={**body, "cost_rate": 4_800}
+    )
+    assert refused.status_code == 403, refused.text
+    names = await sql("SELECT 1 FROM users WHERE full_name = 'Sam Staff'")
+    assert names == []
+    # Without rates the same person may add staff.
+    ok = await client.post(staff_url(org), headers=recruiter.headers, json=body)
+    assert ok.status_code == 201, ok.text
+
+
+@pytest.mark.parametrize("field", ["cost_rate", "charge_rate"])
+async def test_the_rates_of_a_new_person_are_validated(client: AsyncClient, field: str) -> None:
+    owner, org = await practice(client)
+    body = {"full_name": "Sam Staff", "grade_id": await grade_id(org), "start_date": "2026-01-05"}
+    for bad in (-1, "free", 10**13):
+        response = await client.post(
+            staff_url(org), headers=owner.headers, json={**body, field: bad}
+        )
+        assert response.status_code == 422, (field, bad)
+        assert error(response)["details"][0]["field"] == field
+
+
 async def test_rates_are_hidden_from_people_without_rate_read(client: AsyncClient) -> None:
     owner, org = await practice(client)
     person = await new_staff(client, owner, org, "Sam Staff")

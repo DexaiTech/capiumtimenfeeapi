@@ -9,6 +9,7 @@ from pydantic import BaseModel, EmailStr, Field, field_validator, model_validato
 
 from app.db.models import Client, CreditNote, CreditNoteLine, Invoice, InvoiceLine
 from app.schemas.billing import ClientRef, PersonRef
+from app.schemas.bulk import MAX_BULK_IDS
 from app.schemas.common import RequestModel
 
 SignedMoney = Annotated[
@@ -91,6 +92,15 @@ class InvoiceAddWip(WipSelection):
         if not self.time_entry_ids and not self.disbursement_ids:
             raise ValueError("time_entry_ids: Choose at least one WIP item")
         return self
+
+
+class InvoiceBulkAction(RequestModel):
+    invoice_ids: list[uuid.UUID] = Field(min_length=1, max_length=MAX_BULK_IDS)
+    action: Literal["delete"] = Field(
+        description="`delete`: delete draft invoices (the only bulk action: issued invoices "
+        "are locked)"
+    )
+    value: None = Field(default=None, description="No action takes a value yet")
 
 
 class InvoiceUpdate(RequestModel):

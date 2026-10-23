@@ -10,6 +10,8 @@ from app.dependencies.organization import PageParamsDep, require
 from app.repositories.staff import STATUS_ALIASES, StaffFilters
 from app.schemas.common import ApiResponse, error_responses, ok, ok_page
 from app.schemas.staff import (
+    StaffBulkAction,
+    StaffBulkResult,
     StaffCreate,
     StaffDeactivate,
     StaffDetail,
@@ -25,6 +27,7 @@ from app.schemas.staff import (
 from app.services.policy import OrgContext
 from app.services.sessions import SessionService
 from app.services.staff import StaffService
+from app.services.staff_bulk import StaffBulkService
 from app.services.staff_login import StaffLoginService
 
 router = APIRouter(prefix="/organizations/{organization_id}", tags=["Staff"])
@@ -49,7 +52,14 @@ def get_staff_login_service(session: SessionDep, settings: SettingsDep) -> Staff
     return StaffLoginService(session, SessionService(session, settings))
 
 
+def get_staff_bulk_service(
+    session: SessionDep, service: Annotated[StaffService, Depends(get_staff_service)]
+) -> StaffBulkService:
+    return StaffBulkService(session, service)
+
+
 StaffServiceDep = Annotated[StaffService, Depends(get_staff_service)]
+StaffBulkServiceDep = Annotated[StaffBulkService, Depends(get_staff_bulk_service)]
 StaffLoginServiceDep = Annotated[StaffLoginService, Depends(get_staff_login_service)]
 
 
@@ -137,6 +147,31 @@ async def create_staff(
     body: StaffCreate, org: StaffCreator, service: StaffServiceDep, ctx: ContextDep
 ) -> ApiResponse[StaffDetail]:
     return ok(await service.create(org, body, ctx), "Staff member created")
+
+
+@router.post(
+    "/staff/bulk",
+    summary="Change or remove several staff members",
+    description=(
+        "Applies one `action` (`set_grade`, `set_approver`, `clear_approver`, `deactivate`, "
+        "`reactivate`, `delete`) to 1-200 staff members in one transaction: all or nothing. "
+        "`value` is the grade id, the approver's staff id, or for `deactivate` `inactive` "
+        "(default) or `left` (with an optional `leaving_date`). Each person goes through the "
+        "rules of the single endpoint (the last administrator, an owner, yourself, a person "
+        "records refer to): if any is refused the answer is 409 `BULK_REFUSED` with every "
+        "person in `details` (`staff_id`, `number` = staff code, `name`, `error_code`, "
+        "`reason`), and nothing changes. An unknown id answers 404 listing it. Audited as one "
+        "`staff.bulk_changed` entry besides the usual ones. "
+        "`affected` counts the distinct people, `changed` those that actually changed. "
+        "Requires `member.update`; `deactivate` and `delete` need `member.remove`."
+    ),
+    responses=error_responses(403, 404, 409),
+)
+async def bulk_staff(
+    body: StaffBulkAction, org: StaffEditor, service: StaffBulkServiceDep, ctx: ContextDep
+) -> ApiResponse[StaffBulkResult]:
+    result = await service.run(org, body, ctx)
+    return ok(result, f"{result.changed} staff member(s) updated")
 
 
 @router.get(

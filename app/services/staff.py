@@ -35,6 +35,7 @@ from app.db.session import unit_of_work
 from app.repositories import staff_references
 from app.repositories.grades import GradeRepository
 from app.repositories.members import MemberRepository
+from app.repositories.rate_rules import Scope
 from app.repositories.roles import RoleRepository
 from app.repositories.staff import StaffFilters, StaffRepository, StaffRow, normalised_status
 from app.repositories.users import UserRepository
@@ -52,6 +53,7 @@ from app.services.common import apply_changes, record_audit
 from app.services.members import ensure_initials_free, ensure_not_last_owner
 from app.services.organizations import lock_and_refresh
 from app.services.policy import OrgContext
+from app.services.rate_rules import RateRuleService
 from app.services.sessions import SessionService
 from app.services.staff_codes import next_staff_code
 from app.services.staff_common import (
@@ -177,6 +179,8 @@ class StaffService:
     ) -> StaffDetail:
         async with unit_of_work(self.session):
             ctx = await lock_and_refresh(self.session, ctx, "member.invite")
+            if data.cost_rate is not None or data.charge_rate is not None:
+                policy.ensure(ctx, "rate.manage")
             org = ctx.organization
             grade = await self._grade(org.id, data.grade_id)
             role = await self._role(org.id, data.role_id)
@@ -235,6 +239,22 @@ class StaffService:
                     "start_date": data.start_date.isoformat(),
                 },
             )
+            # The person's own rates, in the same transaction: nothing is left half done.
+            rates = RateRuleService(self.session)
+            starts = data.rate_effective_from or data.start_date
+            for kind, rate in (("cost", data.cost_rate), ("charge", data.charge_rate)):
+                if rate is not None:
+                    await rates.write_rule(
+                        ctx,
+                        rctx,
+                        kind=kind,
+                        scope=Scope(None, None, user.id, None),
+                        rate=rate,
+                        start=starts,
+                        end=None,
+                        audit_action="rate.created",
+                        source="staff_rates",
+                    )
             result = await self.detail(ctx, await self.fetch_row(ctx, user.id))
         return result
 

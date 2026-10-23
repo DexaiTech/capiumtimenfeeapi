@@ -12,6 +12,7 @@ from app.api.v1 import (
     credit_notes,
     dashboard,
     dashboard_pages,
+    data_import_export,
     debtors,
     disbursements,
     email_templates,
@@ -68,6 +69,8 @@ api_router.include_router(organizations.me_router)
 api_router.include_router(organizations.router)
 api_router.include_router(members.router)
 api_router.include_router(people.router)
+# Before staff, rates and jobs: /staff/export, /rates/export and /jobs/export are not ids.
+api_router.include_router(data_import_export.router)
 api_router.include_router(staff.router)
 api_router.include_router(grades.router)
 api_router.include_router(roles.permissions_router)

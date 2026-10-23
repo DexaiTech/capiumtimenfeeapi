@@ -20,7 +20,6 @@ from app.schemas.tickets import (
     BulkResult,
     CommentCreate,
     CommentRead,
-    CommentUpdate,
     TicketCreate,
     TicketDetail,
     TicketListItem,
@@ -283,9 +282,10 @@ async def get_ticket(
     "/tickets/{ticket_id}",
     summary="Update a ticket",
     description=(
-        "Partial update of `subject`, `description` (null clears it), `status`, `priority`, "
-        "`assignee_id` (null unassigns; an active member otherwise) and `tag_ids` (replaces the "
-        "tags). Unknown fields and null for the others answer 422. A status change writes a "
+        "Partial update of `status`, `priority`, `assignee_id` (null unassigns; an active member "
+        "otherwise) and `tag_ids` (replaces the tags). The subject and the description are "
+        "written when the ticket is created and cannot be changed afterwards: sending them, "
+        "like any unknown field, or null for the others, answers 422. A status change writes a "
         "history row and sets or clears `closed_at`; it is audited as `ticket.status_changed`, "
         "the other changes as `ticket.updated`. Requires `ticket.update`."
     ),
@@ -360,46 +360,6 @@ async def create_comment(
     ctx: ContextDep,
 ) -> ApiResponse[CommentRead]:
     return ok(await service.create(org, ticket_id, body, ctx), "Comment added")
-
-
-@router.patch(
-    "/tickets/{ticket_id}/comments/{comment_id}",
-    summary="Edit a comment",
-    description=(
-        "Changes the text (`edited_at` is set). Only the author may, and needs `ticket.update`; "
-        "the text may be empty only while the comment has files."
-    ),
-    responses=error_responses(403, 404),
-)
-async def update_comment(
-    ticket_id: uuid.UUID,
-    comment_id: uuid.UUID,
-    body: CommentUpdate,
-    org: TicketEditor,
-    service: CommentServiceDep,
-    ctx: ContextDep,
-) -> ApiResponse[CommentRead]:
-    return ok(await service.update(org, ticket_id, comment_id, body, ctx), "Comment updated")
-
-
-@router.delete(
-    "/tickets/{ticket_id}/comments/{comment_id}",
-    summary="Delete a comment",
-    description=(
-        "Deletes the comment and its files (also from the storage). Only the author (with "
-        "`ticket.update`) or someone with `ticket.delete` may."
-    ),
-    responses=error_responses(403, 404),
-)
-async def delete_comment(
-    ticket_id: uuid.UUID,
-    comment_id: uuid.UUID,
-    org: ContentEditor,
-    service: CommentServiceDep,
-    ctx: ContextDep,
-) -> ApiResponse[None]:
-    await service.delete(org, ticket_id, comment_id, ctx)
-    return ok(message="Comment deleted")
 
 
 # --- Attachments ------------------------------------------------------------------------

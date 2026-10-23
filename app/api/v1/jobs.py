@@ -8,9 +8,11 @@ from fastapi import APIRouter, Depends, Query, status
 
 from app.dependencies.common import ContextDep, SessionDep
 from app.dependencies.organization import PageParamsDep, require
+from app.schemas.bulk import BulkChangeResult
 from app.schemas.common import ApiResponse, error_responses, ok, ok_page
 from app.schemas.jobs import (
     JobAssigneesSet,
+    JobBulkAction,
     JobCopy,
     JobCreate,
     JobRead,
@@ -107,6 +109,38 @@ async def create_job(
     ctx: ContextDep,
 ) -> ApiResponse[JobRead]:
     return ok(await service.create(org, body, ctx), "Job created")
+
+
+@router.post(
+    "/jobs/bulk",
+    summary="Bulk action on jobs",
+    description=(
+        "Applies one `action` to 1-200 jobs (`job_ids`) in one transaction: all or nothing. "
+        "`set_status` (`value`: a job status; each job must be allowed that transition from its "
+        "status, as for `POST /jobs/{job_id}/status`), `set_manager` (`value`: a staff user id "
+        "who is an active member, or null to clear the manager), `set_due_date` (`value`: "
+        "YYYY-MM-DD, or null to clear it; not before a job's start date and not leaving an open "
+        "task due after it) and `delete` (no `value`; same rule as `DELETE /jobs/{job_id}`). "
+        "404 when any id is not a live job of the practice (`details.job_ids` lists them), 422 "
+        "for a wrong `value`. A job that breaks a rule answers 409 and nothing is changed: "
+        "`INVALID_STATUS_TRANSITION`, `JOB_FIELD_MANAGED_BY_PM` (name, manager and dates of a "
+        "job linked to practice management), `JOB_DUE_DATE_INVALID` or `JOB_IN_USE`, with "
+        "`details` listing each offending job (`job_id`, `number`, `reason`). `affected` is the "
+        "number of distinct jobs selected and `changed` how many of them actually changed (a job "
+        "already in the wanted state does not). Each job that changed gets its own audit row, as "
+        "if it had been changed alone, with `bulk: true`. Requires `job.update` (`job.delete` "
+        "for `delete`)."
+    ),
+    responses=error_responses(403, 404, 409),
+)
+async def bulk_jobs(
+    body: JobBulkAction,
+    org: Annotated[OrgContext, Depends(require())],
+    service: JobServiceDep,
+    ctx: ContextDep,
+) -> ApiResponse[BulkChangeResult]:
+    result = await service.bulk(org, body, ctx)
+    return ok(result, f"{result.changed} job{'s' if result.changed != 1 else ''} updated")
 
 
 @router.get(

@@ -13,6 +13,7 @@ from pydantic import BaseModel, EmailStr, Field, field_validator, model_validato
 
 from app.db.models import Client, ClientContact, ClientService, Service
 from app.schemas.billing import ClientRef
+from app.schemas.bulk import MAX_BULK_IDS, need_value, parse_user_id
 from app.schemas.common import RequestModel
 from app.schemas.rates import ClientRateRead
 from app.schemas.settings import Money, blank_is_null, reject_nulls
@@ -371,6 +372,47 @@ class ClientUpdate(_ClientFields):
     def _no_nulls(self) -> Self:
         reject_nulls(self, "code", "name", "client_type", "status", "country", "aml_status")
         return self
+
+
+ClientBulkActionName = Literal["set_status", "set_manager", "set_partner", "set_segment", "delete"]
+_CLIENT_STATUSES = ("prospect", "active", "inactive", "archived")
+
+
+class ClientBulkAction(RequestModel):
+    client_ids: list[uuid.UUID] = Field(min_length=1, max_length=MAX_BULK_IDS)
+    action: ClientBulkActionName
+    value: str | None = Field(
+        default=None,
+        description=(
+            "`set_status`: a client status (`archived` archives); `set_manager` / "
+            "`set_partner`: a staff user id, or null to clear; `set_segment`: a segment of up "
+            "to 40 characters, or null/blank to clear; `delete`: no value"
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _value_fits_the_action(self) -> Self:
+        value = self.value
+        if self.action == "delete":
+            if value is not None:
+                raise ValueError("value: This action takes no value.")
+        elif self.action == "set_status":
+            if need_value(value) not in _CLIENT_STATUSES:
+                raise ValueError(f"value: Use one of {', '.join(_CLIENT_STATUSES)}.")
+        elif self.action == "set_segment":
+            if value is not None and len(value) > 40:
+                raise ValueError("value: Use at most 40 characters.")
+        elif value is not None:
+            parse_user_id(value)
+        return self
+
+    @property
+    def user_id(self) -> uuid.UUID | None:
+        return parse_user_id(self.value) if self.value is not None else None
+
+    @property
+    def segment(self) -> str | None:
+        return self.value or None
 
 
 class ClientRead(BaseModel):

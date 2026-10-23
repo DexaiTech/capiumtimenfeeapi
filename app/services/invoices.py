@@ -39,12 +39,14 @@ from app.repositories.invoice_templates import InvoiceTemplateRepository
 from app.repositories.invoices import InvoiceFilters, InvoiceRepository
 from app.repositories.wip import WipRepository
 from app.schemas.billing import PersonRef, hours_of
+from app.schemas.bulk import BulkChangeResult, unique_ids
 from app.schemas.invoices import (
     ApprovalEventRead,
     CreditNoteSummary,
     DisplayStatus,
     InvoiceAddWip,
     InvoiceApprove,
+    InvoiceBulkAction,
     InvoiceCreate,
     InvoiceIssue,
     InvoiceListSummary,
@@ -75,6 +77,7 @@ from app.services import (
     policy,
 )
 from app.services import jobs as job_queue
+from app.services.audit import AuditRow
 from app.services.billing_common import (
     VatResolver,
     conflict,
@@ -84,6 +87,7 @@ from app.services.billing_common import (
     record,
     today_for,
 )
+from app.services.common import record_audit_many
 from app.services.email import Attachment, EmailService
 from app.services.email_templates import load_override
 from app.services.policy import OrgContext
@@ -803,6 +807,55 @@ class InvoiceService:
                 target_id=invoice_id,
                 meta=meta,
             )
+
+    async def bulk(
+        self, ctx: OrgContext, data: InvoiceBulkAction, rctx: RequestContext
+    ) -> BulkChangeResult:
+        """Delete up to 200 drafts, all or nothing: one invoice that is not a draft (409
+        ``INVOICE_NOT_DRAFT``) stops the whole action, which then deletes nothing."""
+        policy.ensure(ctx, "invoice.create")
+        org_id = ctx.organization_id
+        ids = unique_ids(data.invoice_ids)
+        async with unit_of_work(self.session):
+            invoices = await self.invoices.lock_many(org_id, ids)
+            if len(invoices) != len(ids):
+                found = {i.id for i in invoices}
+                raise NotFoundError(
+                    "Some of the invoices were not found.",
+                    details={"invoice_ids": [str(i) for i in ids if i not in found]},
+                )
+            clients = await self.refs.clients_by_ids(org_id, {i.client_id for i in invoices})
+            locked = [i for i in invoices if i.status != "draft"]
+            if locked:
+                raise conflict(
+                    "INVOICE_NOT_DRAFT",
+                    f"{len(locked)} of the invoices {'are' if len(locked) != 1 else 'is'} not a "
+                    "draft and cannot be deleted. Nothing was deleted.",
+                    details=[
+                        {
+                            "invoice_id": str(i.id),
+                            "number": i.number,
+                            "status": i.status,
+                            "reason": "Only a draft can be deleted: correct an issued invoice "
+                            "with a credit note.",
+                        }
+                        for i in locked
+                    ],
+                )
+            rows: list[AuditRow] = []
+            for invoice in invoices:
+                allocations = await self.wip.allocations_for_invoice(org_id, invoice.id)
+                await self._release(ctx, allocations)
+                meta = _meta(
+                    invoice,
+                    clients.get(invoice.client_id),
+                    item_count=len(allocations),
+                    bulk=True,
+                )
+                await self.invoices.delete(invoice)
+                rows.append(("invoice.draft_deleted", "invoice", invoice.id, meta))
+            await record_audit_many(self.session, ctx, rctx, rows)
+        return BulkChangeResult(action=data.action, affected=len(ids), changed=len(rows))
 
     # --- Approval ----------------------------------------------------------------------
 

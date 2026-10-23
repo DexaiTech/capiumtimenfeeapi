@@ -173,6 +173,23 @@ class ClientJobRepository:
             )
         return {j.id: j for j in (await self.session.execute(stmt)).scalars()}
 
+    async def lock_many(
+        self, organization_id: uuid.UUID, job_ids: Collection[uuid.UUID]
+    ) -> list[Job]:
+        """Live jobs among ``job_ids`` locked ``FOR UPDATE`` in id order (no deadlocks)."""
+        stmt = (
+            select(Job)
+            .where(
+                Job.organization_id == organization_id,
+                Job.id.in_(list(job_ids)),
+                Job.deleted_at.is_(None),
+            )
+            .order_by(Job.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        return list((await self.session.execute(stmt)).scalars())
+
     async def view(self, organization_id: uuid.UUID, job_id: uuid.UUID) -> JobView | None:
         stmt = _view_select().where(
             Job.organization_id == organization_id, Job.id == job_id, Job.deleted_at.is_(None)
@@ -279,6 +296,18 @@ class ClientJobRepository:
                 )
             )
         return bool(await self.session.scalar(select(or_(*checks))))
+
+    async def in_use_ids(
+        self, organization_id: uuid.UUID, job_ids: Collection[uuid.UUID]
+    ) -> set[uuid.UUID]:
+        """Of ``job_ids``, the jobs that ``in_use`` is true for."""
+        found: set[uuid.UUID] = set()
+        for model in (TimeEntry, Disbursement, Expense, InvoiceLine, WipWriteOff):
+            stmt = select(model.job_id).where(
+                model.organization_id == organization_id, model.job_id.in_(list(job_ids))
+            )
+            found.update(j for j in (await self.session.execute(stmt)).scalars() if j)
+        return found
 
     async def soft_delete(self, job: Job) -> None:
         job.deleted_at = datetime.now(UTC)

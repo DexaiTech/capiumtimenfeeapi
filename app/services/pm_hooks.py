@@ -56,6 +56,11 @@ def applying_pm_change() -> Iterator[None]:
         _applying_pm_change.reset(token)
 
 
+def applying_pm_change_active() -> bool:
+    """Whether PM's own change is being applied (its fields may be written)."""
+    return _applying_pm_change.get()
+
+
 def ensure_pm_fields_free(job: Job, data: BaseModel) -> None:
     """409 ``JOB_FIELD_MANAGED_BY_PM`` when a request would change a PM-owned field of a linked
     job (the details name each field)."""

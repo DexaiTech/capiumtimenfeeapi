@@ -45,8 +45,6 @@ description and its error responses.
 | GET | `/tickets/{ticket_id}/timeline` | `ticket.read` |
 | GET | `/tickets/{ticket_id}/comments` | `ticket.read` |
 | POST | `/tickets/{ticket_id}/comments` | `ticket.update` |
-| PATCH | `/tickets/{ticket_id}/comments/{comment_id}` | `ticket.update`, and the caller is the author |
-| DELETE | `/tickets/{ticket_id}/comments/{comment_id}` | the author with `ticket.update`, or anyone with `ticket.delete` |
 | GET | `/tickets/{ticket_id}/attachments` | `ticket.read` |
 | POST | `/tickets/{ticket_id}/attachments` | `ticket.update` (a file on someone else's comment: `ticket.delete`) |
 | GET | `/tickets/{ticket_id}/attachments/{attachment_id}` | `ticket.read` |
@@ -193,7 +191,7 @@ log is append-only, so older entries keep the old codes (the timeline maps them)
 }
 ```
 
-`edited_at` is null until the author changes the text.
+`edited_at` is null, except for a comment edited before comments were made read-only.
 
 `Tag` (`GET /ticket-tags`, create, update):
 
@@ -267,7 +265,7 @@ Permission `ticket.read`. Response `TicketDetail`. Comments come from `GET /tick
 
 ## PATCH /tickets/{ticket_id}
 
-Permission `ticket.update`. Response `TicketDetail`. Partial: send only what changes (the inline selects send `{"status": "on_hold"}`).
+Permission `ticket.update`. Response `TicketDetail`. Partial: send only what changes (the inline selects send `{"status": "on_hold"}`). Fields: `status`, `priority`, `assignee_id`, `tag_ids`; the subject and description cannot be changed.
 
 | Field | Semantics |
 |---|---|
@@ -340,16 +338,12 @@ Permission `ticket.update`. Response 201: `Comment`, message `Comment added`.
 | `body` | string ≤ 5,000, default `""` | May be empty **only** when `attachment_ids` is not (422 on `body` otherwise). |
 | `attachment_ids` | uuid[] ≤ 25 | Files of **this ticket** that are not on a comment yet (uploaded earlier with `POST …/attachments` and no `comment_id`). 422 on `attachment_ids` for any other id. They move onto the new comment. |
 
-## PATCH /tickets/{ticket_id}/comments/{comment_id}
+## Comments cannot be edited or deleted
 
-Permission `ticket.update`, and the caller must be the **author** (403 for anyone else, moderators included). Body `{"body": "…"}`.
-`edited_at` is set when the text really changes. The text may be empty only while the comment has files (422 on `body`). Audited as
-`ticket_comment.updated`.
-
-## DELETE /tickets/{ticket_id}/comments/{comment_id}
-
-The author (with `ticket.update`) or anyone with `ticket.delete` (moderation). Deletes the comment and its files, from the storage
-too. Response 200, `data: null`.
+A comment is a record: once posted there is no route to edit or delete it (PATCH and DELETE on `/comments/{comment_id}` answer 404/405),
+for anyone. Likewise the **subject and the description of a ticket are written when it is created**: `PATCH /tickets/{id}` does not
+accept them (422, unknown field). `edited_at` and the `ticket_comment.updated/deleted`, `subject`/`description` audit entries remain only
+for what was written before this rule; the timeline still shows those old events. A file on a comment can still be removed (as on the ticket).
 
 ---
 
@@ -645,7 +639,7 @@ and 14 all-zero trend entries.
 |---|---|
 | `ticket.read` | Lists, the detail, comments, the files (and downloading them), tags and the dashboard |
 | `ticket.create` | Raising tickets |
-| `ticket.update` | Editing tickets (status, priority, tags, assignee, text), bulk changes, commenting, uploading files, creating and editing tags, editing **one's own** comments and removing **one's own** comments and files |
+| `ticket.update` | Editing tickets (status, priority, tags, assignee), bulk changes, commenting, uploading files, creating and editing tags and removing **one's own** files |
 | `ticket.delete` | Deleting tags, and removing **anyone's** comments and files (moderation) |
 
 | Role | Codes |
@@ -662,7 +656,7 @@ Custom roles get exactly the codes they are given. Hide or disable what the call
 |---|---|---|---|
 | 400 | `FILE_INVALID` | An upload that is not `multipart/form-data`, has no `file` part, has more than one, or is malformed | null |
 | 401 | `AUTH_REQUIRED` | No or an invalid access token | null |
-| 403 | `PERMISSION_DENIED` | The role lacks the code; or editing someone else's comment; or deleting someone else's comment or file without `ticket.delete` | null |
+| 403 | `PERMISSION_DENIED` | The role lacks the code; or deleting someone else's file without `ticket.delete` | null |
 | 404 | `RESOURCE_NOT_FOUND` | Unknown id, or another practice's; a bulk call with such an id | null; bulk: `{"ticket_ids": [ids]}` |
 | 404 | `ATTACHMENT_FILE_MISSING` | The attachment record exists but the stored file is gone | null |
 | 409 | `TAG_NAME_TAKEN` | A tag with that name exists (ignoring case) | `[{field: "name", code: "duplicate", message}]` |
@@ -688,9 +682,9 @@ and the request id they share. A change that changes nothing writes nothing.
 | Action | `target_type` | Meta |
 |---|---|---|
 | `ticket.created` | `ticket` | `code`, `subject`, `status`, `priority`, `assignee_id`, `tags` (names) |
-| `ticket.updated` | `ticket` | `code`, `subject`, `changes: {subject, description, priority, assignee_id, tags: [old, new]}` (only what changed; a long text is cut at 500 characters; `tags` are lists of names) |
+| `ticket.updated` | `ticket` | `code`, `subject`, `changes: {priority, assignee_id, tags: [old, new]}` (only what changed; `tags` are lists of names; older entries may also hold `subject`/`description`) |
 | `ticket.status_changed` | `ticket` | `code`, `subject`, `from`, `to`, `changes: {status: [from, to]}` |
-| `ticket_comment.created` | `ticket_comment` | `ticket_id`, `code`, `attachments` |
+| `ticket_comment.created` | `ticket_comment` | `ticket_id`, `code`, `attachments`, `excerpt` (first 200 characters) |
 | `ticket_comment.updated` | `ticket_comment` | `ticket_id`, `code`, `changes: {body: [old, new]}` |
 | `ticket_comment.deleted` | `ticket_comment` | `ticket_id`, `code`, `attachments` |
 | `ticket_attachment.added` | `ticket_attachment` | `ticket_id`, `code`, `file_name`, `content_type`, `size_bytes`, `comment_id` |
@@ -728,7 +722,7 @@ created with every practice (existing practices got it from migration `015`). Se
 |---|---|
 | Application Testing Dashboard | `GET /tickets/dashboard?date_from=&date_to=` (send the picker's range; without it the last 19 days). KPI cards from `kpis`, donut from `by_status`, bars from `by_priority` and `by_tag`, line chart from `trend`, "Top Assignees" from `top_assignees`, "Recent Tickets" from `recent`. |
 | All Tickets | `GET /tickets` with `q`, `status`, `priority`, `tag_id`, `sort`, `order`, `cursor`; the tag filter from `GET /ticket-tags`. Inline status and priority: `PATCH /tickets/{id}`. "Add tags": `PATCH /tickets/{id}` with the full `tag_ids`, or `POST /tickets/bulk` `add_tag` for one. Selection: `POST /tickets/bulk`. "+ Application Testing": `POST /tickets`. |
-| Ticket detail | `GET /tickets/{id}` and `GET /tickets/{id}/comments`; inline subject, description, status, priority, tags: `PATCH /tickets/{id}`; the files panel: upload `POST …/attachments`, show with the blob flow, remove `DELETE …/attachments/{id}`; comments: `POST/PATCH/DELETE …/comments`. |
+| Ticket detail | `GET /tickets/{id}` and `GET /tickets/{id}/comments`; inline status, priority, tags: `PATCH /tickets/{id}`; the timeline `GET …/timeline`; the files panel: upload `POST …/attachments`, show with the blob flow, remove `DELETE …/attachments/{id}`; comments: `POST …/comments` (read-only afterwards). |
 
 # Types at a glance
 

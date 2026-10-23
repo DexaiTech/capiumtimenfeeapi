@@ -383,17 +383,8 @@ async def test_the_last_file_of_a_comment_without_text_cannot_be_deleted(client)
     ).status_code == 200
     still = await client.delete(files_url(t, ticket["id"], second["id"]), headers=t.owner.headers)
     assert still.status_code == 409
-    # With text on the comment the file may go.
-    edited = await client.patch(
-        files_url(t, ticket["id"]).replace("/attachments", f"/comments/{comment['id']}"),
-        headers=t.owner.headers,
-        json={"body": "Now with words"},
-    )
-    assert edited.status_code == 200
-    assert (
-        await client.delete(files_url(t, ticket["id"], second["id"]), headers=t.owner.headers)
-    ).status_code == 200
-    assert stored_files() == []
+    # A comment cannot be edited, so a comment without text keeps its last file.
+    assert len(stored_files()) == 1
 
 
 async def test_a_file_that_cannot_be_removed_does_not_fail_the_delete(client, monkeypatch):

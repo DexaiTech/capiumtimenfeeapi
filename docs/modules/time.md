@@ -25,6 +25,7 @@ queue** (used by the worker), so the client-work job code lives in `time_jobs.py
 | GET | `/jobs` | `job.read` | List jobs with actuals; filters `client_id`, `status` (multi), `manager_user_id`, `partner_user_id`, `assignee` (id or `me`), `service_id`, `due_from`, `due_to`, `q`; `sort` = `due_date`/`number`/`created_at` (prefix `-` for desc, default `-created_at`) |
 | POST | `/jobs` | `job.create` | Create (number from `job` sequence, defaults from service) |
 | GET | `/jobs/{id}` | `job.read` | One job with assignees and actuals |
+| POST | `/jobs/bulk` | `job.update` (`job.delete` for `delete`) | One action on 1-200 jobs, all or nothing (see "Bulk action on jobs"). Declared before `/jobs/{id}`. |
 | PATCH | `/jobs/{id}` | `job.update` | Edit details (not client, not status) |
 | POST | `/jobs/{id}/status` | `job.update` | Status transition `{status}` |
 | PUT | `/jobs/{id}/assignees` | `job.update` | Replace assignees `{user_ids}` (active members) |
@@ -60,6 +61,31 @@ queue** (used by the worker), so the client-work job code lives in `time_jobs.py
 | POST | `/approvals/bulk-approve` | `timesheet.approve` | `{timesheet_ids}` (1–100), atomically |
 | GET | `/timesheets/missing` | `time.read_all`, else the people the caller manages | Staff whose timesheet for a week is not submitted; `week_start`, `user_id`, `manager_user_id` |
 | POST | `/timesheets/reminders/run` | `organization.update` or `timesheet.approve` | Send the timesheet and approval reminders of a week; optional `{week_start}` |
+
+## Bulk action on jobs
+
+`POST /jobs/bulk`, body `{job_ids, action, value?}`. All or nothing in one transaction: the jobs are locked in id order and a
+rule that any job breaks (409) stops the whole action, so nothing is ever partly applied. Permission `job.update`, or `job.delete`
+for `delete` (403 otherwise, as for the single operations).
+
+| Field | Type | Notes |
+|---|---|---|
+| `job_ids` | uuid[] 1-200 | Duplicates count once. Any id that is not a live job of the practice: 404 `RESOURCE_NOT_FOUND`, `details: {"job_ids": [the unknown ids]}`, nothing changes. |
+| `action` | `set_status`, `set_manager`, `set_due_date`, `delete` | |
+| `value` | string or null | `set_status`: a job status (required). `set_manager`: a staff user id (an active member, 422 otherwise); null clears the manager. `set_due_date`: `YYYY-MM-DD`; null clears it. `delete`: no value (a value is 422). A wrong value is 422 on `value`. |
+
+Rules are those of the single operations. `set_status` uses the same transition table as `POST /jobs/{id}/status` (a job that is
+already in the wanted status is skipped; one that may not move there answers 409 `INVALID_STATUS_TRANSITION`, `details`: one entry
+per job with `job_id`, `number`, `reason`, `from`, `allowed`) and sets `completed_at`/`closed_at` the same way. `set_manager` and
+`set_due_date` answer 409 `JOB_FIELD_MANAGED_BY_PM` for a job linked to practice management; `set_due_date` answers 409
+`JOB_DUE_DATE_INVALID` for a due date before a job's start date or one that leaves an open task due after it. `delete` answers 409
+`JOB_IN_USE` when any selected job has time, disbursements, expense lines, invoice lines or write-offs (it deletes none); the jobs
+that can go also lose their running timers.
+
+Response `{"action", "affected", "changed"}`: `affected` is the number of distinct jobs selected, `changed` how many actually
+changed (a job already in the wanted state does not count). Each job that changed gets its own audit row, the one the single
+operation writes (`job.status_changed`, `job.updated` with `changes`, `job.deleted`), with `bulk: true` in its meta. A changed
+status of a linked job is queued for practice management as for a single change.
 
 ## Shapes (abridged)
 
@@ -115,7 +141,9 @@ charge_value_after, value_delta, cost_value_delta` (`null` without `rate.read`).
 | 409 | `JOB_CLOSED` | Time or timer on a `completed`/`cancelled` job |
 | 409 | `TIME_LOCKED` | Writing time on a `submitted`/`approved` sheet, or an entry that is not `unbilled` |
 | 409 | `INVALID_STATUS_TRANSITION` | Job or timesheet status change not allowed (`details.from/to`) |
-| 409 | `JOB_IN_USE` | Deleting a job referenced by time, disbursements, invoice lines or write-offs |
+| 409 | `JOB_IN_USE` | Deleting a job referenced by time, disbursements, invoice lines or write-offs (bulk: `details` lists each such job) |
+| 409 | `JOB_FIELD_MANAGED_BY_PM` | A bulk `set_manager` / `set_due_date` that includes a job linked to practice management (`details`: one entry per job) |
+| 409 | `JOB_DUE_DATE_INVALID` | A bulk `set_due_date` that is before a job's start date or leaves an open task due after it (`details`: one entry per job) |
 | 409 | `TIMER_RUNNING` | Start with a timer already present (without `replace`), resume a running timer |
 | 409 | `TIMER_NOT_RUNNING` | Pause a paused timer |
 | 409 | `TIMESHEET_HAS_BILLED_TIME` | Reopen with an entry `in_draft`, `billed` or `written_off` |

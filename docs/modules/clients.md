@@ -72,6 +72,7 @@ practice's ids answer 404.
 | POST | `/clients/{client_id}/central-sync` · `/clients/central-sync` | `client.update` | Synchronise the centrally managed name and address of one / every linked client. |
 | PATCH | `/clients/{client_id}` | `client.update` | Change any field (archive transitions also need `client.delete`). |
 | POST | `/clients/{client_id}/archive` | `client.delete` | Status → `archived`. |
+| POST | `/clients/bulk` | `client.update` (`client.delete` for `delete` and for archiving) | One action on 1-200 clients, all or nothing (see "Bulk action"). Declared before `/clients/{client_id}`. |
 | DELETE | `/clients/{client_id}` | `client.delete` | Soft delete when unused, else 409 `CLIENT_IN_USE`. |
 | GET / POST | `/clients/{client_id}/contacts` | `client.read` / `client.update` | List / add contact. |
 | PATCH / DELETE | `/clients/{client_id}/contacts/{contact_id}` | `client.update` | Change / delete contact. |
@@ -158,7 +159,7 @@ active engagements, deadline counts) regardless of page size (tested).
 | `MEMBER_REMOVED` | 409 | Adding a rate for a removed member. |
 | `CLIENT_RATE_EXISTS` | 409 | Second everyone-rate, or second rate for the same person, on a client. |
 | `CLIENT_CODE_TAKEN` | 409 | Another live client uses the code. |
-| `CLIENT_IN_USE` | 409 | Delete of a client with jobs/time/disbursements/invoices/credit notes/payments (`details` has counts). |
+| `CLIENT_IN_USE` | 409 | Delete of a client with jobs/time/disbursements/invoices/credit notes/payments (`details` has counts; for a bulk delete `details` is a list with one entry per such client: `client_id`, `code`, `name`, `reason`, `usage` counts). |
 | `CLIENT_INACTIVE` | 409 | Raised by `ensure_client_accepts_work` for inactive/archived clients. |
 | `CLIENT_SERVICE_EXISTS` | 409 | The client already takes that service. |
 | `CLIENT_FIELD_MANAGED_CENTRALLY` | 409 | Changing the name or address of a client linked to the central client service (`details`: one entry per field). |
@@ -273,6 +274,24 @@ file) and writes one `client.imported` audit row (count + first 100 codes).
 The CSV **export** and **import** are unchanged by the Clients 360 release: the export is not
 column-complete (no address, tax references or billing settings), so the new fields were not
 added to either.
+
+## Bulk action
+
+`POST /clients/bulk`, body `{client_ids, action, value?}`: one action on 1-200 clients, all or nothing in one transaction (the
+clients are locked in id order; a rule that any client breaks stops the whole action). Permission `client.update`, or
+`client.delete` for `delete`.
+
+| Field | Type | Notes |
+|---|---|---|
+| `client_ids` | uuid[] 1-200 | Duplicates count once. Any id that is not a live client of the practice: 404 `RESOURCE_NOT_FOUND`, `details: {"client_ids": [...]}`, nothing changes. |
+| `action` | `set_status`, `set_manager`, `set_partner`, `set_segment`, `delete` | |
+| `value` | string or null | `set_status`: `prospect`, `active`, `inactive` or `archived` (required; `archived` is how clients are archived in bulk, so there is no separate `archive` action; moving a client into or out of `archived` also needs `client.delete`, 403 otherwise). `set_manager` / `set_partner`: a staff user id (an active member, 422 otherwise), null clears. `set_segment`: up to 40 characters; null or blank clears. `delete`: no value (a value is 422). |
+
+`delete` follows `DELETE /clients/{id}`: a client with jobs, time, disbursements, expenses, invoices, credit notes or payments makes
+the whole call answer 409 `CLIENT_IN_USE` (nothing is deleted; archive those instead). The name and address of a centrally
+managed client are not touched by any of these actions. Response `{"action", "affected", "changed"}` (a client already holding the
+wanted value counts in `affected` only). Each client that changed gets the audit row of the single change (`client.updated`,
+`client.archived` when the new status is `archived`, `client.deleted`) with `bulk: true`.
 
 ## Audit actions
 

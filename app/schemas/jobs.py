@@ -7,6 +7,12 @@ from typing import Annotated, Literal, Self
 from pydantic import BaseModel, Field, model_validator
 
 from app.repositories.time_jobs import JobActuals, JobView
+from app.schemas.bulk import (
+    MAX_BULK_IDS,
+    need_value,
+    parse_day,
+    parse_user_id,
+)
 from app.schemas.common import RequestModel
 from app.utils.money import percentage_bp
 
@@ -206,6 +212,46 @@ class JobUpdate(RequestModel):
 
 class JobStatusChange(RequestModel):
     status: JobStatus
+
+
+JobBulkActionName = Literal["set_status", "set_manager", "set_due_date", "delete"]
+_JOB_STATUSES = ("planned", "in_progress", "on_hold", "completed", "closed", "cancelled")
+
+
+class JobBulkAction(RequestModel):
+    job_ids: list[uuid.UUID] = Field(min_length=1, max_length=MAX_BULK_IDS)
+    action: JobBulkActionName
+    value: str | None = Field(
+        default=None,
+        description=(
+            "`set_status`: a job status; `set_manager`: a staff user id, or null to clear the "
+            "manager; `set_due_date`: a date (YYYY-MM-DD), or null to clear it; `delete`: "
+            "no value"
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _value_fits_the_action(self) -> Self:
+        value = self.value
+        if self.action == "delete":
+            if value is not None:
+                raise ValueError("value: This action takes no value.")
+        elif self.action == "set_status":
+            if need_value(value) not in _JOB_STATUSES:
+                raise ValueError(f"value: Use one of {', '.join(_JOB_STATUSES)}.")
+        elif value is not None and self.action == "set_manager":
+            parse_user_id(value)
+        elif value is not None and self.action == "set_due_date":
+            parse_day(value)
+        return self
+
+    @property
+    def user_id(self) -> uuid.UUID | None:
+        return parse_user_id(self.value) if self.value is not None else None
+
+    @property
+    def day(self) -> date | None:
+        return parse_day(self.value) if self.value is not None else None
 
 
 class JobAssigneesSet(RequestModel):

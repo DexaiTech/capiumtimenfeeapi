@@ -10,7 +10,7 @@ from app.repositories.staff import StaffRow, normalised_status
 from app.schemas.common import RequestModel
 from app.schemas.organization import Initials, RoleSummary
 from app.schemas.rate_rules import RefRead
-from app.schemas.settings import reject_nulls
+from app.schemas.settings import Money, reject_nulls
 from app.services.charge_rates import ResolvedRate
 
 StaffStatus = Literal["active", "inactive", "left"]
@@ -190,6 +190,23 @@ class StaffCreate(RequestModel):
     role_id: uuid.UUID | None = Field(
         default=None, description="Role once they have a login; default the Staff role"
     )
+    cost_rate: Money | None = Field(
+        default=None,
+        description=(
+            "Pence per hour: also sets the person's own cost rate from `rate_effective_from`. "
+            "Needs `rate.manage` besides `member.invite`."
+        ),
+    )
+    charge_rate: Money | None = Field(
+        default=None,
+        description=(
+            "Pence per hour: also sets the person's own charge-out rate from "
+            "`rate_effective_from`. Needs `rate.manage` besides `member.invite`."
+        ),
+    )
+    rate_effective_from: date | None = Field(
+        default=None, description="When the rates above start; default `start_date`"
+    )
 
     _code = field_validator("code")(_staff_code)
     _days = field_validator("working_days")(_working_days)
@@ -261,6 +278,49 @@ class StaffDeactivate(RequestModel):
     leaving_date: date | None = Field(
         default=None, description="For `left`: default today; ignored for `inactive`"
     )
+
+
+StaffBulkActionName = Literal[
+    "set_grade", "set_approver", "clear_approver", "deactivate", "reactivate", "delete"
+]
+MAX_BULK_STAFF = 200
+
+
+class StaffBulkAction(RequestModel):
+    """One action on up to 200 staff members, all or nothing."""
+
+    staff_ids: list[uuid.UUID] = Field(min_length=1, max_length=MAX_BULK_STAFF)
+    action: StaffBulkActionName
+    value: str | None = Field(
+        default=None,
+        description=(
+            "`set_grade`: a grade id; `set_approver`: a staff id (someone who can sign in); "
+            "`deactivate`: `inactive` (default) or `left`; the others take no value"
+        ),
+    )
+    leaving_date: date | None = Field(
+        default=None, description="`deactivate` with `left`: default today"
+    )
+
+    @model_validator(mode="after")
+    def _value_fits_the_action(self) -> Self:
+        if self.action in ("set_grade", "set_approver"):
+            try:
+                uuid.UUID(self.value or "")
+            except ValueError as exc:
+                raise ValueError("value: Use the id of a grade or a staff member.") from exc
+        elif self.action == "deactivate":
+            if self.value not in (None, "inactive", "left"):
+                raise ValueError("value: Use inactive or left.")
+        elif self.value is not None:
+            raise ValueError("value: This action takes no value.")
+        return self
+
+
+class StaffBulkResult(BaseModel):
+    action: StaffBulkActionName
+    affected: int = Field(description="Distinct staff members the action was applied to")
+    changed: int = Field(description="Of those, the people who actually changed")
 
 
 class StaffLinkLogin(RequestModel):

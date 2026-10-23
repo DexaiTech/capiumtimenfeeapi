@@ -18,8 +18,10 @@ from app.repositories.job_tasks import TaskRepository
 from app.repositories.time_entries import TimerRepository
 from app.repositories.time_jobs import ClientJobRepository, JobFilters
 from app.repositories.time_refs import TimeReferenceRepository
+from app.schemas.bulk import BulkChangeResult, unique_ids
 from app.schemas.jobs import (
     JobAssigneesSet,
+    JobBulkAction,
     JobCopy,
     JobCreate,
     JobRead,
@@ -27,9 +29,15 @@ from app.schemas.jobs import (
     JobUpdate,
     TaskCounts,
 )
-from app.services import audit, sequences
+from app.services import audit, policy, sequences
+from app.services.audit import AuditRow
+from app.services.common import record_audit_many
 from app.services.job_budget_alerts import refresh_job_budgets
-from app.services.pm_hooks import ensure_pm_fields_free, queue_job_status
+from app.services.pm_hooks import (
+    applying_pm_change_active,
+    ensure_pm_fields_free,
+    queue_job_status,
+)
 from app.services.policy import OrgContext
 from app.services.time_rules import (
     InvalidTransitionError,
@@ -66,6 +74,10 @@ _UPDATABLE = (
     "partner_user_id",
     "manager_user_id",
 )
+
+
+# A job a bulk action changed: the audit action and what it adds to the audit meta.
+JobChange = tuple[Job, str, dict[str, Any]]
 
 
 class JobInUseError(ConflictError):
@@ -339,15 +351,7 @@ class JobService:
                     f"{data.status.replace('_', ' ')}.",
                     details={"from": old, "to": data.status, "allowed": sorted(TRANSITIONS[old])},
                 )
-            job.status = data.status
-            if data.status == "completed":
-                job.completed_at = practice_now()
-            elif data.status == "closed":
-                job.closed_at = practice_now()
-            elif old in ("completed", "closed"):  # reopened
-                job.completed_at = None
-            if old == "closed":
-                job.closed_at = None
+            self._apply_status(job, data.status)
             await self.session.flush()
             await self._audit(
                 ctx, rctx, "job.status_changed", job, extra={"old": old, "new": data.status}
@@ -355,6 +359,20 @@ class JobService:
             await queue_job_status(self.session, job)
             result = await self._read(ctx, job.id)
         return result
+
+    @staticmethod
+    def _apply_status(job: Job, new: str) -> None:
+        """Move the job to ``new`` (the transition is already checked) with its dates."""
+        old = job.status
+        job.status = new
+        if new == "completed":
+            job.completed_at = practice_now()
+        elif new == "closed":
+            job.closed_at = practice_now()
+        elif old in ("completed", "closed"):  # reopened
+            job.completed_at = None
+        if old == "closed":
+            job.closed_at = None
 
     async def set_assignees(
         self, ctx: OrgContext, job_id: uuid.UUID, data: JobAssigneesSet, rctx: RequestContext
@@ -507,6 +525,171 @@ class JobService:
             await TimerRepository(self.session).delete_for_job(ctx.organization_id, job.id)
             await self.jobs.soft_delete(job)
             await self._audit(ctx, rctx, "job.deleted", job)
+
+    # --- Bulk action -----------------------------------------------------------------------
+
+    async def bulk(
+        self, ctx: OrgContext, data: JobBulkAction, rctx: RequestContext
+    ) -> BulkChangeResult:
+        """One action on up to 200 jobs, all or nothing: each job is checked with the rules of
+        the single operation and one that breaks them (409) stops the whole action."""
+        policy.ensure(ctx, "job.delete" if data.action == "delete" else "job.update")
+        org_id = ctx.organization_id
+        ids = unique_ids(data.job_ids)
+        async with unit_of_work(self.session):
+            jobs = await self.jobs.lock_many(org_id, ids)
+            if len(jobs) != len(ids):
+                found = {j.id for j in jobs}
+                raise NotFoundError(
+                    "Some of the jobs were not found.",
+                    details={"job_ids": [str(i) for i in ids if i not in found]},
+                )
+            clients = await self.refs.get_clients(org_id, {j.client_id for j in jobs})
+            changed: list[JobChange] = []
+            match data.action:
+                case "set_status":
+                    assert data.value is not None
+                    changed = self._bulk_status(jobs, data.value)
+                case "set_manager":
+                    changed = await self._bulk_manager(ctx, jobs, data.user_id)
+                case "set_due_date":
+                    changed = await self._bulk_due_date(jobs, data.day)
+                case "delete":
+                    changed = await self._bulk_delete(ctx, jobs)
+            await self.session.flush()
+            rows: list[AuditRow] = []
+            for job, action, extra in changed:
+                client = clients.get(job.client_id)
+                meta = {
+                    "number": job.number,
+                    "name": job.name,
+                    "client_id": str(job.client_id),
+                    "client_name": client.name if client else None,
+                    **extra,
+                    "bulk": True,
+                }
+                rows.append((action, "job", job.id, meta))
+            await record_audit_many(self.session, ctx, rctx, rows)
+            if data.action == "set_status":
+                for job, _, _ in changed:
+                    await queue_job_status(self.session, job)
+        return BulkChangeResult(action=data.action, affected=len(ids), changed=len(changed))
+
+    @staticmethod
+    def _refuse(code: str, message: str, details: list[dict[str, Any]]) -> ConflictError:
+        return ConflictError(message, code=code, details=details)
+
+    def _bulk_status(self, jobs: Sequence[Job], status: str) -> list[JobChange]:
+        refused = [
+            {
+                "job_id": str(j.id),
+                "number": j.number,
+                "reason": f"A {j.status.replace('_', ' ')} job cannot be moved to "
+                f"{status.replace('_', ' ')}.",
+                "from": j.status,
+                "allowed": sorted(TRANSITIONS[j.status]),
+            }
+            for j in jobs
+            if j.status != status and status not in TRANSITIONS[j.status]
+        ]
+        if refused:
+            raise InvalidTransitionError(
+                f"{len(refused)} job{'s' if len(refused) != 1 else ''} cannot be moved to "
+                f"{status.replace('_', ' ')}. Nothing was changed.",
+                details=refused,
+            )
+        rows = []
+        for job in jobs:
+            old = job.status
+            if old == status:
+                continue
+            self._apply_status(job, status)
+            rows.append((job, "job.status_changed", {"old": old, "new": status}))
+        return rows
+
+    async def _bulk_manager(
+        self, ctx: OrgContext, jobs: Sequence[Job], manager: uuid.UUID | None
+    ) -> list[JobChange]:
+        moving = [j for j in jobs if j.manager_user_id != manager]
+        self._ensure_not_pm_managed(moving, "manager", "manager_user_id")
+        if manager is not None and moving:
+            await self._ensure_active_members(ctx, {"value": manager})
+        rows = []
+        for job in moving:
+            old = job.manager_user_id
+            job.manager_user_id = manager
+            rows.append(
+                (job, "job.updated", {"changes": {"manager_user_id": [_json(old), _json(manager)]}})
+            )
+        return rows
+
+    async def _bulk_due_date(self, jobs: Sequence[Job], due: date | None) -> list[JobChange]:
+        moving = [j for j in jobs if j.due_date != due]
+        self._ensure_not_pm_managed(moving, "due date", "due_date")
+        refused: list[dict[str, Any]] = []
+        rows = []
+        for job in moving:
+            old = job.due_date
+            job.due_date = due
+            reason = None
+            if job.start_date and due and job.start_date > due:
+                reason = "The due date cannot be before the start date."
+            else:
+                try:
+                    await self._ensure_tasks_within_dates(job, {"due_date": [None, None]})
+                except ValidationError as exc:
+                    reason = str(exc.details[0]["message"])
+            if reason:
+                refused.append({"job_id": str(job.id), "number": job.number, "reason": reason})
+            rows.append((job, "job.updated", {"changes": {"due_date": [_json(old), _json(due)]}}))
+        if refused:
+            raise self._refuse(
+                "JOB_DUE_DATE_INVALID",
+                f"The due date does not fit {len(refused)} of the jobs. Nothing was changed.",
+                refused,
+            )
+        return rows
+
+    def _ensure_not_pm_managed(self, jobs: Sequence[Job], label: str, field: str) -> None:
+        linked = [j for j in jobs if j.pm_job_id is not None and not applying_pm_change_active()]
+        if linked:
+            raise self._refuse(
+                "JOB_FIELD_MANAGED_BY_PM",
+                f"The {label} of a job linked to practice management can only be changed there.",
+                [
+                    {
+                        "job_id": str(j.id),
+                        "number": j.number,
+                        "field": field,
+                        "reason": f"The {label} is managed in practice management.",
+                    }
+                    for j in linked
+                ],
+            )
+
+    async def _bulk_delete(self, ctx: OrgContext, jobs: Sequence[Job]) -> list[JobChange]:
+        in_use = await self.jobs.in_use_ids(ctx.organization_id, [j.id for j in jobs])
+        if in_use:
+            raise self._refuse(
+                JobInUseError.code,
+                f"{len(in_use)} job{'s have' if len(in_use) != 1 else ' has'} time, "
+                "disbursements, expenses or invoice lines and cannot be deleted. Nothing was "
+                "deleted.",
+                [
+                    {
+                        "job_id": str(j.id),
+                        "number": j.number,
+                        "reason": "Has time, disbursements, expenses, invoice lines or write-offs.",
+                    }
+                    for j in jobs
+                    if j.id in in_use
+                ],
+            )
+        timers = TimerRepository(self.session)
+        for job in jobs:
+            await timers.delete_for_job(ctx.organization_id, job.id)
+            await self.jobs.soft_delete(job)
+        return [(job, "job.deleted", {}) for job in jobs]
 
     # --- Helpers -------------------------------------------------------------------------
 

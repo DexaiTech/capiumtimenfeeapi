@@ -215,8 +215,6 @@ async def test_patch_changes_the_fields_and_audits_them(client):
         url,
         headers=staff.headers,
         json={
-            "subject": "New subject",
-            "description": "New text",
             "priority": "high",
             "assignee_id": str(staff.id),
             "tag_ids": [reporting, accounts],
@@ -225,8 +223,8 @@ async def test_patch_changes_the_fields_and_audits_them(client):
     data = ok_data(response)
     assert response.json()["message"] == "Ticket updated"
     assert (data["subject"], data["description"], data["priority"]) == (
-        "New subject",
-        "New text",
+        "Login page crashes",
+        "Old text",
         "high",
     )
     assert data["assignee"]["id"] == str(staff.id)
@@ -237,8 +235,6 @@ async def test_patch_changes_the_fields_and_audits_them(client):
     assert entry["actor_user_id"] == str(staff.id)
     assert entry["metadata"]["code"] == "APT1"
     assert entry["metadata"]["changes"] == {
-        "subject": ["Login page crashes", "New subject"],
-        "description": ["Old text", "New text"],
         "priority": ["not_set", "high"],
         "assignee_id": [None, str(staff.id)],
         "tags": [["Bug"], ["Accounts", "Reporting"]],
@@ -292,25 +288,35 @@ async def test_patch_status_and_other_fields_write_both_audit_rows(client):
     assert len(await audit_entries(t.id, "ticket.status_changed")) == 1
 
 
-async def test_patch_nulls_clear_description_and_assignee_but_nothing_else(client):
+async def test_patch_null_clears_the_assignee_but_nothing_else(client):
     t = await new_team(client)
     staff = await t.member("staff")
-    ticket = await make_ticket(
-        client, t.owner, t.org, description="Words", assignee_id=str(staff.id)
-    )
+    ticket = await make_ticket(client, t.owner, t.org, assignee_id=str(staff.id))
     url = ticket_url(t.org, ticket["id"])
-    for field in ("subject", "status", "priority", "tag_ids"):
+    for field in ("status", "priority", "tag_ids"):
         response = await client.patch(url, headers=t.owner.headers, json={field: None})
         assert response.status_code == 422, field
         assert error(response)["details"][0]["field"] == field
-    cleared = ok_data(
-        await client.patch(
-            url, headers=t.owner.headers, json={"description": None, "assignee_id": None}
-        )
-    )
-    assert cleared["description"] is None and cleared["assignee"] is None
-    blank = ok_data(await client.patch(url, headers=t.owner.headers, json={"description": "  "}))
-    assert blank["description"] is None
+    cleared = ok_data(await client.patch(url, headers=t.owner.headers, json={"assignee_id": None}))
+    assert cleared["assignee"] is None
+
+
+async def test_the_subject_and_the_description_cannot_be_changed_after_creation(client):
+    t = await new_team(client)
+    ticket = await make_ticket(client, t.owner, t.org, description="Written once")
+    url = ticket_url(t.org, ticket["id"])
+    for body in (
+        {"subject": "Another subject"},
+        {"description": "Another text"},
+        {"description": None},
+        {"description_html": "<p>Another</p>"},
+        {"subject": ticket["subject"]},
+    ):
+        response = await client.patch(url, headers=t.owner.headers, json=body)
+        assert response.status_code == 422, body
+    after = ok_data(await client.get(url, headers=t.owner.headers))
+    assert (after["subject"], after["description"]) == (ticket["subject"], "Written once")
+    assert await audit_entries(t.id, "ticket.updated") == []
 
 
 async def test_patch_tags_replace_and_clear(client):
@@ -331,7 +337,7 @@ async def test_patch_that_changes_nothing_writes_nothing(client):
     t = await new_team(client)
     ticket = await make_ticket(client, t.owner, t.org, priority="low")
     url = ticket_url(t.org, ticket["id"])
-    for body in ({}, {"priority": "low"}, {"subject": ticket["subject"]}, {"status": "open"}):
+    for body in ({}, {"priority": "low"}, {"status": "open"}):
         assert (await client.patch(url, headers=t.owner.headers, json=body)).status_code == 200
     assert await audit_entries(t.id, "ticket.updated") == []
     assert await audit_entries(t.id, "ticket.status_changed") == []
@@ -341,9 +347,6 @@ async def test_patch_that_changes_nothing_writes_nothing(client):
 @pytest.mark.parametrize(
     ("body", "field"),
     [
-        ({"subject": ""}, "subject"),
-        ({"subject": "x" * 201}, "subject"),
-        ({"description": "x" * 10_001}, "description"),
         ({"status": "done"}, "status"),
         ({"priority": "urgent"}, "priority"),
         ({"tag_ids": [str(uuid.uuid4())]}, "tag_ids"),

@@ -7,10 +7,12 @@ from fastapi import APIRouter, Depends, Query, Request, Response, status
 
 from app.dependencies.common import ContextDep, SessionDep
 from app.dependencies.organization import PageParamsDep, require
+from app.schemas.bulk import BulkChangeResult
 from app.schemas.clients import (
     AccountingSoftware,
     AmlStatus,
     CentralFilter,
+    ClientBulkAction,
     ClientCreate,
     ClientDetail,
     ClientFilters,
@@ -274,6 +276,36 @@ async def create_client(
     body: ClientCreate, org: ClientCreator, service: ClientsServiceDep, ctx: ContextDep
 ) -> ApiResponse[ClientDetail]:
     return ok(await service.create(org, body, ctx), "Client created")
+
+
+@router.post(
+    "/clients/bulk",
+    summary="Bulk action on clients",
+    description=(
+        "Applies one `action` to 1-200 clients (`client_ids`) in one transaction: all or "
+        "nothing. `set_status` (`value`: `prospect`, `active`, `inactive` or `archived`; "
+        "archiving or un-archiving a client also needs `client.delete`, 403 otherwise), "
+        "`set_manager` / `set_partner` (`value`: a staff user id who is an active member, or "
+        "null to clear), `set_segment` (`value`: up to 40 characters, null or blank to clear) "
+        "and `delete` (no `value`; same rule as `DELETE /clients/{client_id}`, needs "
+        "`client.delete`). 404 when any id is not a live client of the practice "
+        "(`details.client_ids` lists them), 422 for a wrong `value`. A client that is in use "
+        "answers 409 `CLIENT_IN_USE` and nothing is deleted: `details` lists each one "
+        "(`client_id`, `code`, `name`, `reason`, `usage` counts). `affected` is the number of "
+        "distinct clients selected and `changed` how many of them actually changed (a client "
+        "already in the wanted state does not). Each client that changed gets its own audit row, "
+        "as if it had been changed alone, with `bulk: true`. Requires `client.update`."
+    ),
+    responses=error_responses(403, 404, 409),
+)
+async def bulk_clients(
+    body: ClientBulkAction,
+    org: Annotated[OrgContext, Depends(require())],
+    service: ClientsServiceDep,
+    ctx: ContextDep,
+) -> ApiResponse[BulkChangeResult]:
+    result = await service.bulk(org, body, ctx)
+    return ok(result, f"{result.changed} client{'s' if result.changed != 1 else ''} updated")
 
 
 @router.get(

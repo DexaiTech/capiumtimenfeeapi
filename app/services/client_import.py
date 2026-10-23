@@ -13,16 +13,13 @@
 import csv
 import io
 import re
-from email import policy as email_policy
-from email.message import EmailMessage
-from email.parser import BytesParser
 from typing import Any
 
 from pydantic import ValidationError as PydanticValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.context import RequestContext
-from app.core.exceptions import AppException, FileUploadError, ValidationError
+from app.core.exceptions import FileUploadError, ValidationError
 from app.db.models import Client, ClientContact, ClientService
 from app.db.session import unit_of_work
 from app.repositories.central_clients import CentralClientRepository
@@ -31,28 +28,23 @@ from app.repositories.settings import ServiceRepository
 from app.schemas.clients import ClientCreate, ImportedClient, ImportResult, ImportRowError
 from app.services import audit, policy
 from app.services.clients import generate_client_codes
+from app.services.import_csv import (  # noqa: F401  (re-exported for the clients API and tests)
+    CSV_CONTENT_TYPES,
+    MAX_IMPORT_BYTES,
+    MAX_IMPORT_ROWS,
+    MAX_UPLOAD_BODY_BYTES,
+    ImportTooLargeError,
+    UnsupportedUploadError,
+    decode_csv,
+    extract_csv,
+)
 from app.services.policy import OrgContext
 from app.utils.company_numbers import normalise_company_number
 from app.utils.ids import new_id
 
-MAX_IMPORT_BYTES = 5 * 1024 * 1024
-MAX_IMPORT_ROWS = 5000
-# Room for the multipart envelope around a file of the maximum size.
-MAX_UPLOAD_BODY_BYTES = MAX_IMPORT_BYTES + 64 * 1024
-CSV_CONTENT_TYPES = ("text/csv", "application/csv", "text/plain", "application/vnd.ms-excel")
 _AUDIT_CODES_LIMIT = 100
-
-
-class ImportTooLargeError(AppException):
-    status_code = 413
-    code = "FILE_TOO_LARGE"
-    message = "The file is larger than 5 MB."
-
-
-class UnsupportedUploadError(AppException):
-    status_code = 415
-    code = "FILE_TYPE_NOT_ALLOWED"
-    message = "Upload a CSV file (multipart/form-data field 'file', or a text/csv body)."
+# The name the opening balance import reads the CSV with.
+_decode = decode_csv
 
 
 # Normalised header -> client field. Fields map to themselves too.
@@ -143,47 +135,6 @@ def _normalise_header(value: str) -> str:
 
 def _enum_value(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", value.strip().lower()).strip("_")
-
-
-def extract_csv(content_type: str, body: bytes) -> bytes:
-    """The CSV bytes of an upload: the ``file`` part of a multipart form, or a raw body."""
-    media_type = content_type.split(";", 1)[0].strip().lower()
-    if media_type == "multipart/form-data":
-        envelope = (
-            b"Content-Type: " + content_type.encode("latin-1") + b"\r\nMIME-Version: 1.0\r\n\r\n"
-        )
-        message = BytesParser(policy=email_policy.HTTP).parsebytes(envelope + body)
-        if not isinstance(message, EmailMessage) or not message.is_multipart():
-            raise FileUploadError("The upload is not a valid multipart form.")
-        for part in message.iter_parts():
-            if not isinstance(part, EmailMessage):
-                continue
-            if part.get_param("name", header="content-disposition") == "file":
-                payload = part.get_payload(decode=True)
-                data = payload if isinstance(payload, bytes) else b""
-                break
-        else:
-            raise FileUploadError("Send the CSV in a form field named 'file'.")
-    elif media_type in CSV_CONTENT_TYPES:
-        data = body
-    else:
-        raise UnsupportedUploadError()
-    if len(data) > MAX_IMPORT_BYTES:
-        raise ImportTooLargeError(details={"max_bytes": MAX_IMPORT_BYTES})
-    if not data.strip():
-        raise FileUploadError("The file is empty.")
-    return data
-
-
-def _decode(data: bytes) -> str:
-    try:
-        return data.decode("utf-8-sig")
-    except UnicodeDecodeError:
-        try:
-            # Excel on Windows saves "CSV" in the ANSI code page.
-            return data.decode("cp1252")
-        except UnicodeDecodeError as exc:
-            raise FileUploadError("The file is not UTF-8 or Windows-1252 text.") from exc
 
 
 class _Row:
@@ -330,7 +281,7 @@ class ClientImportService:
         rctx: RequestContext,
     ) -> ImportResult:
         org_id = ctx.organization_id
-        columns, ignored, rows, errors = self._parse(_decode(extract_csv(content_type, body)))
+        columns, ignored, rows, errors = self._parse(decode_csv(extract_csv(content_type, body)))
         if not rows:
             raise FileUploadError("The file has no data rows.")
 

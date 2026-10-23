@@ -1,6 +1,6 @@
 """Rich text in tickets and comments: the editor's HTML is sanitised, its text kept beside it."""
 
-from tests.factories import audit_entries, error
+from tests.factories import error
 from tests.ticket_helpers import make_ticket, new_team, ticket_url
 from tests.time_helpers import ok_data
 
@@ -72,39 +72,6 @@ async def test_the_description_text_is_still_limited_to_10000_characters(client)
     assert response.status_code == 422
 
 
-async def test_editing_the_description_with_html_and_then_with_plain_text(client):
-    t = await new_team(client)
-    ticket = await create(client, t, description="old")
-    url = ticket_url(t.org, ticket["id"])
-    rich = ok_data(
-        await client.patch(
-            url, headers=t.owner.headers, json={"description_html": "<p><em>new</em></p>"}
-        )
-    )
-    assert rich["description"] == "new" and rich["description_html"] == "<p><em>new</em></p>"
-    plain = ok_data(
-        await client.patch(url, headers=t.owner.headers, json={"description": "plain again"})
-    )
-    assert plain["description"] == "plain again" and plain["description_html"] is None
-    cleared = ok_data(await client.patch(url, headers=t.owner.headers, json={"description": None}))
-    assert cleared["description"] is None and cleared["description_html"] is None
-
-
-async def test_a_change_of_formatting_alone_is_an_edit(client):
-    t = await new_team(client)
-    ticket = await create(client, t, description_html="<p>same</p>")
-    url = ticket_url(t.org, ticket["id"])
-    changed = ok_data(
-        await client.patch(
-            url, headers=t.owner.headers, json={"description_html": "<p><strong>same</strong></p>"}
-        )
-    )
-    assert changed["description"] == "same"
-    assert changed["description_html"] == "<p><strong>same</strong></p>"
-    entries = await audit_entries(t.id, "ticket.updated")
-    assert any("description" in (e["metadata"].get("changes") or {}) for e in entries)
-
-
 async def test_a_comment_keeps_the_formatted_body_and_its_text(client):
     t = await new_team(client)
     ticket = await make_ticket(client, t.owner, t.org)
@@ -144,36 +111,6 @@ async def test_a_comment_of_only_empty_html_is_refused(client):
     )
     assert response.status_code == 422
     assert error(response)["code"] == "VALIDATION_ERROR"
-
-
-async def test_editing_a_comment_sanitises_and_replaces_the_html(client):
-    t = await new_team(client)
-    ticket = await make_ticket(client, t.owner, t.org)
-    sent = ok_data(
-        await client.post(
-            comments_url(t, ticket["id"]),
-            headers=t.owner.headers,
-            json={"body_html": "<p>first</p>"},
-        ),
-        201,
-    )
-    edited = ok_data(
-        await client.patch(
-            comments_url(t, ticket["id"], sent["id"]),
-            headers=t.owner.headers,
-            json={"body": "x", "body_html": "<p>second <script>bad()</script></p>"},
-        )
-    )
-    assert edited["body"] == "second" and edited["body_html"] == "<p>second </p>"
-    assert edited["edited_at"] is not None
-    plain = ok_data(
-        await client.patch(
-            comments_url(t, ticket["id"], sent["id"]),
-            headers=t.owner.headers,
-            json={"body": "now plain"},
-        )
-    )
-    assert plain["body"] == "now plain" and plain["body_html"] is None
 
 
 async def test_search_and_excerpt_use_the_text_not_the_tags(client):

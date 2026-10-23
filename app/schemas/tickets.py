@@ -264,34 +264,18 @@ class TicketCreate(RequestModel):
 
 
 class TicketUpdate(RequestModel):
-    """Every field optional. `description` and `assignee_id` accept null to clear them;
-    `tag_ids` replaces the ticket's tags."""
+    """Every field optional. `assignee_id` accepts null to clear it; `tag_ids` replaces the
+    ticket's tags. The subject and the description are written once, when the ticket is
+    created: sending them answers 422 (unknown field)."""
 
-    subject: Subject | None = None
-    description: Description | None = None
-    description_html: RichHtml | None = None
     status: TicketStatus | None = None
     priority: TicketPriority | None = None
     tag_ids: list[uuid.UUID] | None = Field(default=None, max_length=MAX_TAGS_PER_TICKET)
     assignee_id: uuid.UUID | None = None
 
-    _description = field_validator("description")(blank_is_null)
-
     @model_validator(mode="after")
     def _no_nulls(self) -> Self:
-        reject_nulls(self, "subject", "status", "priority", "tag_ids")
-        return self
-
-    @model_validator(mode="after")
-    def _rich_text(self) -> Self:
-        _apply_rich_text(
-            self,
-            html_field="description_html",
-            text_field="description",
-            max_text=10_000,
-            max_html=MAX_DESCRIPTION_HTML,
-            blank_text_is_null=True,
-        )
+        reject_nulls(self, "status", "priority", "tag_ids")
         return self
 
 
@@ -364,23 +348,6 @@ class CommentCreate(RequestModel):
         return self
 
 
-class CommentUpdate(RequestModel):
-    body: CommentBody
-    body_html: RichHtml | None = None
-
-    @model_validator(mode="after")
-    def _rich_text(self) -> Self:
-        _apply_rich_text(
-            self,
-            html_field="body_html",
-            text_field="body",
-            max_text=5_000,
-            max_html=MAX_COMMENT_HTML,
-            blank_text_is_null=False,
-        )
-        return self
-
-
 __all__ = [
     "EXCERPT_LENGTH",
     "MAX_BULK_TICKETS",
@@ -391,7 +358,6 @@ __all__ = [
     "BulkResult",
     "CommentCreate",
     "CommentRead",
-    "CommentUpdate",
     "TagColor",
     "TagCreate",
     "TagDeleted",
