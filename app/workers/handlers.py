@@ -14,6 +14,7 @@ from app.repositories.jobs import JobRepository
 from app.repositories.rate_limits import RateLimitRepository
 from app.services.email import EmailService, PermanentEmailError
 from app.services.email_templates import CUSTOMISABLE_SYSTEM_KEYS, load_override
+from app.services.engagement_jobs import run_due as run_due_engagement_jobs
 from app.services.integration_runner import run_scheduled
 from app.services.invoices import InvoiceEmailError, deliver_invoice_email
 from app.services.notification_delivery import NotificationJobError, deliver_notification
@@ -128,6 +129,15 @@ async def run_recurring_invoices(
     return dict(await run_due_recurring(session))
 
 
+async def create_engagement_jobs(
+    session: AsyncSession, settings: Settings, payload: dict[str, Any]
+) -> dict[str, Any] | None:
+    """Daily, for every practice: create the job of each client engagement that opted in
+    (`auto_create_jobs`) and whose next period is due, with the service's default tasks.
+    Idempotent: one run row per engagement and period; a failed period is retried once a day."""
+    return dict(await run_due_engagement_jobs(session))
+
+
 async def send_payment_reminders(
     session: AsyncSession, settings: Settings, payload: dict[str, Any]
 ) -> dict[str, Any] | None:
@@ -220,6 +230,7 @@ HANDLERS: dict[str, Handler] = {
     "send_timesheet_reminders": send_timesheet_reminders,
     "send_payment_reminders": send_payment_reminders,
     "run_recurring_invoices": run_recurring_invoices,
+    "create_engagement_jobs": create_engagement_jobs,
     "send_payment_reminder_email": send_payment_reminder_email,
     "send_statement_email": send_statement_email,
     "process_integration_items": process_integration_items,
@@ -234,5 +245,6 @@ PERIODIC: tuple[tuple[str, int], ...] = (
     ("send_timesheet_reminders", 86_400),
     ("send_payment_reminders", 86_400),
     ("run_recurring_invoices", 86_400),
+    ("create_engagement_jobs", 86_400),
     ("process_integration_items", 60),
 )

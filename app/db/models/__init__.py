@@ -12,7 +12,7 @@ from app.db.models.billing import (
     WipWriteOff,
 )
 from app.db.models.billing_workflow import InvoiceApproval, PaymentReminder, StatementSend
-from app.db.models.clients import Client, ClientContact, ClientService
+from app.db.models.clients import Client, ClientContact, ClientService, EngagementJobRun
 from app.db.models.data_import import DataImportBatch, DataImportRow
 from app.db.models.estimates import (
     Estimate,
@@ -111,6 +111,7 @@ __all__ = [
     "DocumentSequence",
     "EmailTemplate",
     "EmailVerificationToken",
+    "EngagementJobRun",
     "Estimate",
     "EstimateLine",
     "Expense",

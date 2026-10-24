@@ -201,7 +201,15 @@ class JobService:
 
     # --- Writes --------------------------------------------------------------------------
 
-    async def create(self, ctx: OrgContext, data: JobCreate, rctx: RequestContext) -> JobRead:
+    async def create(
+        self,
+        ctx: OrgContext,
+        data: JobCreate,
+        rctx: RequestContext,
+        meta: dict[str, Any] | None = None,
+    ) -> JobRead:
+        """Create a job. ``meta`` is added to the audit entry (the engagement worker marks its
+        jobs with ``source``)."""
         org_id = ctx.organization_id
         async with unit_of_work(self.session):
             client = await self.refs.get_client(org_id, data.client_id)
@@ -282,6 +290,7 @@ class JobService:
                     "budget_fee": data.budget_fee,
                     "budget_minutes": data.budget_minutes,
                     **({"default_tasks_added": added} if data.add_default_tasks else {}),
+                    **(meta or {}),
                 },
             )
             result = await self._read(ctx, job.id)

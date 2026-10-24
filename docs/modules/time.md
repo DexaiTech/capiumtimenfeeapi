@@ -127,7 +127,37 @@ into every job:
   service or the service has no templates, 409 `JOB_CLOSED` for a closed or cancelled job.
 - **Copy job** is unchanged (it copies the source job's own tasks).
 
-Not yet automatic: recurring jobs from engagements, jobs from deadlines (see `docs/plan.md`), and tasks in the job CSV import.
+Not yet automatic: jobs from deadlines (see `docs/plan.md`), and tasks in the job CSV import.
+
+## Recurring jobs from engagements
+
+A client engagement (`client_services`, see `clients.md`) with `auto_create_jobs: true` gets one job per period without anyone creating
+it. The daily worker `create_engagement_jobs` (`app/services/engagement_jobs.py`, registered in `app/workers/handlers.py` next to
+`run_recurring_invoices`) does it for every practice; `POST /clients/{id}/services/{engagement_id}/create-job` does it on demand.
+
+- **Periods** are anchored on the engagement's `start_date`: monthly = start + k months, quarterly = start + 3k, annually = start + 12k,
+  always counted from the start (31 January -> 28 February -> 31 March; 29 February -> 28 February in common years). A period ends the
+  day before the next one starts (`period_end`). `one_off` has one period from `start_date` with no end.
+- **Due** when `today >= period_start - job_lead_days` and the period has not ended and starts on or before the engagement's `end_date`
+  and the engagement is active and the period has no run row. "Today" is the practice time zone. History is never backfilled: only the
+  latest period whose window has opened is considered, so at most one job per engagement per run, however long the worker was down.
+- **The job** goes through `JobService.create`, so every job rule applies: the engagement's client and service; name `"{service} - {label}"`
+  with label `Oct 2026` (monthly, period start), `Oct 2026 - Dec 2026` (quarterly, start month - end month), `Year to Sep 2027` (annually,
+  month of `period_end`) and no label for `one_off`; `period_start`/`period_end` = the period; `start_date` = `period_start`;
+  `due_date` null; status `planned`; manager and partner of the client when they are still active members; billing basis from the service
+  (and the engagement `fee` as `fixed_fee` for a fixed-fee service); the service's default tasks (`add_default_tasks`); no assignees.
+  Names may repeat (jobs are numbered). The worker acts as the practice's oldest active Owner; the audit entries carry `source:
+  "engagement_schedule"` (`engagement_manual` for the route).
+- **Idempotent**: `engagement_job_runs` has one row per (engagement, `period_start`) (unique), written in the same transaction as the job,
+  and the engagement row is locked (`skip_locked` in the worker), so a delivered-twice run creates one job. Deleting the job keeps the row
+  (`job_id` becomes null on a hard delete), so the period is not created again.
+- **Failures** (the client is archived or inactive, the service was deactivated, a validation rule) are logged and recorded as a `failed`
+  run with the reason, visible in `GET .../job-runs`; one failing engagement or practice does not stop the others. The worker retries a
+  failed period **at most once a day**: only when the failed run's `updated_at` date (practice zone) is before today. The manual route
+  retries at once.
+- **Manual route**: creates the job of the latest period whose window has opened (else the upcoming one) whether or not `auto_create_jobs`
+  is on. 409 `ENGAGEMENT_JOB_EXISTS` when that period already has its job; 409 `ENGAGEMENT_NOT_SCHEDULABLE` (reason in the message) when
+  the engagement has no start date, is inactive or ended, or the client or service does not accept work.
 
 ## Shapes (abridged)
 

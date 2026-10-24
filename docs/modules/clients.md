@@ -79,7 +79,9 @@ practice's ids answer 404.
 | GET / POST | `/clients/{client_id}/contacts` | `client.read` / `client.update` | List / add contact. |
 | PATCH / DELETE | `/clients/{client_id}/contacts/{contact_id}` | `client.update` | Change / delete contact. |
 | GET / POST | `/clients/{client_id}/services` | `client.read` / `client.update` | List / add engagement (client service). |
-| PATCH / DELETE | `/clients/{client_id}/services/{engagement_id}` | `client.update` | Change (`fee`, `frequency`, `start_date`, `end_date`, `is_active`) / delete. |
+| PATCH / DELETE | `/clients/{client_id}/services/{engagement_id}` | `client.update` | Change (`fee`, `frequency`, `start_date`, `end_date`, `is_active`, `auto_create_jobs`, `job_lead_days`) / delete. |
+| POST | `/clients/{client_id}/services/{engagement_id}/create-job` | `client.update` + `job.create` | Create the job of the current (else upcoming) period now. 201 `{job: JobRead, period_start, period_end}`; 409 `ENGAGEMENT_JOB_EXISTS` / `ENGAGEMENT_NOT_SCHEDULABLE`. |
+| GET | `/clients/{client_id}/services/{engagement_id}/job-runs` | `client.read` | Jobs created for the engagement, newest first, up to 50: `[{period_start, period_end, status (created|failed), error, job: {id, number, name}|null, created_at}]` (`job` null once the job was deleted). |
 
 ## Shapes
 
@@ -224,6 +226,16 @@ active engagements, deadline counts) regardless of page size (tested).
   Primary changes are serialised by a `FOR NO KEY UPDATE` lock on the client row.
 * **Engagements**: only active services can be added; the service cannot be changed (delete
   and re-add). `effective_fee` = agreed fee, else the service's `default_fee`.
+* **Recurring jobs**: an engagement with `auto_create_jobs: true` (default false; needs a
+  `start_date`, 422 on `start_date` otherwise, also when a PATCH would clear it) has the daily
+  worker `create_engagement_jobs` create the job of each period, `job_lead_days` (0-365,
+  default 0) days before it starts. `ClientServiceRead` adds `auto_create_jobs`,
+  `job_lead_days` and `next_job_period: {period_start, period_end, create_on} | null` (the
+  period due now or the upcoming one; null when off, inactive, ended, or a one-off job was
+  created). Periods, naming and failure handling are in `time.md` ("Recurring jobs from
+  engagements"). Each created job is audited as `engagement.job_created` (target: the
+  engagement; meta job id and number, period, `source` `engagement_schedule` or
+  `engagement_manual`). Tables: `engagement_job_runs` (one row per engagement and period start).
 * **Deadlines**: open jobs = `planned`, `in_progress`, `on_hold` and not deleted. "Due soon"
   = due after today and within 14 days. `overdue_days` is for the most overdue job.
 * **last_activity_at** = greatest of the client's `updated_at` and the latest `updated_at` of
@@ -301,7 +313,7 @@ wanted value counts in `affected` only). Each client that changed gets the audit
 `activity_code.created|updated|deactivated|deleted`, `sequence.updated`,
 `staff_rate.created|deleted`, `client_rate.created|updated|deleted`,
 `client.created|updated|archived|deleted|imported`,
-`client_contact.created|updated|deleted`, `client_service.created|updated|deleted` — each
+`client_contact.created|updated|deleted`, `client_service.created|updated|deleted`, `engagement.job_created` — each
 with a `meta` naming the record (code/name, amounts, `changes: {field: [old, new]}`).
 From the Clients 360 release also `client.central_enabled`, `client.central_linked`,
 `client.central_unlinked`, `client.central_synced`, `client.central_renamed`,

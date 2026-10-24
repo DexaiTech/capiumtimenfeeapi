@@ -41,6 +41,8 @@ EXPECTED = {
     ("post", "/clients/{client_id}/services"),
     ("patch", "/clients/{client_id}/services/{engagement_id}"),
     ("delete", "/clients/{client_id}/services/{engagement_id}"),
+    ("post", "/clients/{client_id}/services/{engagement_id}/create-job"),
+    ("get", "/clients/{client_id}/services/{engagement_id}/job-runs"),
     ("post", "/imports/clients"),
 }
 

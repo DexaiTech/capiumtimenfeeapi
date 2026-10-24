@@ -31,12 +31,14 @@ from app.schemas.clients import (
     ImportResult,
 )
 from app.schemas.common import ApiResponse, error_responses, ok, ok_page
+from app.schemas.engagement_jobs import EngagementJobCreated, EngagementJobRunRead
 from app.services.client_import import (
     MAX_UPLOAD_BODY_BYTES,
     ClientImportService,
     ImportTooLargeError,
 )
 from app.services.clients import ClientsService
+from app.services.engagement_jobs import EngagementJobService
 from app.services.policy import OrgContext
 
 router = APIRouter(prefix="/organizations/{organization_id}", tags=["Clients"])
@@ -55,6 +57,11 @@ def get_import_service(session: SessionDep) -> ClientImportService:
     return ClientImportService(session)
 
 
+def get_engagement_jobs(session: SessionDep) -> EngagementJobService:
+    return EngagementJobService(session)
+
+
+EngagementJobsDep = Annotated[EngagementJobService, Depends(get_engagement_jobs)]
 ClientsServiceDep = Annotated[ClientsService, Depends(get_clients_service)]
 ImportServiceDep = Annotated[ClientImportService, Depends(get_import_service)]
 
@@ -479,7 +486,7 @@ async def list_engagements(
     client_id: uuid.UUID, org: ClientReader, service: ClientsServiceDep
 ) -> ApiResponse[list[ClientServiceRead]]:
     rows = await service.list_engagements(org, client_id)
-    return ok([ClientServiceRead.from_model(e, s) for e, s in rows])
+    return ok(await service.engagement_reads(org, rows))
 
 
 @router.post(
@@ -489,7 +496,9 @@ async def list_engagements(
     description=(
         "Records that the client takes an active service of the practice (422 otherwise), "
         "with an agreed `fee` (null: the service default), `frequency` and dates. One per "
-        "service: 409 `CLIENT_SERVICE_EXISTS`. Requires `client.update`."
+        "service: 409 `CLIENT_SERVICE_EXISTS`. `auto_create_jobs` (default false) has the daily "
+        "worker create the job of each period, `job_lead_days` (0-365) days before it starts; it "
+        "needs a `start_date` (422). Requires `client.update`."
     ),
     responses=error_responses(403, 404, 409),
 )
@@ -501,13 +510,17 @@ async def create_engagement(
     ctx: ContextDep,
 ) -> ApiResponse[ClientServiceRead]:
     engagement, svc = await service.create_engagement(org, client_id, body, ctx)
-    return ok(ClientServiceRead.from_model(engagement, svc), "Service added")
+    [read] = await service.engagement_reads(org, [(engagement, svc)])
+    return ok(read, "Service added")
 
 
 @router.patch(
     "/clients/{client_id}/services/{engagement_id}",
     summary="Update a client's service",
-    description="Changes fee, frequency, dates or active flag. Requires `client.update`.",
+    description=(
+        "Changes fee, frequency, dates, active flag, `auto_create_jobs` or `job_lead_days`. "
+        "Requires `client.update`."
+    ),
     responses=error_responses(403, 404),
 )
 async def update_engagement(
@@ -519,7 +532,8 @@ async def update_engagement(
     ctx: ContextDep,
 ) -> ApiResponse[ClientServiceRead]:
     engagement, svc = await service.update_engagement(org, client_id, engagement_id, body, ctx)
-    return ok(ClientServiceRead.from_model(engagement, svc), "Service updated")
+    [read] = await service.engagement_reads(org, [(engagement, svc)])
+    return ok(read, "Service updated")
 
 
 @router.delete(
@@ -537,3 +551,49 @@ async def delete_engagement(
 ) -> ApiResponse[None]:
     await service.delete_engagement(org, client_id, engagement_id, ctx)
     return ok(message="Service removed")
+
+
+@router.post(
+    "/clients/{client_id}/services/{engagement_id}/create-job",
+    status_code=status.HTTP_201_CREATED,
+    summary="Create the job of a client's service now",
+    description=(
+        "Creates the job of the current period (the latest whose window has opened, else the "
+        "upcoming one) now, the way the daily worker would: named `<service> - <period>`, "
+        "`planned`, starting on the period start, with the client's manager and partner and the "
+        "service's default tasks. 409 `ENGAGEMENT_JOB_EXISTS` when that period already has its "
+        "job (even one that was deleted); 409 `ENGAGEMENT_NOT_SCHEDULABLE` (with the reason) when "
+        "the engagement has no start date, is inactive or ended, or the client or service does "
+        "not accept work. Works whether or not `auto_create_jobs` is on. Requires "
+        "`client.update` and `job.create`."
+    ),
+    responses=error_responses(403, 404, 409),
+)
+async def create_engagement_job(
+    client_id: uuid.UUID,
+    engagement_id: uuid.UUID,
+    org: Annotated[OrgContext, Depends(require("client.update", "job.create"))],
+    service: EngagementJobsDep,
+    ctx: ContextDep,
+) -> ApiResponse[EngagementJobCreated]:
+    created = await service.create_now(org, client_id, engagement_id, ctx)
+    return ok(created, "Job created")
+
+
+@router.get(
+    "/clients/{client_id}/services/{engagement_id}/job-runs",
+    summary="List the jobs created for a client's service",
+    description=(
+        "The periods of the engagement that have a run, newest first (up to 50): `created` with "
+        "the job (null once it was deleted) or `failed` with the reason. A failed period is "
+        "retried by the worker at most once a day. Requires `client.read`."
+    ),
+    responses=error_responses(403, 404),
+)
+async def list_engagement_job_runs(
+    client_id: uuid.UUID,
+    engagement_id: uuid.UUID,
+    org: ClientReader,
+    service: EngagementJobsDep,
+) -> ApiResponse[list[EngagementJobRunRead]]:
+    return ok(await service.runs(org, client_id, engagement_id))

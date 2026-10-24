@@ -10,8 +10,10 @@ from sqlalchemy import (
     CheckConstraint,
     Date,
     DateTime,
+    ForeignKey,
     ForeignKeyConstraint,
     Index,
+    Integer,
     SmallInteger,
     Text,
     UniqueConstraint,
@@ -244,6 +246,7 @@ class ClientService(Base, IdMixin, OrgScopedMixin, TimestampMixin):
             "frequency IN ('one_off', 'monthly', 'quarterly', 'annually')", name="frequency"
         ),
         CheckConstraint("fee IS NULL OR fee >= 0", name="fee"),
+        CheckConstraint("job_lead_days BETWEEN 0 AND 365", name="job_lead_days"),
         CheckConstraint(
             "end_date IS NULL OR start_date IS NULL OR start_date <= end_date", name="date_order"
         ),
@@ -259,6 +262,40 @@ class ClientService(Base, IdMixin, OrgScopedMixin, TimestampMixin):
     start_date: Mapped[date | None] = mapped_column(Date)
     end_date: Mapped[date | None] = mapped_column(Date)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    # Opt in to the daily worker that creates the job of each period (``engagement_jobs``).
+    auto_create_jobs: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    # The job is created this many days before its period starts.
+    job_lead_days: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
 
 
-__all__ = ["Client", "ClientContact", "ClientService"]
+class EngagementJobRun(Base, IdMixin, OrgScopedMixin, TimestampMixin):
+    """The job of one period of an engagement: one row per (engagement, period start), so a
+    repeated run never creates a second job. ``job_id`` is set null when the job is deleted
+    for good; the row stays so the next run does not create the period again."""
+
+    __tablename__ = "engagement_job_runs"
+    __table_args__ = (
+        UniqueConstraint("client_service_id", "period_start", name="uq_engagement_job_runs_period"),
+        CheckConstraint("status IN ('created', 'failed')", name="status"),
+        Index(
+            "ix_engagement_job_runs_organization_id_client_service_id",
+            "organization_id",
+            "client_service_id",
+        ),
+    )
+
+    client_service_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("client_services.id", ondelete="CASCADE"), nullable=False
+    )
+    period_start: Mapped[date] = mapped_column(Date, nullable=False)
+    period_end: Mapped[date | None] = mapped_column(Date)
+    job_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("jobs.id", ondelete="SET NULL")
+    )
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    error: Mapped[str | None] = mapped_column(Text)
+
+
+__all__ = ["Client", "ClientContact", "ClientService", "EngagementJobRun"]

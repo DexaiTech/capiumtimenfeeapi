@@ -15,6 +15,7 @@ from app.db.models import Client, ClientContact, ClientService, Service
 from app.schemas.billing import ClientRef
 from app.schemas.bulk import MAX_BULK_IDS, need_value, parse_user_id
 from app.schemas.common import RequestModel
+from app.schemas.engagement_jobs import NextJobPeriod
 from app.schemas.rates import ClientRateRead
 from app.schemas.settings import Money, blank_is_null, reject_nulls
 
@@ -201,9 +202,27 @@ class ClientServiceRead(BaseModel):
     is_active: bool
     created_at: datetime
     updated_at: datetime
+    auto_create_jobs: bool = Field(
+        default=False, description="The daily worker creates the job of each period"
+    )
+    job_lead_days: int = Field(
+        default=0, description="Days before a period starts that its job is created"
+    )
+    next_job_period: NextJobPeriod | None = Field(
+        default=None,
+        description=(
+            "The period whose job is created next (due now, or upcoming); null when automatic "
+            "jobs are off, the engagement is inactive or ended, or a one-off job was created"
+        ),
+    )
 
     @classmethod
-    def from_model(cls, engagement: ClientService, service: Service) -> "ClientServiceRead":
+    def from_model(
+        cls,
+        engagement: ClientService,
+        service: Service,
+        next_job_period: NextJobPeriod | None = None,
+    ) -> "ClientServiceRead":
         return cls(
             id=engagement.id,
             client_id=engagement.client_id,
@@ -219,7 +238,13 @@ class ClientServiceRead(BaseModel):
             is_active=engagement.is_active,
             created_at=engagement.created_at,
             updated_at=engagement.updated_at,
+            auto_create_jobs=engagement.auto_create_jobs,
+            job_lead_days=engagement.job_lead_days,
+            next_job_period=next_job_period,
         )
+
+
+START_DATE_NEEDED = "start_date: Automatic jobs need a start date"
 
 
 class ClientServiceCreate(RequestModel):
@@ -229,11 +254,15 @@ class ClientServiceCreate(RequestModel):
     start_date: date | None = None
     end_date: date | None = None
     is_active: bool = True
+    auto_create_jobs: bool = False
+    job_lead_days: int = Field(default=0, ge=0, le=365)
 
     @model_validator(mode="after")
     def _dates(self) -> Self:
         if self.start_date and self.end_date and self.end_date < self.start_date:
             raise ValueError("end_date: The end date is before the start date")
+        if self.auto_create_jobs and self.start_date is None:
+            raise ValueError(START_DATE_NEEDED)
         return self
 
 
@@ -243,10 +272,12 @@ class ClientServiceUpdate(RequestModel):
     start_date: date | None = None
     end_date: date | None = None
     is_active: bool | None = None
+    auto_create_jobs: bool | None = None
+    job_lead_days: int | None = Field(default=None, ge=0, le=365)
 
     @model_validator(mode="after")
     def _no_nulls(self) -> Self:
-        reject_nulls(self, "frequency", "is_active")
+        reject_nulls(self, "frequency", "is_active", "auto_create_jobs", "job_lead_days")
         return self
 
 

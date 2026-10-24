@@ -32,6 +32,7 @@ from app.repositories.clients import (
     DeadlineCounts,
     EngagementRepository,
 )
+from app.repositories.engagement_jobs import EngagementJobRepository
 from app.repositories.invoice_templates import InvoiceTemplateRepository
 from app.repositories.rates import ClientRateRepository
 from app.repositories.settings import SequenceRepository, ServiceRepository
@@ -486,7 +487,7 @@ class ClientsService:
             {
                 **item.model_dump(),
                 "contacts": [ContactRead.from_model(c) for c in contacts],
-                "engagements": [ClientServiceRead.from_model(e, s) for e, s in engagements],
+                "engagements": await self.engagement_reads(ctx, engagements),
                 "rates": rates,
                 "financials": await self._financials(ctx, client, today),
                 "recurring_fees": await self._recurring_fees(ctx, client, engagements, today),
@@ -918,6 +919,22 @@ class ClientsService:
 
     # --- Engagements (client services) --------------------------------------------------
 
+    async def engagement_reads(
+        self, ctx: OrgContext, rows: Sequence[tuple[ClientService, Service]]
+    ) -> list[ClientServiceRead]:
+        """The engagements as returned by the API, each with its next job period."""
+        # Imported here: the job service imports this module.
+        from app.services.engagement_jobs import next_job_period
+
+        done = await EngagementJobRepository(self.session).created_periods(
+            ctx.organization_id, [e.id for e, _ in rows]
+        )
+        today = practice_today(ctx)
+        return [
+            ClientServiceRead.from_model(e, s, next_job_period(e, today, done.get(e.id, set())))
+            for e, s in rows
+        ]
+
     async def list_engagements(
         self, ctx: OrgContext, client_id: uuid.UUID
     ) -> list[tuple[ClientService, Service]]:
@@ -961,6 +978,7 @@ class ClientsService:
                     "service_code": service.code,
                     "fee": engagement.fee,
                     "frequency": engagement.frequency,
+                    "auto_create_jobs": engagement.auto_create_jobs,
                 },
             )
         return engagement, service
@@ -985,6 +1003,10 @@ class ClientsService:
             end = values.get("end_date", engagement.end_date)
             if start and end and end < start:
                 raise ValidationError.for_field("end_date", "The end date is before the start date")
+            if values.get("auto_create_jobs", engagement.auto_create_jobs) and start is None:
+                raise ValidationError.for_field(
+                    "start_date", "Automatic jobs need a start date.", "required"
+                )
             changes: dict[str, list[Any]] = {}
             for field, value in values.items():
                 old = getattr(engagement, field)
