@@ -35,6 +35,8 @@ practice's ids answer 404.
 | PATCH | `/services/{service_id}` | `settings.manage` | Change any field. |
 | POST | `/services/{service_id}/deactivate` · `/activate` | `settings.manage` | Toggle `is_active`. |
 | DELETE | `/services/{service_id}` | `settings.manage` | Delete if unused, else deactivate (`outcome` = `deactivated`). |
+| GET | `/services/{service_id}/task-templates` | any member | The service's default tasks in order: `id`, `title`, `description`, `budget_minutes`, `due_offset_days`, `sort_order`. |
+| PUT | `/services/{service_id}/task-templates` | `settings.manage` | Replace the whole list: `{"templates": [{title, description?, budget_minutes?, due_offset_days?}]}` (0-100, in order, all or nothing; `title` 1-200, `description` <= 2000, `budget_minutes` >= 0, `due_offset_days` 0-3650). The same list changes nothing and writes no audit entry; a change is audited as `service.task_templates_changed`. Tasks already on jobs are not touched. `ServiceRead.task_template_count` says how many a service has. |
 | GET | `/activity-codes?include_inactive=` | any member | Chargeable first, then by code. Bounded. |
 | GET | `/activity-codes/{activity_id}` | any member | One code. |
 | POST | `/activity-codes` | `settings.manage` | Create (`code`, `name`, `is_chargeable`, `is_active`). |

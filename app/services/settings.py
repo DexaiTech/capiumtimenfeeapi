@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.context import RequestContext
 from app.core.exceptions import ConflictError, NotFoundError, ValidationError
-from app.db.models import ActivityCode, DocumentSequence, Service, VatRate
+from app.db.models import ActivityCode, DocumentSequence, Service, ServiceTaskTemplate, VatRate
 from app.db.session import unit_of_work
 from app.repositories.settings import (
     ActivityCodeRepository,
@@ -37,6 +37,8 @@ from app.schemas.settings import (
     ServiceCreate,
     ServiceRead,
     ServiceUpdate,
+    TaskTemplateRead,
+    TaskTemplatesUpdate,
     VatRateCreate,
     VatRateUpdate,
 )
@@ -198,8 +200,14 @@ class SettingsService:
         ids = [s.id for s in services]
         links = await self.services.activity_ids(ctx.organization_id, ids)
         used = await self.services.used_ids(ctx.organization_id, ids)
+        templates = await self.services.template_counts(ctx.organization_id, ids)
         return [
-            ServiceRead.from_model(s, activity_code_ids=links.get(s.id, []), is_used=s.id in used)
+            ServiceRead.from_model(
+                s,
+                activity_code_ids=links.get(s.id, []),
+                is_used=s.id in used,
+                task_template_count=templates.get(s.id, 0),
+            )
             for s in services
         ]
 
@@ -368,6 +376,66 @@ class SettingsService:
                     },
                 )
             result = await self._links_read(ctx, service)
+        return result
+
+    async def list_task_templates(
+        self, ctx: OrgContext, service_id: uuid.UUID
+    ) -> list[TaskTemplateRead]:
+        service = await self._get_service(ctx, service_id)
+        found = await self.services.list_templates(ctx.organization_id, service.id)
+        return [TaskTemplateRead.from_model(t) for t in found]
+
+    async def set_task_templates(
+        self,
+        ctx: OrgContext,
+        service_id: uuid.UUID,
+        data: TaskTemplatesUpdate,
+        rctx: RequestContext,
+    ) -> list[TaskTemplateRead]:
+        """Replace the service's default tasks with the list sent, in that order."""
+        org_id = ctx.organization_id
+        async with unit_of_work(self.session):
+            service = await self._get_service(ctx, service_id, lock=True)
+            before = await self.services.list_templates(org_id, service.id)
+            old = [(t.title, t.description, t.budget_minutes, t.due_offset_days) for t in before]
+            new = [
+                (i.title, i.description, i.budget_minutes, i.due_offset_days)
+                for i in data.templates
+            ]
+            if old == new:
+                return [TaskTemplateRead.from_model(t) for t in before]
+            saved = await self.services.replace_templates(
+                org_id,
+                service.id,
+                [
+                    ServiceTaskTemplate(
+                        organization_id=org_id,
+                        service_id=service.id,
+                        title=item.title,
+                        description=item.description,
+                        budget_minutes=item.budget_minutes,
+                        due_offset_days=item.due_offset_days,
+                        sort_order=position,
+                    )
+                    for position, item in enumerate(data.templates)
+                ],
+            )
+            await record_audit(
+                self.session,
+                ctx,
+                rctx,
+                "service.task_templates_changed",
+                "service",
+                service.id,
+                {
+                    "code": service.code,
+                    "name": service.name,
+                    "count": len(saved),
+                    "before_count": len(before),
+                    "titles": [t.title for t in saved][:50],
+                },
+            )
+            result = [TaskTemplateRead.from_model(t) for t in saved]
         return result
 
     # --- Activity codes -----------------------------------------------------------------

@@ -152,6 +152,45 @@ class ActivityCode(Base, IdMixin, OrgScopedMixin, TimestampMixin):
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
 
 
+class ServiceTaskTemplate(Base, IdMixin, OrgScopedMixin, TimestampMixin):
+    """One default task of a service: added to a new job of the service when the person asks.
+
+    ``due_offset_days`` is counted from the job's start date. A service has at most 100.
+    """
+
+    __tablename__ = "service_task_templates"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["organization_id", "service_id"],
+            ["services.organization_id", "services.id"],
+            name="fk_service_task_templates_service_id_services",
+            ondelete="CASCADE",
+        ),
+        CheckConstraint("length(title) BETWEEN 1 AND 200", name="title_length"),
+        CheckConstraint(
+            "description IS NULL OR length(description) <= 2000", name="description_length"
+        ),
+        CheckConstraint("budget_minutes IS NULL OR budget_minutes >= 0", name="budget_minutes"),
+        CheckConstraint(
+            "due_offset_days IS NULL OR due_offset_days BETWEEN 0 AND 3650",
+            name="due_offset_days",
+        ),
+        Index(
+            "ix_service_task_templates_organization_id_service_id_sort_order",
+            "organization_id",
+            "service_id",
+            "sort_order",
+        ),
+    )
+
+    service_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    budget_minutes: Mapped[int | None] = mapped_column(Integer)
+    due_offset_days: Mapped[int | None] = mapped_column(Integer)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+
+
 class ServiceActivityCode(Base, OrgScopedMixin):
     """An activity type allowed on a service. A service without links allows every type."""
 

@@ -3,6 +3,7 @@
 PREFIX = "/api/v1/organizations/{organization_id}"
 ANY_MEMBER_READS = {
     ("get", "/services/{service_id}/activity-codes"),
+    ("get", "/services/{service_id}/task-templates"),
     ("get", "/activity-codes/{activity_id}"),
 }
 EXPECTED = {
@@ -42,6 +43,8 @@ EXPECTED = {
     ("post", "/activity-codes/{activity_id}/deactivate"): "Settings",
     ("get", "/services/{service_id}/activity-codes"): "Settings",
     ("put", "/services/{service_id}/activity-codes"): "Settings",
+    ("get", "/services/{service_id}/task-templates"): "Settings",
+    ("put", "/services/{service_id}/task-templates"): "Settings",
 }
 CONFLICTS = {
     ("post", "/staff"),

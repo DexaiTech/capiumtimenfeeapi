@@ -21,6 +21,8 @@ from app.schemas.settings import (
     ServiceCreate,
     ServiceRead,
     ServiceUpdate,
+    TaskTemplateRead,
+    TaskTemplatesUpdate,
     VatRateCreate,
     VatRateRead,
     VatRateUpdate,
@@ -262,6 +264,45 @@ async def delete_service(
     service_id: uuid.UUID, org: SettingsManager, service: SettingsServiceDep, ctx: ContextDep
 ) -> ApiResponse[DeleteOutcome]:
     return _deleted(await service.delete_service(org, service_id, ctx), "Service")
+
+
+@router.get(
+    "/services/{service_id}/task-templates",
+    summary="Default tasks of a service",
+    description=(
+        "The service's default tasks in order: `title`, `description`, `budget_minutes` and "
+        "`due_offset_days` (days after a job's start date). A new job of the service can have "
+        "them added as its tasks (`add_default_tasks` on `POST /jobs`, or `POST "
+        "/jobs/{id}/tasks/from-service`). Any member."
+    ),
+    responses=error_responses(404),
+)
+async def list_service_task_templates(
+    service_id: uuid.UUID, org: OrgContextDep, service: SettingsServiceDep
+) -> ApiResponse[list[TaskTemplateRead]]:
+    return ok(await service.list_task_templates(org, service_id))
+
+
+@router.put(
+    "/services/{service_id}/task-templates",
+    summary="Set the default tasks of a service",
+    description=(
+        "Replaces the service's default tasks with `templates` (0-100, in the order sent; an "
+        "empty list removes them), all or nothing. `title` is 1-200 characters, `description` "
+        "at most 2000, `budget_minutes` whole minutes, `due_offset_days` 0-3650. Tasks already "
+        "on jobs are not changed. Audited as `service.task_templates_changed`. Requires "
+        "`settings.manage`."
+    ),
+    responses=error_responses(403, 404),
+)
+async def set_service_task_templates(
+    service_id: uuid.UUID,
+    body: TaskTemplatesUpdate,
+    org: SettingsManager,
+    service: SettingsServiceDep,
+    ctx: ContextDep,
+) -> ApiResponse[list[TaskTemplateRead]]:
+    return ok(await service.set_task_templates(org, service_id, body, ctx), "Default tasks saved")
 
 
 @router.get(

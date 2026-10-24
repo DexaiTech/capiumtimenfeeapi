@@ -8,7 +8,7 @@ from typing import Annotated, Literal, Self
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from app.db.models import ActivityCode, DocumentSequence, Service, VatRate
+from app.db.models import ActivityCode, DocumentSequence, Service, ServiceTaskTemplate, VatRate
 from app.schemas.common import RequestModel
 from app.services.sequences import format_number
 
@@ -128,6 +128,8 @@ class ServiceRead(BaseModel):
     sort_order: int
     # The activity codes time on this service's jobs is limited to; empty = every code.
     activity_code_ids: list[uuid.UUID]
+    # How many default tasks the service has (`GET /services/{id}/task-templates`).
+    task_template_count: int = 0
     # True once jobs, client engagements, invoice lines or rates refer to the service.
     is_used: bool
     # Used services can only be deactivated: DELETE does that instead.
@@ -137,7 +139,12 @@ class ServiceRead(BaseModel):
 
     @classmethod
     def from_model(
-        cls, service: Service, *, activity_code_ids: list[uuid.UUID], is_used: bool
+        cls,
+        service: Service,
+        *,
+        activity_code_ids: list[uuid.UUID],
+        is_used: bool,
+        task_template_count: int = 0,
     ) -> "ServiceRead":
         return cls(
             id=service.id,
@@ -153,6 +160,7 @@ class ServiceRead(BaseModel):
             status="active" if service.is_active else "inactive",
             sort_order=service.sort_order,
             activity_code_ids=activity_code_ids,
+            task_template_count=task_template_count,
             is_used=is_used,
             can_delete=not is_used,
             created_at=service.created_at,
@@ -277,6 +285,63 @@ class ServiceActivityCodesUpdate(RequestModel):
         max_length=200,
         description="The activity codes to allow; an empty list removes the limit (all allowed)",
     )
+
+
+MAX_TASK_TEMPLATES = 100
+
+
+class TaskTemplateRead(BaseModel):
+    id: uuid.UUID
+    title: str
+    description: str | None
+    budget_minutes: int | None
+    due_offset_days: int | None = Field(
+        description="Days after the job's start date the task is due; null: no due date"
+    )
+    sort_order: int
+
+    @classmethod
+    def from_model(cls, template: ServiceTaskTemplate) -> "TaskTemplateRead":
+        return cls(
+            id=template.id,
+            title=template.title,
+            description=template.description,
+            budget_minutes=template.budget_minutes,
+            due_offset_days=template.due_offset_days,
+            sort_order=template.sort_order,
+        )
+
+
+class TaskTemplateInput(RequestModel):
+    title: str = Field(min_length=1, max_length=200)
+    description: str | None = Field(default=None, max_length=2000)
+    budget_minutes: int | None = Field(
+        default=None, ge=0, le=10_000_000, description="Hours budget, in whole minutes"
+    )
+    due_offset_days: int | None = Field(
+        default=None, ge=0, le=3650, description="Days after the job's start date"
+    )
+
+    _description = field_validator("description")(blank_is_null)
+
+    @field_validator("title")
+    @classmethod
+    def _one_line(cls, value: str) -> str:
+        return " ".join(value.split())
+
+
+class TaskTemplatesUpdate(RequestModel):
+    templates: list[TaskTemplateInput] = Field(
+        max_length=MAX_TASK_TEMPLATES,
+        description="The service's complete list of default tasks, in order; empty removes them",
+    )
+
+    @model_validator(mode="after")
+    def _titles_not_blank(self) -> Self:
+        for index, item in enumerate(self.templates, start=1):
+            if not item.title:
+                raise ValueError(f"templates: Task {index} needs a title.")
+        return self
 
 
 # --- Number sequences -------------------------------------------------------------------

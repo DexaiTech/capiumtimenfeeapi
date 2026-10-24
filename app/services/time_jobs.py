@@ -262,6 +262,13 @@ class JobService:
             await self.jobs.add(job)
             if assignees:
                 await self.jobs.set_assignees(org_id, job.id, assignees)
+            added = 0
+            if data.add_default_tasks and data.service_id is not None:
+                # Imported here: the task service imports this module.
+                from app.services.service_tasks import add_templates, templates_of
+
+                templates = await templates_of(self.session, ctx, data.service_id)
+                added = len(await add_templates(self.session, ctx, rctx, job, templates, assignees))
             await self._audit(
                 ctx,
                 rctx,
@@ -274,6 +281,7 @@ class JobService:
                     "hourly_rate": data.hourly_rate,
                     "budget_fee": data.budget_fee,
                     "budget_minutes": data.budget_minutes,
+                    **({"default_tasks_added": added} if data.add_default_tasks else {}),
                 },
             )
             result = await self._read(ctx, job.id)

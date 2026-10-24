@@ -24,6 +24,7 @@ from app.db.models import (
     RateRule,
     Service,
     ServiceActivityCode,
+    ServiceTaskTemplate,
     Ticket,
     TimeEntry,
     Timer,
@@ -286,6 +287,51 @@ class ServiceRepository:
             for a in activity_ids
         )
         await self.session.flush()
+
+    async def template_counts(
+        self, organization_id: uuid.UUID, service_ids: Collection[uuid.UUID]
+    ) -> dict[uuid.UUID, int]:
+        """How many default tasks each service has (a service without any is left out)."""
+        if not service_ids:
+            return {}
+        stmt = (
+            select(ServiceTaskTemplate.service_id, func.count())
+            .where(
+                ServiceTaskTemplate.organization_id == organization_id,
+                ServiceTaskTemplate.service_id.in_(list(service_ids)),
+            )
+            .group_by(ServiceTaskTemplate.service_id)
+        )
+        return {sid: int(n) for sid, n in (await self.session.execute(stmt)).all()}
+
+    async def list_templates(
+        self, organization_id: uuid.UUID, service_id: uuid.UUID
+    ) -> list[ServiceTaskTemplate]:
+        stmt = (
+            select(ServiceTaskTemplate)
+            .where(
+                ServiceTaskTemplate.organization_id == organization_id,
+                ServiceTaskTemplate.service_id == service_id,
+            )
+            .order_by(ServiceTaskTemplate.sort_order, ServiceTaskTemplate.created_at)
+        )
+        return list((await self.session.execute(stmt)).scalars())
+
+    async def replace_templates(
+        self,
+        organization_id: uuid.UUID,
+        service_id: uuid.UUID,
+        items: list[ServiceTaskTemplate],
+    ) -> list[ServiceTaskTemplate]:
+        await self.session.execute(
+            delete(ServiceTaskTemplate).where(
+                ServiceTaskTemplate.organization_id == organization_id,
+                ServiceTaskTemplate.service_id == service_id,
+            )
+        )
+        self.session.add_all(items)
+        await self.session.flush()
+        return await self.list_templates(organization_id, service_id)
 
     async def add(self, service: Service) -> Service:
         self.session.add(service)

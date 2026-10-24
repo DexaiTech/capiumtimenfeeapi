@@ -136,7 +136,13 @@ class TaskService:
     # --- Writes --------------------------------------------------------------------------
 
     async def create(
-        self, ctx: OrgContext, job_id: uuid.UUID, data: TaskCreate, rctx: RequestContext
+        self,
+        ctx: OrgContext,
+        job_id: uuid.UUID,
+        data: TaskCreate,
+        rctx: RequestContext,
+        *,
+        source: str | None = None,
     ) -> TaskRead:
         org_id = ctx.organization_id
         async with unit_of_work(self.session):
@@ -174,6 +180,7 @@ class TaskService:
                     "budget_minutes": task.budget_minutes,
                     "due_date": task.due_date.isoformat() if task.due_date else None,
                     "assignee_user_ids": [str(u) for u in assignees],
+                    **({"source": source} if source else {}),
                 },
             )
             result = await self._read_one(ctx, task)

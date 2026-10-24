@@ -87,6 +87,48 @@ changed (a job already in the wanted state does not count). Each job that change
 operation writes (`job.status_changed`, `job.updated` with `changes`, `job.deleted`), with `bulk: true` in its meta. A changed
 status of a linked job is queued for practice management as for a single change.
 
+## Bulk actions on tasks
+
+**Add many to a job** - `POST /jobs/{job_id}/tasks/bulk`, body `{"tasks": [TaskCreate, ...]}` (1-100 items, each as in
+`POST /jobs/{id}/tasks`). Permission `job.update`. The tasks are added at the end of the job's list in the order sent, in one
+transaction. If any item is refused (a due date outside the job's dates, an inactive assignee, the 500-task limit) the answer is
+409 `BULK_REFUSED` with `details` = one entry per refused item (`name` = `Task <n>: <title>`, `row`, `error_code`, `reason`) and
+nothing is added. A closed or cancelled job answers 409 `JOB_CLOSED`, an unknown job 404. Response 201 with the created `TaskRead[]`.
+
+**Change or delete many** - `POST /tasks/bulk`, body `{task_ids, action, value?}` (1-200 tasks of any jobs). All or nothing.
+
+| `action` | `value` | Same rules as |
+|---|---|---|
+| `set_status` | `not_started`, `in_progress`, `on_hold` or `completed` | `PATCH /jobs/{id}/tasks/{id}/status`: needs `job.update`, or being one of the task's assignees |
+| `set_due_date` | `YYYY-MM-DD`, or null to clear | `PATCH /jobs/{id}/tasks/{id}` (within the job's dates) |
+| `add_assignee` / `remove_assignee` | a staff user id (an active member to add) | `PUT .../assignees` (the person is added to or taken from the current list) |
+| `delete` | none | `DELETE /jobs/{id}/tasks/{id}`: 409 `TASK_IN_USE` for a task with time or a running timer |
+
+The route needs `job.read`; every action except `set_status` needs `job.update` (403 otherwise). Each task goes through the
+**same service call** as its single endpoint, so a closed job (`JOB_CLOSED`), the job's dates and the other rules hold. A task
+refused by any rule refuses the batch: 409 `BULK_REFUSED`, `details` = one entry per task (`name` = title, `task_id`, `job_id`,
+`error_code`, `reason`), nothing changes. Unknown or foreign ids: 404, `details: {"task_ids": [...]}`. Response
+`{"action", "affected", "changed"}` (`changed` leaves out tasks already in the wanted state). Each changed task writes its usual audit
+entry, and one `task.bulk_changed` entry records `action`, `count`, `task_ids` (at most 100) and `bulk: true`.
+
+## Default tasks of a service
+
+A service can carry a list of default tasks (`PUT /services/{id}/task-templates`, see `clients.md`). They save typing the same tasks
+into every job:
+
+- **A new job** - `POST /jobs` with `add_default_tasks: true` (default false, so existing callers and the CSV import are unchanged;
+  ignored without a service or when the service has none) adds one task per template, in order, in the same transaction as the job. Each
+  task is `not_started`, takes the template's title, description and hours budget, is assigned to the job's assignees, and is due
+  `due_offset_days` after the job's `start_date` when the job has one and the result lies within the job's dates (otherwise it has no due
+  date; a date never fails the job). Every task goes through the normal task rules, so the 500-task limit stops the whole job (409
+  `TASK_LIMIT_REACHED`, nothing created). Audited as `task.created` (meta `source: "service_template"`) and `default_tasks_added` on `job.created`.
+- **An existing job** - `POST /jobs/{job_id}/tasks/from-service` (no body, `job.update`) adds the templates of the job's service that the
+  job does not have yet, comparing titles ignoring case. Response `{"added", "skipped"}`. 409 `SERVICE_HAS_NO_TASKS` when the job has no
+  service or the service has no templates, 409 `JOB_CLOSED` for a closed or cancelled job.
+- **Copy job** is unchanged (it copies the source job's own tasks).
+
+Not yet automatic: recurring jobs from engagements, jobs from deadlines (see `docs/plan.md`), and tasks in the job CSV import.
+
 ## Shapes (abridged)
 
 **JobRead**: `id, number, name, description, client_id, client_code, client_name, service_id,

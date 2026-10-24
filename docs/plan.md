@@ -35,7 +35,7 @@ recoverability and profitability.
 
 ### Later versions (backlog, prioritised)
 
-1. Recurring billing and recurring jobs from client engagements (`client_services.frequency`).
+1. Recurring billing and recurring jobs from client engagements (`client_services.frequency`). Done so far: default tasks per service (`service_task_templates`), added to a new job on request; still to do: creating the jobs themselves on a schedule, per-client task overrides, tasks in the job import.
 2. Xero / QuickBooks / Sage integration: push invoices, credit notes and payments; contact sync (OAuth per practice, outbox table for retries).
 3. Online payments: GoCardless direct debit, Stripe card links on invoices; automatic receipt matching.
 4. Deadlines from Companies House and HMRC (accounts, CT600, confirmation statement, VAT quarters) feeding jobs.

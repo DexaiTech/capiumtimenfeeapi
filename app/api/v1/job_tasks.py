@@ -9,19 +9,24 @@ from fastapi import APIRouter, Depends, Query, status
 
 from app.dependencies.common import ContextDep, SessionDep
 from app.dependencies.organization import PageParamsDep, require
+from app.schemas.bulk import BulkChangeResult
 from app.schemas.common import ApiResponse, error_responses, ok, ok_page
 from app.schemas.job_tasks import (
     TaskAssigneesSet,
+    TaskBulkAction,
+    TaskBulkCreate,
     TaskCreate,
     TaskListItem,
     TaskRead,
     TaskReorder,
+    TasksFromService,
     TaskSort,
     TaskStatus,
     TaskStatusChange,
     TaskUpdate,
 )
 from app.services.job_tasks import TaskService
+from app.services.job_tasks_bulk import TaskBulkService
 from app.services.policy import OrgContext
 
 router = APIRouter(prefix="/organizations/{organization_id}", tags=["Tasks"])
@@ -31,12 +36,46 @@ def get_task_service(session: SessionDep) -> TaskService:
     return TaskService(session)
 
 
+def get_task_bulk_service(
+    session: SessionDep, service: Annotated[TaskService, Depends(get_task_service)]
+) -> TaskBulkService:
+    return TaskBulkService(session, service)
+
+
 TaskServiceDep = Annotated[TaskService, Depends(get_task_service)]
+TaskBulkServiceDep = Annotated[TaskBulkService, Depends(get_task_bulk_service)]
 
 _CLOSED = (
     "A closed or cancelled job answers 409 `JOB_CLOSED`: its tasks cannot be changed "
     "until it is reopened."
 )
+
+
+@router.post(
+    "/tasks/bulk",
+    summary="Change or delete several tasks",
+    description=(
+        "Applies one `action` (`set_status`, `set_due_date`, `add_assignee`, `remove_assignee`, "
+        "`delete`) to 1-200 tasks, of any jobs, in one transaction: all or nothing. `value` is "
+        "the status, an ISO date (null clears the due date), or the assignee's staff id. Each "
+        "task goes through the rules of its single endpoint (a closed job, the job's dates, "
+        "active assignees, time recorded against a task that stops its deletion): if any is "
+        "refused the answer is 409 `BULK_REFUSED` with every task in `details` (`name`, "
+        "`error_code`, `reason`, `task_id`, `job_id`) and nothing changes. An unknown id answers "
+        "404 listing it. A task's own assignees may change its status; every other action needs "
+        "`job.update`. `affected` counts distinct tasks, `changed` those that actually changed. "
+        "Requires `job.read`."
+    ),
+    responses=error_responses(403, 404, 409),
+)
+async def bulk_tasks(
+    body: TaskBulkAction,
+    org: Annotated[OrgContext, Depends(require("job.read"))],
+    service: TaskBulkServiceDep,
+    ctx: ContextDep,
+) -> ApiResponse[BulkChangeResult]:
+    result = await service.run(org, body, ctx)
+    return ok(result, f"{result.changed} task(s) updated")
 
 
 @router.get(
@@ -110,6 +149,55 @@ async def list_job_tasks(
     ] = None,
 ) -> ApiResponse[list[TaskRead]]:
     return ok(await service.list_for_job(org, job_id, task_status))
+
+
+@router.post(
+    "/jobs/{job_id}/tasks/bulk",
+    status_code=status.HTTP_201_CREATED,
+    summary="Add several tasks to a job",
+    description=(
+        "Adds 1-100 tasks at the end of the job's list, in the order sent, all or nothing. Each "
+        "item is a task as in `POST /jobs/{id}/tasks`. If any is refused (a due date outside "
+        "the job's dates, an inactive assignee, the 500-task limit) the answer is 409 "
+        "`BULK_REFUSED` with every refused item in `details` (`name` = `Task <n>: <title>`, "
+        "`row`, `error_code`, `reason`) and nothing is added. " + _CLOSED + " Requires "
+        "`job.update`."
+    ),
+    responses=error_responses(403, 404, 409),
+)
+async def create_tasks_bulk(
+    job_id: uuid.UUID,
+    body: TaskBulkCreate,
+    org: Annotated[OrgContext, Depends(require("job.update"))],
+    service: TaskBulkServiceDep,
+    ctx: ContextDep,
+) -> ApiResponse[list[TaskRead]]:
+    created = await service.create_many(org, job_id, body, ctx)
+    return ok(created, f"{len(created)} task(s) added")
+
+
+@router.post(
+    "/jobs/{job_id}/tasks/from-service",
+    summary="Add the service's default tasks to a job",
+    description=(
+        "Adds the default tasks of the job's service (`GET /services/{id}/task-templates`) that "
+        "the job does not have yet: a task whose title (ignoring case) is already on the job is "
+        "skipped. Each is due `due_offset_days` after the job's start date when that lies "
+        "within the job's dates, and is assigned to the job's assignees. Answers 409 "
+        "`SERVICE_HAS_NO_TASKS` when the job has no service or the service has no default "
+        "tasks; a closed or cancelled job answers 409 `JOB_CLOSED`. `added` and `skipped` "
+        "count the templates. Requires `job.update`."
+    ),
+    responses=error_responses(403, 404, 409),
+)
+async def add_tasks_from_service(
+    job_id: uuid.UUID,
+    org: Annotated[OrgContext, Depends(require("job.update"))],
+    service: TaskBulkServiceDep,
+    ctx: ContextDep,
+) -> ApiResponse[TasksFromService]:
+    result = await service.add_from_service(org, job_id, ctx)
+    return ok(result, f"{result.added} task(s) added")
 
 
 @router.post(

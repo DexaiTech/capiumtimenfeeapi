@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from app.db.models import Task
 from app.repositories.job_tasks import TaskActuals, TaskView
+from app.schemas.bulk import MAX_BULK_IDS, parse_day, parse_user_id
 from app.schemas.common import RequestModel
 from app.schemas.jobs import JobStatus, Minutes, UserIds
 from app.utils.money import percentage_bp
@@ -150,3 +151,53 @@ class TaskReorder(RequestModel):
         max_length=500,
         description="Every task of the job exactly once, in the new order",
     )
+
+
+MAX_BULK_NEW_TASKS = 100
+TaskBulkActionName = Literal[
+    "set_status", "set_due_date", "add_assignee", "remove_assignee", "delete"
+]
+
+
+class TaskBulkCreate(RequestModel):
+    """Several tasks for one job, all or nothing; they are added in the order sent."""
+
+    tasks: list[TaskCreate] = Field(min_length=1, max_length=MAX_BULK_NEW_TASKS)
+
+
+class TaskBulkAction(RequestModel):
+    """One action on up to 200 tasks (of any jobs), all or nothing."""
+
+    task_ids: list[uuid.UUID] = Field(min_length=1, max_length=MAX_BULK_IDS)
+    action: TaskBulkActionName
+    value: str | None = Field(
+        default=None,
+        description=(
+            "`set_status`: a task status; `set_due_date`: `YYYY-MM-DD` or null to clear; "
+            "`add_assignee` / `remove_assignee`: a staff id; `delete`: no value"
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _value_fits_the_action(self) -> Self:
+        action, value = self.action, self.value
+        if action == "set_status":
+            if value not in ("not_started", "in_progress", "on_hold", "completed"):
+                raise ValueError("value: Use not_started, in_progress, on_hold or completed.")
+        elif action == "set_due_date":
+            if value is not None:
+                parse_day(value)
+        elif action in ("add_assignee", "remove_assignee"):
+            if value is None:
+                raise ValueError("value: This field is required for this action.")
+            parse_user_id(value)
+        elif value is not None:
+            raise ValueError("value: This action takes no value.")
+        return self
+
+
+class TasksFromService(BaseModel):
+    """What `POST /jobs/{id}/tasks/from-service` did."""
+
+    added: int = Field(description="Default tasks added to the job")
+    skipped: int = Field(description="Default tasks left out: a task of that title already exists")

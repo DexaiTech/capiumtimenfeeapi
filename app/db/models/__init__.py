@@ -62,6 +62,7 @@ from app.db.models.practice import (
     Grade,
     Service,
     ServiceActivityCode,
+    ServiceTaskTemplate,
     VatRate,
 )
 from app.db.models.rates import RateChange, RateRerun, RateRerunItem, RateRule
@@ -156,6 +157,7 @@ __all__ = [
     "RolePermission",
     "Service",
     "ServiceActivityCode",
+    "ServiceTaskTemplate",
     "StatementSend",
     "Task",
     "TaskAssignee",

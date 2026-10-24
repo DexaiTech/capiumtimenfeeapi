@@ -174,6 +174,15 @@ class JobCreate(RequestModel):
     manager_user_id: uuid.UUID | None = None
     status: Literal["planned", "in_progress"] = "planned"
     assignee_user_ids: UserIds = Field(default_factory=list)
+    add_default_tasks: bool = Field(
+        default=False,
+        description=(
+            "Also add the service's default tasks (`GET /services/{id}/task-templates`) as the "
+            "job's tasks: each is due `due_offset_days` after the job's start date when that "
+            "lies within the job's dates, and is assigned to the job's assignees. Ignored "
+            "without a service or when the service has none."
+        ),
+    )
 
     @model_validator(mode="after")
     def _validate(self) -> Self:
