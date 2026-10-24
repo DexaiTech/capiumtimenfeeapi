@@ -28,7 +28,7 @@ from app.repositories.settings import ServiceRepository
 from app.schemas.clients import ClientCreate, ImportedClient, ImportResult, ImportRowError
 from app.services import audit, policy
 from app.services.clients import generate_client_codes
-from app.services.import_csv import (  # noqa: F401  (re-exported for the clients API and tests)
+from app.services.import_csv import (
     CSV_CONTENT_TYPES,
     MAX_IMPORT_BYTES,
     MAX_IMPORT_ROWS,
@@ -41,6 +41,18 @@ from app.services.import_csv import (  # noqa: F401  (re-exported for the client
 from app.services.policy import OrgContext
 from app.utils.company_numbers import normalise_company_number
 from app.utils.ids import new_id
+
+__all__ = [
+    "CSV_CONTENT_TYPES",
+    "MAX_IMPORT_BYTES",
+    "MAX_IMPORT_ROWS",
+    "MAX_UPLOAD_BODY_BYTES",
+    "ClientImportService",
+    "ImportTooLargeError",
+    "UnsupportedUploadError",
+    "decode_csv",
+    "extract_csv",
+]
 
 _AUDIT_CODES_LIMIT = 100
 # The name the opening balance import reads the CSV with.

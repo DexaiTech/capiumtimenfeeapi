@@ -11,6 +11,7 @@
 
 import uuid
 from decimal import Decimal, InvalidOperation
+from functools import partial
 from typing import Any
 
 from pydantic import ValidationError as PydanticValidationError
@@ -199,7 +200,7 @@ class JobImportService:
                         row.line,
                         "row",
                         errors,
-                        lambda plan=plan: jobs.create(ctx, plan, rctx),
+                        partial(jobs.create, ctx, plan, rctx),
                         rename=_RENAME,
                     )
                     if job is not None:

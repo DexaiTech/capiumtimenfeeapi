@@ -13,6 +13,7 @@
 import uuid
 from dataclasses import dataclass
 from datetime import date
+from functools import partial
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -187,7 +188,8 @@ class RateImportService:
                         plan.line,
                         "effective_from",
                         errors,
-                        lambda plan=plan: rules.write_rule(
+                        partial(
+                            rules.write_rule,
                             ctx,
                             rctx,
                             kind=plan.kind,

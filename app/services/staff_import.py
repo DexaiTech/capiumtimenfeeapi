@@ -16,6 +16,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal, InvalidOperation
+from functools import partial
 from typing import Any
 
 from pydantic import ValidationError as PydanticValidationError
@@ -394,7 +395,7 @@ class StaffImportService:
                         plan.line,
                         "row",
                         errors,
-                        lambda plan=plan: self._write(ctx, plan, role.id, reserved, rules, rctx),
+                        partial(self._write, ctx, plan, role.id, reserved, rules, rctx),
                         integrity=_integrity,
                     )
                     if outcome is None:
