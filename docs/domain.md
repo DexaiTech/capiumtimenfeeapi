@@ -325,9 +325,10 @@ audit entries about the client (and clients merged into it) whose kind the calle
 * Defaults from the service: `billing_basis`, `fixed_fee = default_fee`; a service that is not
   billable by default (`default_billable=false`) gives a job created without a billing basis the
   basis `non_billable`.
-* Status: `planned → in_progress → on_hold ↔ in_progress → completed`; `cancelled` from any
-  open state. Time cannot be logged on `completed`/`cancelled` jobs (409 `JOB_CLOSED`);
-  reopening a completed job (back to `in_progress`) is allowed with `job.update`.
+* Status: `planned → in_progress ↔ on_hold`; `in_progress → completed → closed`; `cancelled` from any
+  open state. Time cannot be logged on `completed`, `closed` or `cancelled` jobs (409 `JOB_CLOSED`);
+  reopening a completed or closed job (back to `in_progress`) is allowed with `job.update`
+  (`app/services/time_jobs.py`).
 * Budget: `budget_minutes`, `budget_fee`; job responses carry actuals: `logged_minutes`,
   `wip_value` (unbilled billable charge value), `billed_value`, `written_off_value`.
 * Delete only when no time, disbursements or invoice lines reference the job.
@@ -440,7 +441,10 @@ logged minutes ÷ budget minutes) minus what is already billed**.
 
 ## Invoices
 
-Lifecycle: `draft → issued → void`. Drafts have no number and may be deleted.
+Lifecycle (stored): `draft → [awaiting_approval → approved] → issued → void`. The approval steps apply
+only when the practice asks for approval and the invoice reaches the threshold; a rejection returns the
+invoice to `draft`. What the person sees (`credited`, `paid`, `overdue`, `part_paid`) is derived from
+the payments and credit notes. Drafts have no number and may be deleted.
 
 **Draft from WIP** (`invoice.create`): choose the client, the WIP items (time entries and
 disbursements, all from that client and currently `unbilled`) and how to present them:
@@ -564,7 +568,8 @@ Endpoints, shapes, the exact dashboard and the error codes are in `docs/modules/
   the transaction that creates it, and a stored **code** (`APT271`, unique per practice); a later
   change of the prefix does not rename old tickets. A failed create leaves no gap; concurrent
   creates never share a number.
-* **Status** is `open` (default), `hold`, `in_progress`, `reopen` or `closed`; **priority** is `high`,
+* **Status** is `open` (default), `in_progress`, `requirement_pending`, `clarification_required`,
+  `blocked`, `ready_for_ba_review`, `reopened`, `closed`, `invalid` or `on_hold`; **priority** is `high`,
   `medium`, `low` or `not_set` (default). Any status may follow any other. `closed_at` is set
   exactly while the status is `closed` (a database CHECK). The category is `application`.
 * Creating a ticket and every status change, by edit or by bulk action, write a
