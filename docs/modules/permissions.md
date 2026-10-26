@@ -9,7 +9,7 @@ not editable) and any custom role a practice builds from the catalogue (`PUT
 /organizations/{id}/roles/{role_id}/permissions`; nobody can grant a permission they do not hold
 themselves).
 
-There are **63** permissions in **15** groups. `GET /permissions` returns the same catalogue by
+There are **64** permissions in **15** groups. `GET /permissions` returns the same catalogue by
 group then code; `GET /organizations/{id}` and `GET /users/me/organizations` return the caller's
 own permission codes.
 
@@ -21,9 +21,9 @@ own permission codes.
 
 | Role | Key | Permissions | Purpose |
 |---|---|---|---|
-| Owner | `owner` | 63 | Full control, including deleting the practice. |
-| Admin | `admin` | 62 | Runs the practice: staff, roles, settings and billing. |
-| Partner | `partner` | 58 | Owns client relationships, billing and write-offs. |
+| Owner | `owner` | 64 | Full control, including deleting the practice. |
+| Admin | `admin` | 63 | Runs the practice: staff, roles, settings and billing. |
+| Partner | `partner` | 59 | Owns client relationships, billing and write-offs. |
 | Manager | `manager` | 36 | Runs jobs, approves time and prepares bills. |
 | Staff | `staff` | 11 | Records time and disbursements on their work. |
 | Billing | `billing` | 28 | Credit control: invoices, credit notes and payments. |
@@ -116,9 +116,9 @@ gave them.
 
 | Code | Description | Owner | Admin | Partner | Manager | Staff | Billing | Viewer |
 |---|---|---|---|---|---|---|---|---|
-| `period_lock.manage` | Lock time, expenses and WIP up to a date | ✓ | ✓ | ✓ |  |  |  |  |
+| `period_lock.manage` | Lock a month, quarter or year of time, expenses and WIP | ✓ | ✓ | ✓ |  |  |  |  |
 | `period_lock.read` | View period locks and their history | ✓ | ✓ | ✓ | ✓ |  | ✓ |  |
-| `period_lock.reopen` | Reopen a locked period | ✓ | ✓ |  |  |  |  |  |
+| `period_lock.reopen` | Unlock a locked period | ✓ | ✓ |  |  |  |  |  |
 
 ### Practice
 
@@ -179,11 +179,12 @@ gave them.
 | `time.manage_all` | Edit other people's unbilled time | ✓ | ✓ | ✓ | ✓ |  |  |  |
 | `time.read_all` | View other people's time | ✓ | ✓ | ✓ | ✓ |  | ✓ | ✓ |
 | `timesheet.approve` | Approve and reject timesheets | ✓ | ✓ | ✓ | ✓ |  |  |  |
+| `timesheet.exempt` | Own time needs no approval before it is billed | ✓ | ✓ | ✓ |  |  |  |  |
 
 ## Where the period-lock permissions apply
 
-`period_lock.read` shows the lock and its history, `period_lock.manage` moves the lock forward and
-`period_lock.reopen` moves it back (it is deliberately held only by Owner and Admin: reopening a
+`period_lock.read` shows the lock and its history, `period_lock.manage` locks a month, quarter or
+year and `period_lock.reopen` unlocks one (it is deliberately held only by Owner and Admin: unlocking a
 closed period re-opens figures that may already have been reported). The three are independent: a
 custom role may hold any of them without the others. See `docs/modules/period-locks.md`.
 
@@ -197,3 +198,23 @@ custom role may hold any of them without the others. See `docs/modules/period-lo
    `alembic/versions/019_practice_settings_and_permissions.py` does with its `GRANTS` table. New
    practices copy the system roles from the catalogue.
 3. Add its rows to the table above; `tests/test_permissions_doc.py` fails until you do.
+
+## Permissions for one person
+
+A role is the starting point; a person can be given more, or less, than their role. `member_permission_overrides`
+holds one row per member and permission: `grant` (given on top of the role) or `deny` (taken away although the
+role gives it). A person's permissions are the role's, plus the grants, less the denials, and that is what every
+request, the practice list the app gates its menus on (`GET /users/me/organizations`, `/organizations/by-slug/{slug}`,
+`GET /organizations/{id}`) and the time-approval exemption (`timesheet.exempt`) use. For example, a staff member who
+does credit control can be granted `wip.read`, `invoice.read` and `payment.read` without a role of their own.
+
+| Method | Path | Permission | Purpose |
+|---|---|---|---|
+| GET | `/members/{user_id}/permissions` | `role.read` + `member.read` | `role_permissions`, `grants`, `denies` and `effective` |
+| PUT | `/members/{user_id}/permissions` | `role.manage` | Replace the grants and denials (`{grants: [...], denies: [...]}`) |
+
+Rules: only what differs from the role is kept (a grant of something the role gives, or a denial of something it
+does not, is dropped); a code cannot be both granted and denied (422); you can grant only what you hold yourself
+(403); you cannot change your own permissions (403) or an Owner's (409 `OWNER_PERMISSIONS_FIXED`: an Owner holds
+every permission, always). Each change is audited as `member.permissions_changed` with the grants and denials added
+and removed. Tests: `tests/test_member_permissions.py`.

@@ -117,6 +117,11 @@ class Organization(Base, IdMixin, TimestampMixin, SoftDeleteMixin):
     require_timesheet_approval: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("true")
     )
+    # Time of people who hold ``timesheet.exempt`` (Owner, Admin and Partner by default) counts
+    # as approved without a timesheet decision.
+    auto_approve_privileged_time: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("true")
+    )
     # How the unbilled part of a fixed fee counts as work in progress: once the job is completed
     # (``on_completion``) or in step with the budget hours used (``by_budget_progress``).
     fixed_fee_wip_mode: Mapped[FixedFeeWipMode] = mapped_column(
@@ -232,6 +237,39 @@ class RolePermission(Base):
     permission_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("permissions.id", ondelete="CASCADE"), nullable=False
     )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class MemberPermissionOverride(Base, IdMixin):
+    """A permission granted to (``grant``) or taken from (``deny``) one member, on top of their
+    role. The member's permissions are the role's, plus the grants, less the denials."""
+
+    __tablename__ = "member_permission_overrides"
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id",
+            "user_id",
+            "permission_code",
+            name="uq_member_permission_overrides_member_code",
+        ),
+        ForeignKeyConstraint(
+            ["organization_id", "user_id"],
+            ["organization_members.organization_id", "organization_members.user_id"],
+            name="fk_member_permission_overrides_organization_members",
+            ondelete="CASCADE",
+        ),
+        CheckConstraint("effect IN ('grant', 'deny')", name="effect"),
+    )
+
+    organization_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    permission_code: Mapped[str] = mapped_column(
+        Text, ForeignKey("permissions.code", ondelete="CASCADE"), nullable=False
+    )
+    effect: Mapped[str] = mapped_column(Text, nullable=False)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -371,6 +409,18 @@ class OrganizationMember(Base, IdMixin, TimestampMixin):
         primaryjoin="OrganizationMember.role_id == Role.id",
         foreign_keys=[role_id],
         viewonly=True,
+    )
+    # Permissions given to, or taken from, this person on top of their role.
+    permission_overrides: Mapped[list[MemberPermissionOverride]] = relationship(
+        "MemberPermissionOverride",
+        lazy="raise",
+        primaryjoin=(
+            "and_(OrganizationMember.organization_id == MemberPermissionOverride.organization_id, "
+            "OrganizationMember.user_id == MemberPermissionOverride.user_id)"
+        ),
+        foreign_keys="[MemberPermissionOverride.organization_id, MemberPermissionOverride.user_id]",
+        viewonly=True,
+        order_by="MemberPermissionOverride.permission_code",
     )
     grade: Mapped["Grade | None"] = relationship(
         "Grade",

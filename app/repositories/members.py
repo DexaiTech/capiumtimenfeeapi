@@ -35,6 +35,7 @@ class MemberRepository:
             .options(
                 selectinload(OrganizationMember.user),
                 selectinload(OrganizationMember.role).selectinload(Role.permissions),
+                selectinload(OrganizationMember.permission_overrides),
             )
             .execution_options(populate_existing=True)
         )

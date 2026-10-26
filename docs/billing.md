@@ -35,6 +35,33 @@ Widgets Ltd's year-end accounts job collects:
 saved.) `GET /wip` shows the client with `time_value` 48,000, `disbursement_value` 1,300 and
 the age buckets by item date.
 
+### The billing summary and the billing basis
+
+`GET /clients/{client_id}/billing-summary` (`wip.read`) shows, for each job of the client and for the
+work without a job, what was spent and what it is worth, so the hours are visible even when nothing can
+be billed yet (a fixed fee job whose fee is not recognised, non-billable time):
+
+- **Terms**: the contract terms in words ("Fixed fee of £2,000.00", "Hourly at the rates agreed with the
+  client or the practice's own rates").
+- **Hours**: `logged`, `billable`, `non_billable`, `billed`, `ready` (billable, unbilled and approved when
+  the practice requires it) and `awaiting_approval`.
+- **Value by source**: `company_time_value` (unbilled billable time at the practice's own rates:
+  `rate_source` staff, grade, service_grade, default) and `contract_time_value` (at rates agreed with
+  the client: `rate_source` client_*, or the job's own rate), the `fixed_fee` and `fixed_fee_billed`, and
+  the `other_costs` (disbursements ready to bill).
+- **Budget against actual**, three separate figures: `actual_cost` (the cost of the people who did the
+  work; needs `rate.read`), `budgeted_cost` (the job's `budget_cost`, the cost expected at the service level
+  it is sold at) and `agreed_price` (the fixed fee, else the fee budget).
+- **`basis_values`**, what billing the ready work would come to on each **billing basis**: `contract`
+  (the time at the rates in force, or the fixed fee still to bill, plus disbursements), `job` (what is left
+  of the value set for the job, plus disbursements) and `team` (the cost of the team members who did the
+  work, plus disbursements; needs `rate.read`). `time_costs` lists the cost of each ready entry so the
+  invoice can be valued on the team basis.
+
+The Prepare Invoice page offers the three bases; the chosen one sets the default amount of each line
+(`overrides` of `POST /invoices`), and a line edited by hand keeps the amount typed. The difference to the
+WIP value is the write-on or write-off, as ever.
+
 ## 2. The draft
 
 The partner bills the time at **£450.00** instead of £480.00:

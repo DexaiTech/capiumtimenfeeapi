@@ -10,7 +10,9 @@ from app.dependencies.common import ContextDep, SessionDep
 from app.dependencies.organization import PageParamsDep, require
 from app.repositories.wip import WipSummaryFilters, WriteOffFilters
 from app.schemas.billing import ClientWipRead, WipClientSummary, WriteOffCreate, WriteOffRead
+from app.schemas.billing_summary import ClientBillingSummary
 from app.schemas.common import ApiResponse, error_responses, ok, ok_page
+from app.services.billing_summary import BillingSummaryService
 from app.services.policy import OrgContext
 from app.services.wip import WipService
 from app.services.wip_views import WipViewService
@@ -26,8 +28,13 @@ def get_view_service(session: SessionDep) -> WipViewService:
     return WipViewService(session)
 
 
+def get_billing_summary_service(session: SessionDep) -> BillingSummaryService:
+    return BillingSummaryService(session)
+
+
 WipServiceDep = Annotated[WipService, Depends(get_wip_service)]
 ViewServiceDep = Annotated[WipViewService, Depends(get_view_service)]
+SummaryServiceDep = Annotated[BillingSummaryService, Depends(get_billing_summary_service)]
 WipReader = Annotated[OrgContext, Depends(require("wip.read"))]
 WipWriter = Annotated[OrgContext, Depends(require("wip.write_off"))]
 
@@ -87,6 +94,29 @@ async def client_wip(
     job_id: Annotated[uuid.UUID | None, Query(description="Only this job's items")] = None,
 ) -> ApiResponse[ClientWipRead]:
     return ok(await service.client_wip(org, client_id, job_id))
+
+
+@router.get(
+    "/clients/{client_id}/billing-summary",
+    summary="A client's billing summary",
+    description=(
+        "For each job of the client (and the work without a job): the contract terms, the hours "
+        "spent (logged, billable, non-billable, billed, ready to bill, awaiting approval), the "
+        "value of the unbilled billable time by source (`company_time_value` at the practice's own "
+        "rates, `contract_time_value` at rates agreed with the client), the fixed fee and what "
+        "has been billed of it, the `other_costs` (disbursements) and what billing on each basis "
+        "would come to (`basis_values`: contract, job, team). Budget against actual is "
+        "`actual_cost` (the people who did the work; needs `rate.read`), `budgeted_cost` (the "
+        "job's `budget_cost`) and `agreed_price` (the fixed fee, else the fee budget), tracked "
+        "separately. Also returned when nothing can be billed yet, so the hours are always "
+        "visible. Requires `wip.read`."
+    ),
+    responses=error_responses(403, 404),
+)
+async def client_billing_summary(
+    client_id: uuid.UUID, org: WipReader, service: SummaryServiceDep
+) -> ApiResponse[ClientBillingSummary]:
+    return ok(await service.client_summary(org, client_id))
 
 
 @router.post(

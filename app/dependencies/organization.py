@@ -12,6 +12,7 @@ import structlog
 from fastapi import Depends, Query
 
 from app.core.exceptions import AuthorizationError, NotFoundError
+from app.core.permissions import effective_permissions
 from app.dependencies.auth import VerifiedPrincipalDep
 from app.dependencies.common import SessionDep
 from app.repositories.memberships import MembershipRepository
@@ -38,7 +39,10 @@ async def get_member_context(
         organization=organization,
         member=member,
         role=member.role,
-        permissions=frozenset(p.code for p in member.role.permissions),
+        permissions=effective_permissions(
+            (p.code for p in member.role.permissions),
+            ((o.permission_code, o.effect) for o in member.permission_overrides),
+        ),
     )
 
 

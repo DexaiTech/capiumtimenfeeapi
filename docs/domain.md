@@ -202,9 +202,8 @@ default cost rate, else 0 (cost rules exist only for staff and grades).
   moved to new rates only by re-rating.
 * Rules of one kind and scope never overlap (409 `RATE_OVERLAP`; an exclusion constraint makes
   it hold under concurrency). `close_previous` ends the earlier open-ended rule the day before.
-* A rule is **used** when any time entry falls inside its scope and period. A used rule can be
-  end-dated (and its amount changed) but not deleted or moved to another start day
-  (409 `RATE_IN_USE`).
+* A rule is **used** when any time entry falls inside its scope and period. A used rule cannot be
+  deleted (409 `RATE_IN_USE`), but its amount, start day and end day can change.
 * Every change to a rule or to a grade's default rate is appended to the rate history
   (`rate_changes`) and to the audit log.
 * **Re-rating** re-takes the rates of **unbilled** time for chosen clients, jobs, staff and/or a

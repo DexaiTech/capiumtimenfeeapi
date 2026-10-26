@@ -5,11 +5,12 @@ Rules (docs/domain.md, "Rates"):
 * A rule applies from ``effective_from`` to ``effective_to`` inclusive (open-ended when null).
   The rules of one kind and scope never overlap: 409 ``RATE_OVERLAP`` (the database enforces it
   with an exclusion constraint, so concurrent requests cannot both succeed).
-* A rule that has been used (time falls inside its scope and period) can be end-dated and its
-  amount can change, but it cannot be deleted or moved to another start day: 409
-  ``RATE_IN_USE``. Unused rules can be changed and deleted freely.
-* Recorded time keeps the rate it was saved with: changing a rule never rewrites an entry
-  (use re-rating for unbilled time).
+* A rule that has been used (time falls inside its scope and period) cannot be deleted (409
+  ``RATE_IN_USE``), but its amount and both dates can change, so a rate added with the wrong
+  start day can be corrected afterwards. Unused rules can be changed and deleted freely.
+* Recorded time keeps the rate it was saved with: changing a rule, its start day included, never
+  rewrites an entry (use re-rating for unbilled time: it takes the rate from the ladder as it is
+  now, so nobody has to enter the time again).
 * Every create, change, end-date and delete is appended to ``rate_changes`` (the history) and
   to the audit log in the same transaction.
 """
@@ -404,11 +405,6 @@ class RateRuleService:
         rate = data.rate if data.rate is not None else rule.rate
         if end is not None and end < start:
             raise ValidationError.for_field("effective_to", "Must not be before effective_from.")
-        if start != rule.effective_from and await self.rules.is_used(org_id, rule.id):
-            raise in_use_error(
-                "This rate has been used on time entries, so it cannot start on a different "
-                "day. End-date it and add a new rate instead."
-            )
         overlaps = await self.rules.overlapping(
             org_id, rule.kind, scope, start, end, exclude_id=rule.id
         )

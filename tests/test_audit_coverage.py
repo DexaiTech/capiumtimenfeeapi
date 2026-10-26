@@ -11,7 +11,7 @@ from tests.domain_factories import make_client, make_job, make_time_entry, pract
 from tests.expense_helpers import act, create_claim
 from tests.factories import API, add_member, role_id
 from tests.foundation_helpers import create_person, sign_in
-from tests.period_lock_helpers import lock_through, reopen_to, today
+from tests.period_lock_helpers import lock_period, today, unlock_period
 from tests.team_helpers import new_rate, new_staff
 from tests.time_helpers import log_time
 
@@ -269,7 +269,7 @@ async def test_locking_and_reopening_a_period_are_audited(client):
     owner, org = await practice(client)
     t = today(org)
     assert (
-        await lock_through(client, owner, org, t - 30 * DAY, reason="March close")
+        await lock_period(client, owner, org, "year", t.year - 1, reason="March close")
     ).status_code == 200
     lock_id = (await sql("SELECT id FROM period_locks WHERE organization_id = :o", o=org["id"]))[0][
         "id"
@@ -278,19 +278,18 @@ async def test_locking_and_reopening_a_period_are_audited(client):
         org, "period_lock.locked", actor=owner, target_type="period_lock", target_id=lock_id
     )
     assert row["metadata"]["reason"] == "March close"
+    period_id = (
+        await sql("SELECT id FROM locked_periods WHERE organization_id = :o", o=org["id"])
+    )[0]["id"]
     assert (
-        await reopen_to(client, owner, org, t - 40 * DAY, reason="A late invoice")
+        await unlock_period(client, owner, org, str(period_id), reason="A late invoice")
     ).status_code == 200
     row = await only(
         org, "period_lock.reopened", actor=owner, target_type="period_lock", target_id=lock_id
     )
     assert row["metadata"]["reason"] == "A late invoice"
     assert await changes(client, owner, org, "period_lock", lock_id, "period_lock.reopened") == [
-        {
-            "field": "locked_through",
-            "before": str(t - 30 * DAY),
-            "after": str(t - 40 * DAY),
-        }
+        {"field": "period", "before": str(t.year - 1), "after": None}
     ]
 
 
@@ -542,7 +541,7 @@ async def test_every_entry_of_these_flows_carries_an_actor_an_address_and_a_requ
         json={"name": "Jane", "email": "jane@example.com"},
     )
     t = today(org)
-    await lock_through(client, owner, org, t - 30 * DAY)
+    await lock_period(client, owner, org, "year", t.year - 1)
     rows = await entry_rows(org)
     assert rows, "nothing was recorded"
     for row in rows:

@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import PeriodLock, PeriodLockEvent, User
+from app.db.models import LockedPeriod, PeriodLock, PeriodLockEvent, User
 from app.utils.ids import new_id
 from app.utils.pagination import Page, PageParams, paginate
 
@@ -17,18 +17,63 @@ class PeriodLockRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
-    async def locked_through_shared(self, organization_id: uuid.UUID) -> date | None:
-        """The last locked day, with the row share-locked until the transaction ends.
+    async def locked_periods_shared(self, organization_id: uuid.UUID) -> list[LockedPeriod]:
+        """The practice's locked periods, with its lock row share-locked until the transaction ends.
 
-        A lock or reopening needs the row ``FOR UPDATE``: it waits for the writes that were
-        checked against the old state, and a write that starts after it waits for it.
+        A lock or unlock needs the row ``FOR UPDATE``: it waits for the writes that were checked
+        against the old state, and a write that starts after it waits for it.
         """
-        stmt = (
-            select(PeriodLock.locked_through)
+        # Two statements on purpose: a write that waited for the lock must read the periods with
+        # a snapshot taken after the wait, or it would miss the period that was just locked.
+        await self.session.execute(
+            select(PeriodLock.id)
             .where(PeriodLock.organization_id == organization_id)
             .with_for_update(read=True)
         )
+        return await self.list_periods(organization_id)
+
+    async def list_periods(self, organization_id: uuid.UUID) -> list[LockedPeriod]:
+        """Oldest period first."""
+        stmt = (
+            select(LockedPeriod)
+            .where(LockedPeriod.organization_id == organization_id)
+            .order_by(LockedPeriod.start_date, LockedPeriod.end_date)
+            .execution_options(populate_existing=True)
+        )
+        return list((await self.session.execute(stmt)).scalars())
+
+    async def get_period(
+        self, organization_id: uuid.UUID, period_id: uuid.UUID
+    ) -> LockedPeriod | None:
+        stmt = select(LockedPeriod).where(
+            LockedPeriod.organization_id == organization_id, LockedPeriod.id == period_id
+        )
         return (await self.session.execute(stmt)).scalar_one_or_none()
+
+    async def overlapping(
+        self, organization_id: uuid.UUID, start: date, end: date
+    ) -> LockedPeriod | None:
+        stmt = (
+            select(LockedPeriod)
+            .where(
+                LockedPeriod.organization_id == organization_id,
+                LockedPeriod.start_date <= end,
+                LockedPeriod.end_date >= start,
+            )
+            .order_by(LockedPeriod.start_date)
+            .limit(1)
+        )
+        return (await self.session.execute(stmt)).scalar_one_or_none()
+
+    async def add_period(self, period: LockedPeriod) -> LockedPeriod:
+        self.session.add(period)
+        await self.session.flush()
+        await self.session.refresh(period)
+        return period
+
+    async def delete_period(self, period: LockedPeriod) -> None:
+        await self.session.delete(period)
+        await self.session.flush()
 
     async def get(self, organization_id: uuid.UUID) -> PeriodLock | None:
         stmt = (

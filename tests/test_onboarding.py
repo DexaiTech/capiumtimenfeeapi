@@ -2,7 +2,6 @@
 permissions, isolation, audit and the races between two people marking the same step."""
 
 import asyncio
-from datetime import timedelta
 
 import pytest
 from sqlalchemy.exc import IntegrityError
@@ -12,7 +11,7 @@ from tests.domain_factories import make_client, make_job, make_time_entry, pract
 from tests.factories import audit_entries, create_user_with_org, error
 from tests.foundation_helpers import add_custom_role
 from tests.onboarding_helpers import STEP_KEYS, checklist, mark, steps
-from tests.period_lock_helpers import lock_through, today
+from tests.period_lock_helpers import lock_period, today
 from tests.team_helpers import new_staff, set_grade_rates
 from tests.time_helpers import org_url
 
@@ -102,7 +101,7 @@ async def _a_time_entry(client, owner, org):
 
 
 async def _a_lock(client, owner, org):
-    response = await lock_through(client, owner, org, today(org) - timedelta(days=30))
+    response = await lock_period(client, owner, org, "year", today(org).year - 1)
     assert response.status_code == 200, response.text
 
 

@@ -132,8 +132,17 @@ class TimesheetService:
                 raise TimesheetEmptyError()
             old = sheet.status
             submitted_at = practice_now()
-            sheet.status = "submitted"
             sheet.submitted_at = submitted_at
+            if sheet.approval_exempt:
+                # The owner's time needs no approval (practice setting + `timesheet.exempt`):
+                # the week is approved as it is submitted and nobody is asked.
+                sheet.status = "approved"
+                sheet.decided_by = ctx.user.id
+                sheet.decided_at = submitted_at
+                sheet.decision_note = "Approval not required"
+                await self._save(ctx, rctx, "timesheet.approved", sheet, old, totals)
+                return await self._detail(ctx, sheet)
+            sheet.status = "submitted"
             sheet.decided_by = None
             sheet.decided_at = None
             sheet.decision_note = None

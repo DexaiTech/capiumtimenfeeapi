@@ -8,7 +8,9 @@ from fastapi import APIRouter, Depends, Query
 from app.dependencies.common import ContextDep, SessionDep, SettingsDep
 from app.dependencies.organization import OrgContextDep, PageParamsDep, require
 from app.schemas.common import ApiResponse, error_responses, ok, ok_page
+from app.schemas.member_permissions import MemberPermissionsRead, MemberPermissionsUpdate
 from app.schemas.organization import MemberRead, MemberStatus, MemberUpdate
+from app.services.member_permissions import MemberPermissionService
 from app.services.members import MemberService
 from app.services.policy import OrgContext
 
@@ -20,6 +22,15 @@ def get_member_service(session: SessionDep) -> MemberService:
 
 
 MemberServiceDep = Annotated[MemberService, Depends(get_member_service)]
+
+
+def get_member_permission_service(session: SessionDep) -> MemberPermissionService:
+    return MemberPermissionService(session)
+
+
+MemberPermissionServiceDep = Annotated[
+    MemberPermissionService, Depends(get_member_permission_service)
+]
 
 
 @router.get(
@@ -106,3 +117,44 @@ async def remove_member(
     await service.remove(org, user_id, ctx)
     left = user_id == org.user.id
     return ok(message="You left the practice" if left else "Member removed")
+
+
+@router.get(
+    "/{user_id}/permissions",
+    summary="A member's permissions",
+    description=(
+        "What the member's role gives them (`role_permissions`), what is granted to them on top "
+        "(`grants`), what is taken from them (`denies`) and what they can do (`effective`). "
+        "Requires `role.read` and `member.read`."
+    ),
+    responses=error_responses(403, 404),
+)
+async def get_member_permissions(
+    user_id: uuid.UUID,
+    org: Annotated[OrgContext, Depends(require("role.read", "member.read"))],
+    service: MemberPermissionServiceDep,
+) -> ApiResponse[MemberPermissionsRead]:
+    return ok(await service.get(org, user_id))
+
+
+@router.put(
+    "/{user_id}/permissions",
+    summary="Change a member's own permissions",
+    description=(
+        "Replaces the member's grants and denials: `grants` are given on top of their role, "
+        "`denies` are taken from them although their role gives them. Only what differs from the "
+        "role is kept. You can grant only what you hold yourself (403), not change your own "
+        "(403) or an Owner's (409 `OWNER_PERMISSIONS_FIXED`), and a code cannot be both "
+        "granted and denied (422). Audited as `member.permissions_changed`. Requires "
+        "`role.manage`."
+    ),
+    responses=error_responses(403, 404, 409),
+)
+async def set_member_permissions(
+    user_id: uuid.UUID,
+    body: MemberPermissionsUpdate,
+    org: Annotated[OrgContext, Depends(require("role.manage"))],
+    service: MemberPermissionServiceDep,
+    ctx: ContextDep,
+) -> ApiResponse[MemberPermissionsRead]:
+    return ok(await service.update(org, user_id, body, ctx), "Permissions saved")

@@ -19,7 +19,7 @@ from tests.domain_factories import (
     staff,
 )
 from tests.factories import audit_entries
-from tests.period_lock_helpers import assert_locked, lock_through, org_url, set_lock, today
+from tests.period_lock_helpers import assert_locked, lock_period, org_url, set_lock, today
 from tests.time_helpers import entry_row, make_client_rate, ok_data
 
 DAY = timedelta(days=1)
@@ -481,12 +481,12 @@ async def test_assert_open_assert_open_many_and_locked_dates(client):
         }
         assert await period_locks.locked_dates(session, org_id, []) == {}
 
-        # One lookup however many days; none at all for no days.
+        # One lookup (the lock, then the periods) however many days; none at all for no days.
         with count_queries() as statements:
             await period_locks.assert_open_many(
                 session, org_id, [lock + n * DAY for n in (1, 2, 3)], "time"
             )
-        assert len(statements) == 1
+        assert len(statements) == 2
         with count_queries() as statements:
             await period_locks.assert_open_many(session, org_id, [], "time")
         assert statements == []
@@ -504,7 +504,7 @@ async def test_a_practice_without_a_lock_row_is_open_and_can_still_be_locked(cli
     await sql("DELETE FROM period_locks WHERE organization_id = :o", o=org["id"])
     async with get_sessionmaker()() as session:
         await period_locks.assert_open(session, org_id, t - 400 * DAY, "time")
-    assert (await lock_through(client, owner, org, t - 5 * DAY)).status_code == 200
+    assert (await lock_period(client, owner, org, "year", t.year - 1)).status_code == 200
     assert (
         await count_rows(
             "SELECT count(*) FROM period_locks WHERE organization_id = :o", o=org["id"]

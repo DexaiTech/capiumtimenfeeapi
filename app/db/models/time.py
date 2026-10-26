@@ -58,6 +58,11 @@ class Timesheet(Base, IdMixin, OrgScopedMixin, TimestampMixin):
     decided_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     decision_note: Mapped[str | None] = mapped_column(Text)
+    # The person's time needs no approval (practice setting + permission ``timesheet.exempt``):
+    # the sheet counts as approved for WIP and billing without being submitted.
+    approval_exempt: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
 
 
 class TimeEntry(Base, IdMixin, OrgScopedMixin, TimestampMixin):

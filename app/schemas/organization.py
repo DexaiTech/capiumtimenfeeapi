@@ -1,6 +1,7 @@
 """Request and response models of the practice, staff (member) and role endpoints."""
 
 import uuid
+from collections.abc import Iterable
 from datetime import datetime
 from typing import Annotated, Literal, Self
 from zoneinfo import available_timezones
@@ -41,6 +42,12 @@ class OrganizationRead(BaseModel):
     )
     require_timesheet_approval: bool = Field(
         description="Whether time must be on an approved timesheet before it can be billed"
+    )
+    auto_approve_privileged_time: bool = Field(
+        description=(
+            "Whether the time of people who hold `timesheet.exempt` (Owner, Admin and Partner "
+            "by default) counts as approved, and can be billed, without a timesheet approval"
+        )
     )
     fixed_fee_wip_mode: FixedFeeWipMode = Field(
         description=(
@@ -112,6 +119,7 @@ class OrganizationRead(BaseModel):
             default_charge_rate=organization.default_charge_rate,
             time_increment_minutes=organization.time_increment_minutes,
             require_timesheet_approval=organization.require_timesheet_approval,
+            auto_approve_privileged_time=organization.auto_approve_privileged_time,
             fixed_fee_wip_mode=organization.fixed_fee_wip_mode,
             wip_adjustment_approval_threshold=organization.wip_adjustment_approval_threshold,
             wip_write_off_approval_threshold_percent=(
@@ -156,12 +164,19 @@ class OrganizationContextRead(BaseModel):
     permissions: list[str]
 
     @classmethod
-    def build(cls, organization: Organization, role: Role) -> "OrganizationContextRead":
-        """``role.permissions`` must be loaded."""
+    def build(
+        cls,
+        organization: Organization,
+        role: Role,
+        permissions: Iterable[str] | None = None,
+    ) -> "OrganizationContextRead":
+        """``role.permissions`` must be loaded. ``permissions`` are the person's own (their role's
+        with what was granted or denied them); the role's when left out."""
+        codes = permissions if permissions is not None else (p.code for p in role.permissions)
         return cls(
             organization=OrganizationRead.from_model(organization),
             role=RoleSummary.from_model(role),
-            permissions=sorted(p.code for p in role.permissions),
+            permissions=sorted(codes),
         )
 
 
@@ -299,6 +314,13 @@ class OrganizationUpdate(RequestModel):
     )
     require_timesheet_approval: bool | None = Field(
         default=None, description="Whether time must be approved before it can be billed"
+    )
+    auto_approve_privileged_time: bool | None = Field(
+        default=None,
+        description=(
+            "Whether time of people with `timesheet.exempt` needs no timesheet approval. Applies "
+            "to the sheets of those people straight away"
+        ),
     )
     fixed_fee_wip_mode: FixedFeeWipMode | None = Field(
         default=None,

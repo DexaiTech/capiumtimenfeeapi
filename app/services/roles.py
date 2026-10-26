@@ -13,6 +13,7 @@ from app.core.permissions import SYSTEM_ROLES
 from app.db.models import Permission, Role
 from app.db.session import unit_of_work
 from app.repositories.roles import RoleRepository
+from app.repositories.timesheets import TimesheetRepository
 from app.schemas.organization import (
     RoleCreate,
     RolePermissionsUpdate,
@@ -117,6 +118,7 @@ class RoleService:
             if old != new:
                 role.permissions = permissions
                 await self.session.flush()
+                await TimesheetRepository(self.session).sync_exemptions(ctx.organization_id)
                 await self._audit(
                     ctx,
                     rctx,

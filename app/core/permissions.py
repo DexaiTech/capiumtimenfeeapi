@@ -4,6 +4,7 @@ Permissions are seeded into the ``permissions`` table by migration. Adding one m
 adding it here *and* writing a migration that inserts it (see ``migration_helpers``).
 """
 
+from collections.abc import Iterable
 from typing import NamedTuple
 
 
@@ -44,6 +45,7 @@ CATALOGUE: tuple[PermissionDef, ...] = (
     PermissionDef("time.read_all", "Time", "View other people's time"),
     PermissionDef("time.manage_all", "Time", "Edit other people's unbilled time"),
     PermissionDef("timesheet.approve", "Time", "Approve and reject timesheets"),
+    PermissionDef("timesheet.exempt", "Time", "Own time needs no approval before it is billed"),
     # Disbursements
     PermissionDef("disbursement.log", "Disbursements", "Record disbursements"),
     PermissionDef("disbursement.manage", "Disbursements", "Edit and delete any disbursement"),
@@ -68,8 +70,12 @@ CATALOGUE: tuple[PermissionDef, ...] = (
     PermissionDef("ticket.delete", "Tickets", "Delete tags and moderate comments"),
     # Period lock
     PermissionDef("period_lock.read", "Period lock", "View period locks and their history"),
-    PermissionDef("period_lock.manage", "Period lock", "Lock time, expenses and WIP up to a date"),
-    PermissionDef("period_lock.reopen", "Period lock", "Reopen a locked period"),
+    PermissionDef(
+        "period_lock.manage",
+        "Period lock",
+        "Lock a month, quarter or year of time, expenses and WIP",
+    ),
+    PermissionDef("period_lock.reopen", "Period lock", "Unlock a locked period"),
     # Expenses
     PermissionDef("expense.log", "Expenses", "Record and submit own expense claims"),
     PermissionDef("expense.read_all", "Expenses", "View everyone's expense claims and receipts"),
@@ -235,3 +241,20 @@ SYSTEM_ROLES: tuple[SystemRole, ...] = (
 )
 
 OWNER_KEY = "owner"
+
+
+def effective_permissions(
+    role_codes: Iterable[str], overrides: Iterable[tuple[str, str]]
+) -> frozenset[str]:
+    """A person's permissions: their role's, plus what is granted to them, less what is denied.
+
+    ``overrides`` are ``(code, effect)`` pairs, effect ``grant`` or ``deny``. A denial wins over
+    the role and over a grant of the same code (there is at most one override per code).
+    """
+    codes = set(role_codes)
+    for code, effect in overrides:
+        if effect == "grant":
+            codes.add(code)
+        else:
+            codes.discard(code)
+    return frozenset(codes)

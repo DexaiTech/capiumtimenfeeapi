@@ -12,12 +12,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.context import RequestContext
 from app.core.exceptions import ConflictError, NotFoundError, ValidationError
-from app.core.permissions import OWNER_KEY, SYSTEM_ROLES
+from app.core.permissions import OWNER_KEY, SYSTEM_ROLES, effective_permissions
 from app.db.models import Organization, OrganizationMember, Role, User
 from app.db.session import unit_of_work
 from app.repositories.members import MemberRepository
 from app.repositories.organizations import OrganizationRepository
 from app.repositories.roles import RoleRepository
+from app.repositories.timesheets import TimesheetRepository
 from app.schemas.organization import OrganizationCreate, OrganizationDelete, OrganizationUpdate
 from app.services import audit, policy
 from app.services.policy import OrgContext
@@ -62,7 +63,10 @@ async def lock_and_refresh(session: AsyncSession, ctx: OrgContext, *codes: str) 
         organization=organization,
         member=member,
         role=member.role,
-        permissions=frozenset(p.code for p in member.role.permissions),
+        permissions=effective_permissions(
+            (p.code for p in member.role.permissions),
+            ((o.permission_code, o.effect) for o in member.permission_overrides),
+        ),
     )
     policy.ensure(fresh, *codes)
     return fresh
@@ -75,13 +79,13 @@ class OrganizationService:
         self.members = MemberRepository(session)
         self.roles = RoleRepository(session)
 
-    async def list_mine(self, user: User) -> list[tuple[Organization, Role]]:
+    async def list_mine(self, user: User) -> list[tuple[Organization, Role, frozenset[str]]]:
         return await self.organizations.list_for_user(user.id)
 
     async def first_organization(self) -> Organization | None:
         return await self.organizations.first()
 
-    async def get_by_slug(self, user: User, slug: str) -> tuple[Organization, Role]:
+    async def get_by_slug(self, user: User, slug: str) -> tuple[Organization, Role, frozenset[str]]:
         found = await self.organizations.get_by_slug_for_user(slug, user.id)
         if found is None:
             # Unknown slug and "not a member" are indistinguishable to the caller.
@@ -204,6 +208,8 @@ class OrganizationService:
                     setattr(organization, field, value)
             if changes:
                 await self.session.flush()
+                if "auto_approve_privileged_time" in changes:
+                    await TimesheetRepository(self.session).sync_exemptions(organization.id)
                 await audit.record(
                     self.session,
                     "organization.updated",

@@ -275,7 +275,8 @@ def wip_items(
         time_q = time_q.where(
             TimeEntry.timesheet_id.in_(
                 select(Timesheet.id).where(
-                    Timesheet.organization_id == organization_id, Timesheet.status == "approved"
+                    Timesheet.organization_id == organization_id,
+                    or_(Timesheet.status == "approved", Timesheet.approval_exempt.is_(True)),
                 )
             )
         )

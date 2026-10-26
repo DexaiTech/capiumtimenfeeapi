@@ -28,7 +28,10 @@ class MembershipRepository:
             )
             # One statement: the role and its permissions come with the row (two more round
             # trips as separate selectin loads).
-            .options(joinedload(OrganizationMember.role).joinedload(Role.permissions))
+            .options(
+                joinedload(OrganizationMember.role).joinedload(Role.permissions),
+                joinedload(OrganizationMember.permission_overrides),
+            )
         )
         row = (await self.session.execute(stmt)).unique().one_or_none()
         return (row[0], row[1]) if row else None

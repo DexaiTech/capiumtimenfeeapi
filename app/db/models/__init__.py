@@ -48,13 +48,14 @@ from app.db.models.notifications import (
 )
 from app.db.models.onboarding import OnboardingProgress
 from app.db.models.organization import (
+    MemberPermissionOverride,
     Organization,
     OrganizationMember,
     Permission,
     Role,
     RolePermission,
 )
-from app.db.models.period_locks import PeriodLock, PeriodLockEvent
+from app.db.models.period_locks import LockedPeriod, PeriodLock, PeriodLockEvent
 from app.db.models.platform import AuditLog, BackgroundJob, RateLimitCounter
 from app.db.models.practice import (
     ActivityCode,
@@ -131,6 +132,8 @@ __all__ = [
     "Job",
     "JobAssignee",
     "JobBudgetAlert",
+    "LockedPeriod",
+    "MemberPermissionOverride",
     "MessageLog",
     "Notification",
     "NotificationPreference",

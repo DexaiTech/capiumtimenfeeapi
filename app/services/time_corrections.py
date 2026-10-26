@@ -19,7 +19,7 @@ from app.db.session import unit_of_work
 from app.repositories.time_entries import EntryView
 from app.repositories.time_history import TimeHistoryRepository
 from app.schemas.time import TimeEntryRead
-from app.schemas.time_views import TimeCorrection, TimeEntryHistoryRead
+from app.schemas.time_views import TimeCorrection, TimeEntryHistoryRead, TimeRemoval
 from app.services import charge_rates, period_locks
 from app.services.charge_rates import RateQuery
 from app.services.job_budget_alerts import refresh_job_budgets
@@ -122,6 +122,58 @@ class TimeCorrectionService:
         self.jobs = self.time.jobs
         self.refs = self.time.refs
         self.history = TimeHistoryRepository(session)
+
+    async def remove(
+        self, ctx: OrgContext, entry_id: uuid.UUID, data: TimeRemoval, rctx: RequestContext
+    ) -> None:
+        """Delete approved, unbilled time that was posted by mistake, saying why.
+
+        The same people and rules as a correction; the reason is kept in the audit entry
+        ``time_entry.deleted`` (the entry itself, and its history, go).
+        """
+        ensure_any(ctx, "time.manage_all", "timesheet.approve")
+        reason = (data.reason or "").strip()
+        if not reason:
+            raise TimeCorrectionReasonRequiredError(
+                "Say why the approved time is being removed.",
+                details=[
+                    {
+                        "field": "reason",
+                        "code": "required",
+                        "message": "Say why the approved time is being removed.",
+                    }
+                ],
+            )
+        org_id = ctx.organization_id
+        async with unit_of_work(self.session):
+            current = await self.entries.get(org_id, entry_id)
+            if current is None:
+                raise NotFoundError("Time entry not found.")
+            if current.user_id == ctx.user.id and not has_permission(ctx, "organization.update"):
+                raise SelfCorrectionError("You cannot remove your own approved time.")
+            [sheet] = await self.sheets.lock_many(org_id, [current.timesheet_id])
+            entry = await self.entries.get(org_id, entry_id, for_update=True)
+            if entry is None:
+                raise NotFoundError("Time entry not found.")
+            if entry.timesheet_id != sheet.id:
+                raise ConflictError("This entry was changed at the same time. Try again.")
+            if sheet.status != "approved" or entry.billing_status != "unbilled":
+                raise TimeNotCorrectableError(
+                    "Only approved time that has not been billed can be removed this way.",
+                    details={
+                        "timesheet_status": sheet.status,
+                        "billing_status": entry.billing_status,
+                    },
+                )
+            await period_locks.assert_open(self.session, org_id, entry.entry_date, "time")
+            await self.time._audit(
+                ctx, rctx, "time_entry.deleted", entry, {"reason": reason, "was_approved": True}
+            )
+            job_id = entry.job_id
+            await self.entries.delete(entry)
+            await refresh_job_budgets(
+                self.session, org_id, [job_id], actor_user_id=ctx.user.id, rctx=rctx
+            )
 
     async def correct(
         self, ctx: OrgContext, entry_id: uuid.UUID, data: TimeCorrection, rctx: RequestContext

@@ -484,9 +484,10 @@ async def test_a_used_rate_can_be_end_dated_but_not_deleted_or_moved(client: Asy
     url = org_url(org, f"/rates/{rule['id']}")
     refused = await client.delete(url, headers=owner.headers)
     assert refused.status_code == 409 and refused.json()["error"]["code"] == "RATE_IN_USE"
-    moved = await client.patch(url, headers=owner.headers, json={"effective_from": "2026-02-01"})
-    assert moved.status_code == 409 and moved.json()["error"]["code"] == "RATE_IN_USE"
     assert await rule_count(org, id=rule["id"]) == 1
+    # A used rate can start on a different day (the entries keep the rate they were saved with).
+    moved = await client.patch(url, headers=owner.headers, json={"effective_from": "2026-02-01"})
+    assert ok_data(moved)["effective_from"] == "2026-02-01"
 
     ended = await client.patch(url, headers=owner.headers, json={"effective_to": "2026-12-31"})
     assert ok_data(ended)["effective_to"] == "2026-12-31"

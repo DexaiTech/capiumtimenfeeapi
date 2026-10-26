@@ -113,6 +113,16 @@ class CopyEntryRequest(RequestModel):
 # --- Corrections ---------------------------------------------------------------------------
 
 
+class TimeRemoval(RequestModel):
+    """The removal of approved, unbilled time: ``reason`` is required."""
+
+    reason: str | None = Field(
+        default=None,
+        max_length=2000,
+        description="Why the approved time is removed (required, 1-2000 characters)",
+    )
+
+
 class TimeCorrection(RequestModel):
     """A correction of approved, unbilled time. ``reason`` is required; send the fields that
     change (at least one). ``date``/``billable`` may also be written ``entry_date``/

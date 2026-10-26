@@ -15,12 +15,12 @@ from tests.factories import API, Actor
 __all__ = [
     "assert_locked",
     "events",
-    "lock_through",
-    "locked_through",
+    "lock_period",
+    "locked_periods",
     "org_url",
-    "reopen_to",
     "set_lock",
     "today",
+    "unlock_period",
 ]
 
 
@@ -33,46 +33,60 @@ def today(org: dict) -> date:
     return today_in(org["timezone"])
 
 
-async def lock_through(
-    client: AsyncClient, actor: Actor, org: dict, day: date | str, **body: Any
+async def lock_period(
+    client: AsyncClient,
+    actor: Actor,
+    org: dict,
+    period_type: str,
+    year: int,
+    period: int | None = None,
+    **body: Any,
 ) -> Response:
-    return await client.post(
-        org_url(org, "/period-locks"),
-        headers=actor.headers,
-        json={"locked_through": str(day), **body},
-    )
+    payload: dict[str, Any] = {"period_type": period_type, "year": year, **body}
+    if period is not None:
+        payload["period"] = period
+    return await client.post(org_url(org, "/period-locks"), headers=actor.headers, json=payload)
 
 
-async def reopen_to(
-    client: AsyncClient, actor: Actor, org: dict, day: date | str | None, **body: Any
+async def unlock_period(
+    client: AsyncClient, actor: Actor, org: dict, lock_id: str, **body: Any
 ) -> Response:
     return await client.post(
         org_url(org, "/period-locks/reopen"),
         headers=actor.headers,
-        json={"reopen_to": None if day is None else str(day), **body},
+        json={"lock_id": lock_id, **body},
     )
 
 
 async def set_lock(org: dict, day: date | None) -> None:
-    """Lock straight in the database (no event, no audit): set-up for the enforcement tests."""
+    """Lock everything through ``day`` straight in the database (a ``legacy`` period, no event,
+    no audit), or nothing for None: set-up for the enforcement tests."""
     async with get_sessionmaker()() as session:
         await session.execute(
-            text(
-                "INSERT INTO period_locks (id, organization_id, locked_through) "
-                "VALUES (gen_random_uuid(), :org, :day) "
-                "ON CONFLICT (organization_id) DO UPDATE SET locked_through = :day"
-            ),
-            {"org": uuid.UUID(org["id"]), "day": day},
+            text("DELETE FROM locked_periods WHERE organization_id = :org"),
+            {"org": uuid.UUID(org["id"])},
         )
+        if day is not None:
+            await session.execute(
+                text(
+                    "INSERT INTO locked_periods (id, organization_id, period_type, start_date, "
+                    "end_date) VALUES (gen_random_uuid(), :org, 'legacy', DATE '2000-01-01', :day)"
+                ),
+                {"org": uuid.UUID(org["id"]), "day": day},
+            )
         await session.commit()
 
 
-async def locked_through(org: dict) -> date | None:
+async def locked_periods(org: dict) -> list[dict[str, Any]]:
     async with get_sessionmaker()() as session:
-        return await session.scalar(
-            text("SELECT locked_through FROM period_locks WHERE organization_id = :org"),
+        rows = await session.execute(
+            text(
+                "SELECT period_type, start_date, end_date FROM locked_periods "
+                "WHERE organization_id = :org ORDER BY start_date"
+            ),
             {"org": uuid.UUID(org["id"])},
         )
+        return [dict(row._mapping) for row in rows]
 
 
 async def events(org: dict) -> list[dict[str, Any]]:
@@ -80,7 +94,7 @@ async def events(org: dict) -> list[dict[str, Any]]:
     async with get_sessionmaker()() as session:
         rows = await session.execute(
             text(
-                "SELECT event_type, previous_locked_through, locked_through, reason, "
+                "SELECT event_type, period_type, period_start, period_end, reason, "
                 "actor_user_id FROM period_lock_events WHERE organization_id = :org "
                 "ORDER BY created_at, id"
             ),

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Any
 
-from sqlalchemy import ColumnElement, Select, and_, delete, exists, func, select, true
+from sqlalchemy import ColumnElement, Select, and_, delete, exists, func, or_, select, true
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,7 +28,7 @@ def wip_time_clause(require_timesheet_approval: bool) -> ColumnElement[bool]:
         approved = exists().where(
             Timesheet.organization_id == TimeEntry.organization_id,
             Timesheet.id == TimeEntry.timesheet_id,
-            Timesheet.status == "approved",
+            or_(Timesheet.status == "approved", Timesheet.approval_exempt.is_(True)),
         )
         clause = and_(clause, approved)
     return clause

@@ -48,7 +48,12 @@ async def list_my_organizations(
     principal: VerifiedPrincipalDep, service: OrganizationServiceDep
 ) -> ApiResponse[list[OrganizationContextRead]]:
     found = await service.list_mine(principal.user)
-    return ok([OrganizationContextRead.build(organization, role) for organization, role in found])
+    return ok(
+        [
+            OrganizationContextRead.build(organization, role, permissions)
+            for organization, role, permissions in found
+        ]
+    )
 
 
 @router.post(
@@ -90,8 +95,8 @@ async def get_organization_by_slug(
     principal: VerifiedPrincipalDep,
     service: OrganizationServiceDep,
 ) -> ApiResponse[OrganizationContextRead]:
-    organization, role = await service.get_by_slug(principal.user, slug)
-    return ok(OrganizationContextRead.build(organization, role))
+    organization, role, permissions = await service.get_by_slug(principal.user, slug)
+    return ok(OrganizationContextRead.build(organization, role, permissions))
 
 
 @router.get(
@@ -106,7 +111,7 @@ async def get_organization_by_slug(
 async def get_organization(
     org: Annotated[OrgContext, Depends(require("organization.read"))],
 ) -> ApiResponse[OrganizationContextRead]:
-    return ok(OrganizationContextRead.build(org.organization, org.role))
+    return ok(OrganizationContextRead.build(org.organization, org.role, org.permissions))
 
 
 @router.patch(

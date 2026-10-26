@@ -66,6 +66,7 @@ class Job(Base, IdMixin, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
         CheckConstraint("hourly_rate IS NULL OR hourly_rate >= 0", name="hourly_rate"),
         CheckConstraint("budget_minutes IS NULL OR budget_minutes >= 0", name="budget_minutes"),
         CheckConstraint("budget_fee IS NULL OR budget_fee >= 0", name="budget_fee"),
+        CheckConstraint("budget_cost IS NULL OR budget_cost >= 0", name="budget_cost"),
         CheckConstraint(
             "period_start IS NULL OR period_end IS NULL OR period_start <= period_end",
             name="period_order",
@@ -112,6 +113,8 @@ class Job(Base, IdMixin, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
     hourly_rate: Mapped[int | None] = mapped_column(BigInteger)
     budget_minutes: Mapped[int | None] = mapped_column(Integer)
     budget_fee: Mapped[int | None] = mapped_column(BigInteger)
+    # What the work is expected to cost at its service level, to compare with the actual cost.
+    budget_cost: Mapped[int | None] = mapped_column(BigInteger)
     # The accounting period the work covers, e.g. the year ending 31 March 2026.
     period_start: Mapped[date | None] = mapped_column(Date)
     period_end: Mapped[date | None] = mapped_column(Date)

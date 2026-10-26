@@ -42,6 +42,7 @@ queue** (used by the worker), so the client-work job code lives in `time_jobs.py
 | POST | `/time-entries/copy-week` | `time.log` (own) / `time.manage_all` | Copy a week into another week (200, partial success) |
 | POST | `/time-entries/{id}/copy` | `time.log` (own) / `time.manage_all` | Copy one entry to another day (201) |
 | POST | `/time-entries/{id}/correct` | `time.manage_all` or `timesheet.approve` | Correct approved, unbilled time; a reason is required |
+| POST | `/time-entries/{id}/remove` | `time.manage_all` or `timesheet.approve` | Delete approved, unbilled time posted by mistake; a reason is required (audited as `time_entry.deleted`); not one's own time without `organization.update` |
 | GET | `/time-entries/{id}/history` | own / `time.read_all` / manager | The corrections of an entry, newest first, cursor-paginated |
 | POST | `/rates/revalue` | `rate.manage` | Re-price unbilled entries `{date_from, date_to, user_id?, client_id?}` (V1; the preview and apply pair is in `docs/modules/team-rates.md`) |
 | GET | `/timer` | `time.log` | The caller's timer or `null` |
@@ -692,3 +693,22 @@ two migrations:
   * Both tables name people and entries **without foreign keys** (like `rate_changes`): the history
     outlives a deleted entry, and neither table can block deleting or merging staff through the
     staff-reference check.
+
+## Time that needs no approval
+
+`organizations.auto_approve_privileged_time` (on by default; `PATCH /organizations/{id}`) and the
+permission `timesheet.exempt` (Owner, Admin and Partner hold it; give it to a manager or a custom
+role to include them) decide whose time needs no approval. When a practice requires timesheet approval
+(`require_timesheet_approval`), a person who holds the permission has `timesheets.approval_exempt =
+true` on their sheets and:
+
+- their unbilled billable time **counts as approved** for WIP, billing, client and job figures and the
+  reports (`wip_time_clause`, `sheet_counts_as_approved` in `app/repositories/timesheets.py`), whether or
+  not the week was submitted;
+- their time stays editable until they submit; **submitting** the week approves it at once
+  (`decision_note` "Approval not required") and nobody is asked: it never reaches `/approvals`;
+- their open weeks are not listed as "unsubmitted" on the dashboards.
+
+The flag is kept in step by `TimesheetRepository.sync_exemptions`: when time is written, and when the
+setting, a member's role or a role's permissions change. Turning the setting off makes the existing weeks
+need approval again. Tests: `tests/test_time_approval_exempt.py`.

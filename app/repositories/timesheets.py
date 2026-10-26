@@ -5,11 +5,19 @@ from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from datetime import date
 
-from sqlalchemy import case, func, select
+from sqlalchemy import and_, case, exists, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import TimeEntry, Timesheet
+from app.db.models import (
+    MemberPermissionOverride,
+    Organization,
+    OrganizationMember,
+    Permission,
+    RolePermission,
+    TimeEntry,
+    Timesheet,
+)
 from app.repositories.time_paging import keyset_finish, keyset_query, parse_date
 from app.utils.pagination import Page, PageParams
 
@@ -22,9 +30,69 @@ class SheetTotals:
     billable_value: int = 0
 
 
+EXEMPT_PERMISSION = "timesheet.exempt"
+
+
+def sheet_counts_as_approved():
+    """A sheet whose time counts as approved: approved, or its owner needs no approval."""
+    return or_(Timesheet.status == "approved", Timesheet.approval_exempt.is_(True))
+
+
 class TimesheetRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
+
+    async def sync_exemptions(
+        self, organization_id: uuid.UUID, user_id: uuid.UUID | None = None
+    ) -> None:
+        """Mark the sheets of people who need no approval (one person's, or the practice's).
+
+        A sheet is exempt when the practice's setting ``auto_approve_privileged_time`` is on and
+        its owner is an active member whose role holds ``timesheet.exempt``. Called when a sheet
+        is written and when the setting, a member's role or a role's permissions change.
+        """
+        role_gives = exists().where(
+            OrganizationMember.organization_id == Timesheet.organization_id,
+            OrganizationMember.user_id == Timesheet.user_id,
+            OrganizationMember.status == "active",
+            RolePermission.role_id == OrganizationMember.role_id,
+            Permission.id == RolePermission.permission_id,
+            Permission.code == EXEMPT_PERMISSION,
+        )
+
+        def own(effect: str):
+            return exists().where(
+                MemberPermissionOverride.organization_id == Timesheet.organization_id,
+                MemberPermissionOverride.user_id == Timesheet.user_id,
+                MemberPermissionOverride.permission_code == EXEMPT_PERMISSION,
+                MemberPermissionOverride.effect == effect,
+            )
+
+        member_active = exists().where(
+            OrganizationMember.organization_id == Timesheet.organization_id,
+            OrganizationMember.user_id == Timesheet.user_id,
+            OrganizationMember.status == "active",
+        )
+        # The role's, plus what was granted to the person, less what was denied them.
+        holds = and_(or_(role_gives, and_(member_active, own("grant"))), ~own("deny"))
+        enabled = (
+            select(Organization.auto_approve_privileged_time)
+            .where(Organization.id == organization_id)
+            .scalar_subquery()
+        )
+        wanted = and_(enabled, holds)
+        stmt = (
+            update(Timesheet)
+            .where(
+                Timesheet.organization_id == organization_id,
+                Timesheet.approval_exempt.is_distinct_from(wanted),
+            )
+            .values(approval_exempt=wanted)
+            .execution_options(synchronize_session=False)
+        )
+        if user_id is not None:
+            stmt = stmt.where(Timesheet.user_id == user_id)
+        await self.session.execute(stmt)
 
     async def get(
         self, organization_id: uuid.UUID, timesheet_id: uuid.UUID, *, for_update: bool = False
@@ -79,6 +147,8 @@ class TimesheetRepository:
         id order. Keyed by sheet id."""
         for user_id, week_start in sorted(weeks):
             await self.ensure(organization_id, user_id, week_start)
+        for user_id in sorted({user_id for user_id, _ in weeks}):
+            await self.sync_exemptions(organization_id, user_id)
         ids = set(sheet_ids)
         for user_id, week_start in weeks:
             sheet = await self.find(organization_id, user_id, week_start)

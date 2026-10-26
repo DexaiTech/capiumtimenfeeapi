@@ -581,7 +581,7 @@ class ClientRepository:
                     Timesheet.organization_id == TimeEntry.organization_id,
                     Timesheet.id == TimeEntry.timesheet_id,
                 ),
-            ).where(Timesheet.status == "approved")
+            ).where(or_(Timesheet.status == "approved", Timesheet.approval_exempt.is_(True)))
         row = (await self.session.execute(stmt)).one()
         return int(row[0]), int(row[1])
 

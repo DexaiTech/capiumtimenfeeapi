@@ -133,6 +133,8 @@ async def test_reject_needs_note(client: AsyncClient) -> None:
 
 async def test_self_approval(client: AsyncClient) -> None:
     owner, org = await practice(client)
+    # The owner's own time would need no approval; this test is about deciding on one's own sheet.
+    await set_practice(org, auto_approve_privileged_time=False)
     manager = await staff(org, "manager")
     other_manager = await staff(org, "manager")
     sheet_id = await _sheet(client, manager, org)

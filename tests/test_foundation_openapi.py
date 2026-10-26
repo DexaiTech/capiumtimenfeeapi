@@ -12,13 +12,13 @@ LOCK_ROUTES = [
         "post",
         "/period-locks",
         "period_lock.manage",
-        ["PERIOD_LOCK_NOT_FORWARD", "PERIOD_LOCK_IN_FUTURE"],
+        ["PERIOD_LOCK_OVERLAPS", "PERIOD_LOCK_IN_FUTURE"],
     ),
     (
         "post",
         "/period-locks/reopen",
         "period_lock.reopen",
-        ["PERIOD_LOCK_NOT_BACKWARD", "PERIOD_LOCK_REASON_REQUIRED"],
+        ["PERIOD_LOCK_REASON_REQUIRED"],
     ),
 ]
 SETTINGS = (
@@ -107,15 +107,13 @@ async def test_every_field_of_the_lock_and_organization_schemas_is_described(cli
 
 async def test_the_lock_request_models_say_what_is_required(client):
     schemas = (await load(client))["components"]["schemas"]
-    assert schemas["PeriodLockCreate"]["required"] == ["locked_through"]
-    # An empty body must never remove the lock: reopen_to is required, even when null.
-    assert schemas["PeriodLockReopen"]["required"] == ["reopen_to"]
+    assert schemas["PeriodLockCreate"]["required"] == ["period_type", "year"]
+    # An empty body must never unlock anything: lock_id is required.
+    assert schemas["PeriodLockReopen"]["required"] == ["lock_id"]
     reopen = schemas["PeriodLockReopen"]["properties"]
     assert "PERIOD_LOCK_REASON_REQUIRED" in reopen["reason"]["description"]
-    assert "PERIOD_LOCK_NOT_BACKWARD" in reopen["reopen_to"]["description"]
     create = schemas["PeriodLockCreate"]["properties"]
-    assert "PERIOD_LOCK_IN_FUTURE" in create["locked_through"]["description"]
-    assert "PERIOD_LOCK_NOT_FORWARD" in create["locked_through"]["description"]
+    assert "month" in create["period_type"]["description"]
 
 
 async def test_the_organization_routes_name_the_new_settings_and_their_bounds(client):

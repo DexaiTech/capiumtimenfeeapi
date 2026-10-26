@@ -1,8 +1,6 @@
 """Migration 020: period locks, the estimate sequence and the rate mode - what a downgrade takes
 away and what an upgrade seeds for the practices that already exist."""
 
-from datetime import timedelta
-
 import pytest
 from sqlalchemy.exc import IntegrityError
 
@@ -11,7 +9,7 @@ from tests.clients_helpers import scalar, sql
 from tests.domain_factories import practice
 from tests.factories import API
 from tests.migration_helpers import head_revision, migrate
-from tests.period_lock_helpers import lock_through, org_url, today
+from tests.period_lock_helpers import lock_period, org_url, today
 
 NEW_TABLES = ("period_locks", "period_lock_events")
 ESTIMATE_ROW = (
@@ -34,8 +32,8 @@ async def test_downgrading_removes_what_020_added_and_upgrading_seeds_every_prac
         json={"rate_mode": "grade_only"},
     )
     assert patched.status_code == 200, patched.text
-    locked = await lock_through(
-        client, first_owner, first, today(first) - timedelta(days=40), reason="Quarter end"
+    locked = await lock_period(
+        client, first_owner, first, "year", today(first).year - 1, reason="Quarter end"
     )
     assert locked.status_code == 200, locked.text
     assert await scalar("SELECT count(*) FROM period_lock_events") == 1
@@ -93,7 +91,7 @@ async def test_downgrading_removes_what_020_added_and_upgrading_seeds_every_prac
 
     # The practices can use all of it straight away.
     state = await client.get(org_url(first, "/period-locks"), headers=first_owner.headers)
-    assert state.status_code == 200 and state.json()["data"]["locked_through"] is None
+    assert state.status_code == 200 and state.json()["data"]["periods"] == []
     sequences = await client.get(org_url(first, "/sequences"), headers=first_owner.headers)
     previews = {row["kind"]: row["preview"] for row in sequences.json()["data"]}
     assert previews["estimate"] == "EST00001"
@@ -103,7 +101,9 @@ async def test_downgrading_removes_what_020_added_and_upgrading_seeds_every_prac
         json={"rate_mode": "grade_only"},
     )
     assert patched.status_code == 200 and patched.json()["data"]["rate_mode"] == "grade_only"
-    assert (await lock_through(client, first_owner, first, today(first))).status_code == 200
+    assert (
+        await lock_period(client, first_owner, first, "year", today(first).year - 1)
+    ).status_code == 200
 
     # Models and migrations agree, and running the migrations again changes nothing.
     check = await migrate("check")

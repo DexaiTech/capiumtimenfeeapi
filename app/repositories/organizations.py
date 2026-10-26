@@ -6,9 +6,17 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.core.permissions import OWNER_KEY
+from app.core.permissions import OWNER_KEY, effective_permissions
 from app.db.models import Organization, OrganizationMember, Role, User
 from app.db.models.organization import GONE_STATUSES
+
+
+def _permissions_of(member: OrganizationMember) -> frozenset[str]:
+    """The member's permissions; ``role`` and ``permission_overrides`` must be loaded."""
+    return effective_permissions(
+        (p.code for p in member.role.permissions),
+        ((o.permission_code, o.effect) for o in member.permission_overrides),
+    )
 
 
 class OrganizationRepository:
@@ -20,8 +28,11 @@ class OrganizationRepository:
         await self.session.flush()
         return organization
 
-    async def list_for_user(self, user_id: uuid.UUID) -> list[tuple[Organization, Role]]:
-        """Organizations the user is an *active* member of, with their role and permissions."""
+    async def list_for_user(
+        self, user_id: uuid.UUID
+    ) -> list[tuple[Organization, Role, frozenset[str]]]:
+        """Organizations the user is an *active* member of, with their role and permissions (the
+        role's, with what was granted to or denied the person)."""
         stmt = (
             select(Organization, OrganizationMember)
             .join(OrganizationMember, OrganizationMember.organization_id == Organization.id)
@@ -30,15 +41,18 @@ class OrganizationRepository:
                 OrganizationMember.user_id == user_id,
                 OrganizationMember.status == "active",
             )
-            .options(selectinload(OrganizationMember.role).selectinload(Role.permissions))
+            .options(
+                selectinload(OrganizationMember.role).selectinload(Role.permissions),
+                selectinload(OrganizationMember.permission_overrides),
+            )
             .order_by(func.lower(Organization.name), Organization.name, Organization.id)
         )
         rows = (await self.session.execute(stmt)).all()
-        return [(row[0], row[1].role) for row in rows]
+        return [(row[0], row[1].role, _permissions_of(row[1])) for row in rows]
 
     async def get_by_slug_for_user(
         self, slug: str, user_id: uuid.UUID
-    ) -> tuple[Organization, Role] | None:
+    ) -> tuple[Organization, Role, frozenset[str]] | None:
         stmt = (
             select(Organization, OrganizationMember)
             .join(OrganizationMember, OrganizationMember.organization_id == Organization.id)
@@ -48,10 +62,13 @@ class OrganizationRepository:
                 OrganizationMember.user_id == user_id,
                 OrganizationMember.status == "active",
             )
-            .options(selectinload(OrganizationMember.role).selectinload(Role.permissions))
+            .options(
+                selectinload(OrganizationMember.role).selectinload(Role.permissions),
+                selectinload(OrganizationMember.permission_overrides),
+            )
         )
         row = (await self.session.execute(stmt)).one_or_none()
-        return (row[0], row[1].role) if row else None
+        return (row[0], row[1].role, _permissions_of(row[1])) if row else None
 
     async def first(self) -> Organization | None:
         """The oldest live organization (the only one in a closed deployment)."""

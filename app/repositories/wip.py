@@ -18,6 +18,7 @@ from sqlalchemy import (
     delete,
     func,
     literal,
+    or_,
     select,
     tuple_,
     union_all,
@@ -83,7 +84,7 @@ def _approved_timesheet() -> ColumnElement[bool]:
         .where(
             Timesheet.organization_id == TimeEntry.organization_id,
             Timesheet.id == TimeEntry.timesheet_id,
-            Timesheet.status == "approved",
+            or_(Timesheet.status == "approved", Timesheet.approval_exempt.is_(True)),
         )
         .exists()
     )
@@ -336,7 +337,9 @@ class WipRepository:
         wanted = set(ids)
         if not wanted:
             return {}
-        stmt = select(Timesheet.id, Timesheet.status).where(
+        # A sheet whose owner needs no approval reads as approved.
+        status = case((Timesheet.approval_exempt.is_(True), "approved"), else_=Timesheet.status)
+        stmt = select(Timesheet.id, status).where(
             Timesheet.organization_id == organization_id, Timesheet.id.in_(wanted)
         )
         return {row[0]: row[1] for row in (await self.session.execute(stmt)).all()}

@@ -400,8 +400,9 @@ used.". Changing the mode never touches recorded entries; they follow it only wh
   period); otherwise 409 `RATE_OVERLAP`.
 * A rule is **used** (`is_used`) once any time entry falls inside its scope and period (a rule that *could*
   have priced an entry counts: its empty dimensions match anything). A used rule cannot be deleted
-  (409 `RATE_IN_USE`) and cannot start on a different day (409 `RATE_IN_USE`), but it can be **end-dated**
-  (`effective_to`) and its amount can change; entries already recorded keep their rates.
+  (409 `RATE_IN_USE`), but its start day, **end date** (`effective_to`) and amount can change; entries
+  already recorded keep their rates until unbilled time is re-rated (`POST /rates/rerate`), so nobody
+  has to enter the time again.
 * A person who has left cannot get new rules (409 `MEMBER_REMOVED`).
 
 ## GET /rates

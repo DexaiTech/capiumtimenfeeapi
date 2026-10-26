@@ -186,6 +186,7 @@ class DashboardPagesRepository:
                 Timesheet.organization_id == organization_id,
                 Timesheet.user_id == user_id,
                 Timesheet.status.in_(("open", "rejected")),
+                Timesheet.approval_exempt.is_(False),
                 Timesheet.week_start < before,
             )
             .group_by(Timesheet.status)

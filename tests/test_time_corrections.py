@@ -402,6 +402,7 @@ async def test_nobody_corrects_their_own_approved_time_without_organization_upda
     client: AsyncClient,
 ) -> None:
     owner, org, _, approver, acme = await team(client)
+    await set_practice(org, auto_approve_privileged_time=False)  # the owner's time needs approval
     other_approver = await staff(org, "manager")
     mine = await log_time(client, approver, org, client_id=acme.id)
     await sheet_action(client, approver, org, mine["timesheet_id"], "submit")
@@ -569,3 +570,94 @@ async def test_the_history_table_refuses_bad_rows(
             o=org["id"], e=str(entry["id"]), u=str(person.id), c=str(approver.id),
             r=reason, b=before, a=after,
         )  # fmt: skip
+
+
+# --- Removing approved time ------------------------------------------------------------------
+
+
+async def remove(
+    client: AsyncClient, actor, org: dict, entry_id: str, *, status: int = 200, **body: str
+):
+    response = await client.post(
+        org_url(org, f"/time-entries/{entry_id}/remove"), headers=actor.headers, json=body
+    )
+    assert response.status_code == status, response.text
+    return response.json()["error"] if status >= 300 else None
+
+
+async def entry_exists(client: AsyncClient, actor, org: dict, entry_id: str) -> bool:
+    response = await client.get(org_url(org, f"/time-entries/{entry_id}"), headers=actor.headers)
+    return response.status_code == 200
+
+
+async def test_an_approver_removes_approved_time_with_a_reason(client: AsyncClient) -> None:
+    _, org, person, approver, acme = await team(client)
+    entry = await approved_entry(client, org, person, approver, client_id=acme.id, minutes=60)
+    other = await log_time(client, person, org, client_id=acme.id, entry_date=day(14), minutes=30)
+
+    await remove(client, approver, org, entry["id"], reason="Posted to the wrong client")
+
+    assert not await entry_exists(client, approver, org, entry["id"])
+    [logged] = await audit_entries(org["id"], "time_entry.deleted")
+    assert logged["actor_user_id"] == str(approver.id) and logged["target_id"] == entry["id"]
+    assert logged["metadata"]["reason"] == "Posted to the wrong client"
+    assert logged["metadata"]["was_approved"] is True
+    assert await entry_exists(client, approver, org, other["id"])
+
+
+@pytest.mark.parametrize("body", [{}, {"reason": ""}, {"reason": "   "}])
+async def test_removing_approved_time_needs_a_reason(client: AsyncClient, body) -> None:
+    _, org, person, approver, acme = await team(client)
+    entry = await approved_entry(client, org, person, approver, client_id=acme.id)
+    error = await remove(client, approver, org, entry["id"], status=422, **body)
+    assert error["code"] == "TIME_CORRECTION_REASON_REQUIRED"
+    assert await entry_exists(client, approver, org, entry["id"])
+
+
+async def test_only_approved_unbilled_time_is_removed_this_way(client: AsyncClient) -> None:
+    _, org, person, approver, acme = await team(client)
+    open_entry = await log_time(client, person, org, client_id=acme.id)
+    error = await remove(client, approver, org, open_entry["id"], status=409, reason="Oops")
+    assert error["code"] == "TIME_NOT_CORRECTABLE"
+    entry = await approved_entry(client, org, person, approver, client_id=acme.id)
+    await set_entry(entry["id"], billing_status="billed")
+    error = await remove(client, approver, org, entry["id"], status=409, reason="Oops")
+    assert error["code"] == "TIME_NOT_CORRECTABLE"
+    assert await entry_exists(client, approver, org, entry["id"])
+
+
+async def test_who_may_remove_approved_time(client: AsyncClient) -> None:
+    owner, org, person, approver, acme = await team(client)
+    entry = await approved_entry(client, org, person, approver, client_id=acme.id)
+    # The person who logged it cannot remove it from an approved sheet.
+    error = await remove(client, person, org, entry["id"], status=403, reason="Oops")
+    assert error["code"] == "PERMISSION_DENIED"
+    # Nor can an approver remove their own approved time (an Owner or Admin can).
+    other_approver = await staff(org, "manager")
+    mine = await log_time(client, approver, org, client_id=acme.id)
+    await sheet_action(client, approver, org, mine["timesheet_id"], "submit")
+    await sheet_action(client, other_approver, org, mine["timesheet_id"], "approve")
+    error = await remove(client, approver, org, mine["id"], status=403, reason="Oops")
+    assert error["code"] == "SELF_CORRECTION_FORBIDDEN"
+    await remove(client, owner, org, mine["id"], reason="Duplicate")
+    await remove(client, approver, org, entry["id"], reason="Duplicate")
+
+
+async def test_removing_approved_time_is_refused_in_a_locked_period(client: AsyncClient) -> None:
+    _, org, person, approver, acme = await team(client)
+    entry = await approved_entry(client, org, person, approver, client_id=acme.id)
+    await set_lock(org, date.fromisoformat(day(0)))
+    error = await remove(client, approver, org, entry["id"], status=409, reason="Oops")
+    assert error["code"] == "PERIOD_LOCKED"
+    assert await entry_exists(client, approver, org, entry["id"])
+
+
+async def test_an_approved_week_can_be_reopened_and_its_time_deleted(client: AsyncClient) -> None:
+    _, org, person, approver, acme = await team(client)
+    entry = await approved_entry(client, org, person, approver, client_id=acme.id)
+    reopened = await sheet_action(client, approver, org, entry["timesheet_id"], "reopen")
+    assert reopened["status"] == "open"
+    response = await client.delete(
+        org_url(org, f"/time-entries/{entry['id']}"), headers=person.headers
+    )
+    assert response.status_code == 200, response.text

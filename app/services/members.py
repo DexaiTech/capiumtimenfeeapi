@@ -15,6 +15,7 @@ from app.db.models.organization import GONE_STATUSES
 from app.db.session import unit_of_work
 from app.repositories.members import MemberRepository
 from app.repositories.roles import RoleRepository
+from app.repositories.timesheets import TimesheetRepository
 from app.schemas.organization import MemberUpdate
 from app.services import audit, policy
 from app.services.organizations import lock_and_refresh
@@ -195,6 +196,10 @@ class MemberService:
 
             if role_changed:
                 target.role_id = new_role.id
+                await self.session.flush()
+                await TimesheetRepository(self.session).sync_exemptions(
+                    ctx.organization_id, user_id
+                )
                 await self._audit(
                     ctx,
                     rctx,

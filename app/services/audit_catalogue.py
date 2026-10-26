@@ -36,6 +36,7 @@ ACTION_LABELS: dict[str, str] = {
     "member.created": "Staff member added",
     "member.updated": "Staff details updated",
     "member.role_changed": "Role changed",
+    "member.permissions_changed": "Personal permissions changed",
     "member.suspended": "Staff member suspended",
     "member.reactivated": "Staff member reactivated",
     "member.removed": "Staff member removed",

@@ -1,4 +1,4 @@
-"""Period locks: lock time, expenses and WIP up to a date, reopen, history. HTTP only."""
+"""Period locks: lock a month, quarter or year, unlock it, history. HTTP only."""
 
 from typing import Annotated
 
@@ -32,12 +32,11 @@ ServiceDep = Annotated[PeriodLockService, Depends(get_period_lock_service)]
 
 @router.get(
     "/period-locks",
-    summary="Get the period lock",
+    summary="Get the period locks",
     description=(
-        "The practice's current lock: `locked_through` is the last locked day (inclusive; "
-        "null when nothing is locked). Time, expenses and WIP dated on or before it cannot be "
-        "created, edited or deleted (409 `PERIOD_LOCKED`). `last_event` is the latest lock or "
-        "reopening, `updated_at` when it happened. Requires `period_lock.read`."
+        "The practice's locked months, quarters and years (`periods`, oldest first). Time, "
+        "expenses and WIP dated inside any of them cannot be created, edited or deleted (409 "
+        "`PERIOD_LOCKED`). `last_event` is the latest lock or unlock. Requires `period_lock.read`."
     ),
     responses=error_responses(403, 404),
 )
@@ -66,10 +65,10 @@ async def list_period_lock_history(
     "/period-locks",
     summary="Lock a period",
     description=(
-        "Locks time, expenses and WIP up to `locked_through` (inclusive) and writes a `locked` "
-        "event. The date must be later than the current lock (422 `PERIOD_LOCK_NOT_FORWARD`) "
-        "and not after today in the practice's time zone (422 `PERIOD_LOCK_IN_FUTURE`). "
-        "Returns the new lock. Audited. Requires `period_lock.manage`."
+        "Locks one calendar `month`, `quarter` or `year` (`period` is the month 1-12 or quarter "
+        "1-4) and writes a `locked` event. The period must have ended (422 "
+        "`PERIOD_LOCK_IN_FUTURE`) and must not overlap a period that is already locked (422 "
+        "`PERIOD_LOCK_OVERLAPS`). Returns the locks. Audited. Requires `period_lock.manage`."
     ),
     responses=error_responses(403, 404),
 )
@@ -81,16 +80,15 @@ async def lock_period(
 
 @router.post(
     "/period-locks/reopen",
-    summary="Reopen a locked period",
+    summary="Unlock a locked period",
     description=(
-        "Moves the lock back to `reopen_to` (null removes it) and writes a `reopened` event. "
-        "`reason` is required (422 `PERIOD_LOCK_REASON_REQUIRED`) and `reopen_to` must be "
-        "earlier than the current lock (422 `PERIOD_LOCK_NOT_BACKWARD`; also when nothing is "
-        "locked). Returns the new lock. Audited. Requires `period_lock.reopen`."
+        "Unlocks the period `lock_id` (404 when it is not locked) and writes a `reopened` event. "
+        "`reason` is required (422 `PERIOD_LOCK_REASON_REQUIRED`). Returns the locks. Audited. "
+        "Requires `period_lock.reopen`."
     ),
     responses=error_responses(403, 404),
 )
 async def reopen_period(
     body: PeriodLockReopen, org: Reopener, service: ServiceDep, ctx: ContextDep
 ) -> ApiResponse[PeriodLockRead]:
-    return ok(await service.reopen(org, body, ctx), "Period reopened")
+    return ok(await service.reopen(org, body, ctx), "Period unlocked")

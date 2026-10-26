@@ -18,6 +18,7 @@ from app.schemas.time_views import (
     TimeCorrection,
     TimeDay,
     TimeEntryHistoryRead,
+    TimeRemoval,
 )
 from app.services.time_copy import TimeCopyService
 from app.services.time_corrections import TimeCorrectionService
@@ -148,6 +149,30 @@ async def copy_entry(
     ctx: ContextDep,
 ) -> ApiResponse[TimeEntryRead]:
     return ok(await service.copy_entry(org, entry_id, body, ctx), "Time entry copied")
+
+
+@router.post(
+    "/time-entries/{entry_id}/remove",
+    summary="Remove approved time",
+    description=(
+        "Deletes an entry whose timesheet is `approved` and which is not billed, for time that "
+        "was posted by mistake (409 `TIME_NOT_CORRECTABLE` otherwise; unapproved time is deleted "
+        "with `DELETE /time-entries/{entry_id}`). Needs `time.manage_all` or `timesheet.approve`, "
+        "and not one's own time unless `organization.update` (403 `SELF_CORRECTION_FORBIDDEN`). "
+        "`reason` is required (422 `TIME_CORRECTION_REASON_REQUIRED`) and is kept in the audit "
+        "entry `time_entry.deleted`. A locked period still refuses it (409 `PERIOD_LOCKED`)."
+    ),
+    responses=error_responses(403, 404, 409),
+)
+async def remove_entry(
+    entry_id: uuid.UUID,
+    body: TimeRemoval,
+    org: OrgContextDep,
+    service: CorrectionServiceDep,
+    ctx: ContextDep,
+) -> ApiResponse[None]:
+    await service.remove(org, entry_id, body, ctx)
+    return ok(message="Time entry removed")
 
 
 @router.post(

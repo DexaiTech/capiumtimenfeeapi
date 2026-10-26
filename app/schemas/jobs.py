@@ -45,6 +45,7 @@ class JobRead(BaseModel):
     hourly_rate: int | None
     budget_minutes: int | None
     budget_fee: int | None
+    budget_cost: int | None
     period_start: date | None
     period_end: date | None
     start_date: date | None
@@ -109,6 +110,7 @@ class JobRead(BaseModel):
             hourly_rate=job.hourly_rate,
             budget_minutes=job.budget_minutes,
             budget_fee=job.budget_fee,
+            budget_cost=job.budget_cost,
             period_start=job.period_start,
             period_end=job.period_end,
             start_date=job.start_date,
@@ -166,6 +168,10 @@ class JobCreate(RequestModel):
     )
     budget_minutes: Minutes | None = None
     budget_fee: Money | None = None
+    budget_cost: Money | None = Field(
+        default=None,
+        description="The cost the work is expected to take (pence), for the billing summary",
+    )
     period_start: date | None = None
     period_end: date | None = None
     start_date: date | None = None
@@ -203,6 +209,7 @@ class JobUpdate(RequestModel):
     hourly_rate: Money | None = None
     budget_minutes: Minutes | None = None
     budget_fee: Money | None = None
+    budget_cost: Money | None = None
     period_start: date | None = None
     period_end: date | None = None
     start_date: date | None = None
