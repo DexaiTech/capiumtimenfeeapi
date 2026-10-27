@@ -57,7 +57,9 @@ async def missing_timesheets(
     Who is expected to record time: active staff with a weekly capacity above 0 who are
     employed on at least one working day of the week (start and leaving dates, working days).
     Their ``status`` is ``none`` (no timesheet for the week), ``open`` (not submitted) or
-    ``rejected`` (returned); people with a ``submitted`` or ``approved`` sheet are not listed.
+    ``rejected`` (returned); people with a ``submitted`` or ``approved`` sheet are not listed, nor
+    are people whose time needs no approval (``timesheets.approval_exempt``) once they have
+    logged some.
     ``expected_minutes`` is the person's target for the week, ``missing_days`` their working
     days up to today with no time. Sorted by name. ``with_reminders=False`` leaves out
     ``last_reminded_at`` (one query less) for callers that do not show it.
@@ -92,6 +94,9 @@ async def missing_timesheets(
         if sheet is not None and sheet.status in SUBMITTED_STATUSES:
             continue
         logged = minutes.get(member.user_id, {})
+        # Time that needs no approval counts as handed in: there is nobody to submit it to.
+        if sheet is not None and sheet.approval_exempt and sum(logged.values()) > 0:
+            continue
         figures = week_figures(pattern_of(org, member), days, logged, today)
         if figures.weekly_target <= 0:
             continue

@@ -138,3 +138,24 @@ async def test_submitting_an_exempt_week_approves_it_without_asking_anybody(
     )
     queue = await client.get(org_url(org, "/approvals"), headers=owner.headers)
     assert [row["id"] for row in queue.json()["data"]] == [theirs["timesheet_id"]]
+
+
+async def test_people_whose_time_needs_no_approval_are_not_missing_a_timesheet(
+    client: AsyncClient,
+) -> None:
+    from tests.time_gap_helpers import missing
+
+    owner, org = await practice(client)
+    acme = await make_client(org, "Acme Ltd")
+    partner = await staff(org, "partner", full_name="Pia Partner")
+    person = await staff(org, "staff", full_name="Sam Staff")
+    quiet = await staff(org, "partner", full_name="Quin Quiet")  # exempt, but logged nothing
+    entry = await log_time(client, partner, org, client_id=acme.id)
+    await log_time(client, person, org, client_id=acme.id)
+
+    names = {
+        row["name"] for row in await missing(client, owner, org, week_start=entry["entry_date"])
+    }
+    assert "Sam Staff" in names and "Quin Quiet" in names
+    assert "Pia Partner" not in names
+    assert quiet is not None

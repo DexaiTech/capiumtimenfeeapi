@@ -305,3 +305,20 @@ async def test_a_failing_row_after_valid_rows_rolls_the_whole_file_back(client):
         )
         == 1
     )
+
+
+async def test_the_budgeted_cost_is_imported_and_exported(client):
+    owner, org = await setup(client)
+    content = csv_of(
+        "Job Name,Client,Basis,Fixed Fee,Budgeted Cost",
+        "Audit 2026,ACME,fixed,3000,1250.50",
+    )
+    response = await upload(client, owner, org, "jobs", content)
+    assert response.status_code == 200, response.text
+    assert response.json()["data"]["created"] == 1
+    listed = (await client.get(org_url(org, "/jobs?limit=10"), headers=owner.headers)).json()[
+        "data"
+    ]
+    assert listed[0]["budget_cost"] == 125_050
+    _, rows = await export_rows(client, owner, org, "jobs")
+    assert rows[0]["budget_cost"] == "1250.50"

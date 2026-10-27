@@ -6,11 +6,12 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import func, select, update
+from sqlalchemy import exists, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import (
+    MemberPermissionOverride,
     Notification,
     NotificationPreference,
     NotificationSetting,
@@ -265,18 +266,40 @@ class NotificationSettingsRepository:
         *,
         among: Collection[uuid.UUID] | None = None,
     ) -> list[uuid.UUID]:
-        """Active members who can sign in and hold at least one of the permissions."""
-        stmt = (
-            select(OrganizationMember.user_id)
-            .join(RolePermission, RolePermission.role_id == OrganizationMember.role_id)
-            .join(Permission, Permission.id == RolePermission.permission_id)
-            .where(
-                OrganizationMember.organization_id == organization_id,
-                OrganizationMember.status == "active",
-                OrganizationMember.login_enabled.is_(True),
-                Permission.code.in_(list(codes)),
+        """Active members who can sign in and hold at least one of the permissions: their role's,
+        plus what was granted to them, less what was denied them."""
+        wanted = list(codes)
+
+        def override(effect: str, code_column):
+            return (
+                select(MemberPermissionOverride.id)
+                .where(
+                    MemberPermissionOverride.organization_id == OrganizationMember.organization_id,
+                    MemberPermissionOverride.user_id == OrganizationMember.user_id,
+                    MemberPermissionOverride.permission_code == code_column,
+                    MemberPermissionOverride.effect == effect,
+                )
+                .correlate(OrganizationMember, Permission)
+                .exists()
             )
-            .distinct()
+
+        from_role = exists().where(
+            RolePermission.role_id == OrganizationMember.role_id,
+            Permission.id == RolePermission.permission_id,
+            Permission.code.in_(wanted),
+            ~override("deny", Permission.code),
+        )
+        granted = exists().where(
+            MemberPermissionOverride.organization_id == OrganizationMember.organization_id,
+            MemberPermissionOverride.user_id == OrganizationMember.user_id,
+            MemberPermissionOverride.permission_code.in_(wanted),
+            MemberPermissionOverride.effect == "grant",
+        )
+        stmt = select(OrganizationMember.user_id).where(
+            OrganizationMember.organization_id == organization_id,
+            OrganizationMember.status == "active",
+            OrganizationMember.login_enabled.is_(True),
+            or_(from_role, granted),
         )
         if among is not None:
             stmt = stmt.where(OrganizationMember.user_id.in_(list(among)))

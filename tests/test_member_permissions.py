@@ -190,3 +190,25 @@ async def test_time_needs_no_approval_for_a_person_who_was_given_that_permission
     await put(client, owner, org, manager, grants=["timesheet.exempt"])
     await put(client, owner, org, partner, denies=["timesheet.exempt"])
     assert await eligible(org) == {mine["id"]}
+
+
+async def test_approval_notifications_follow_a_persons_own_permissions(client: AsyncClient) -> None:
+    from tests.notification_helpers import inbox
+    from tests.time_helpers import ok_data
+
+    owner, org = await practice(client)
+    pat = await staff(org, "staff", full_name="Pat Person")
+    granted = await staff(org, "staff", full_name="Gail Granted")  # no approve right of their own
+    denied = await staff(org, "manager", full_name="Dan Denied")  # approves through the role
+    await put(client, owner, org, granted, grants=["timesheet.approve"])
+    await put(client, owner, org, denied, denies=["timesheet.approve"])
+
+    entry = await log_time(client, pat, org, minutes=90)
+    response = await client.post(
+        org_url(org, f"/timesheets/{entry['timesheet_id']}/submit"), headers=pat.headers
+    )
+    assert ok_data(response)["status"] == "submitted"
+
+    assert [n["type"] for n in await inbox(client, granted, org)] == ["approval_pending"]
+    assert await inbox(client, denied, org) == []
+    assert [n["type"] for n in await inbox(client, owner, org)] == ["approval_pending"]

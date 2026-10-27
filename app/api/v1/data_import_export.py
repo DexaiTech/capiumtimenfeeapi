@@ -227,7 +227,8 @@ async def import_rates(
     description=(
         "Every job that is not deleted, ordered by number, as CSV (UTF-8 with BOM): "
         "`number`, `name`, `client_code`, `service_code`, `status`, `billing_basis`, "
-        "`fixed_fee`, `hourly_rate`, `budget_hours`, `budget_fee` (pounds), `period_start`, "
+        "`fixed_fee`, `hourly_rate`, `budget_hours`, `budget_fee`, `budget_cost` (pounds), "
+        "`period_start`, "
         "`period_end`, `start_date`, `due_date`, `manager` and `partner` (staff codes), "
         "`assignees` (staff codes separated by `;`), `description` and `client_name`. No "
         "actuals or WIP. Text cells that start with `=`, `+`, `-` or `@` are prefixed with "
@@ -248,7 +249,7 @@ async def export_jobs(org: JobExporter, session: SessionDep) -> Response:
         + "One row is one job, created like `POST /jobs`: `name` and `client_code` are "
         "required; optional `service_code`, `status` (`planned` or `in_progress`), "
         "`billing_basis` (`hourly`, `fixed` or `non_billable`; default from the service), "
-        "`fixed_fee`, `hourly_rate`, `budget_hours`, `budget_fee`, `period_start`, "
+        "`fixed_fee`, `hourly_rate`, `budget_hours`, `budget_fee`, `budget_cost`, `period_start`, "
         "`period_end`, `start_date`, `due_date`, `manager`, `partner` (a staff code or email "
         "address), `assignees` (staff codes or emails separated by `;`) and `description`. "
         "Numbers come from the job sequence (a `number` column is ignored). Writes a "
