@@ -549,7 +549,13 @@ class InvoiceService:
                 "invoice.draft_created",
                 target_type="invoice",
                 target_id=invoice.id,
-                meta=_meta(invoice, client, wip_value=items.wip_value, item_count=items.count),
+                meta=_meta(
+                    invoice,
+                    client,
+                    wip_value=items.wip_value,
+                    item_count=items.count,
+                    **({"valuation_basis": data.valuation_basis} if data.valuation_basis else {}),
+                ),
             )
             detail = await self._detail(ctx, invoice)
         return detail

@@ -58,6 +58,8 @@ be billed yet (a fixed fee job whose fee is not recognised, non-billable time):
   work, plus disbursements; needs `rate.read`). `time_costs` lists the cost of each ready entry so the
   invoice can be valued on the team basis.
 
+`POST /invoices` takes an optional `valuation_basis` (`contract`, `job` or `team`), the basis the lines were valued on; it is kept in the audit entry `invoice.draft_created`, and the amounts stay the lines' own.
+
 The Prepare Invoice page offers the three bases; the chosen one sets the default amount of each line
 (`overrides` of `POST /invoices`), and a line edited by hand keeps the amount typed. The difference to the
 WIP value is the write-on or write-off, as ever.

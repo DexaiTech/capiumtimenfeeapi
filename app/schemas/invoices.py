@@ -82,6 +82,14 @@ class InvoiceCreate(WipSelection):
     due_date: date | None = None
     reference: str | None = Field(default=None, max_length=100)
     notes: str | None = Field(default=None, max_length=2000)
+    valuation_basis: Literal["contract", "job", "team"] | None = Field(
+        default=None,
+        description=(
+            "What the lines were valued on when the draft was prepared: the `contract` value, the "
+            "`job` value or the `team` value (see `GET /clients/{id}/billing-summary`). Kept in "
+            "the audit entry `invoice.draft_created`; the amounts are the lines' own"
+        ),
+    )
 
     _blank = field_validator("reference", "notes")(_blank_is_null)
 

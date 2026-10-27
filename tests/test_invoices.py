@@ -689,3 +689,18 @@ async def test_other_practice_invoice_is_404(client):
         )
         assert response.status_code == 404, (method, path, response.text)
     assert (await get_invoice(client, other.owner, other.org, theirs["id"]))["status"] == "draft"
+
+
+async def test_the_valuation_basis_is_kept_in_the_audit_entry(client):
+    p = await new_practice(client)
+    first = await make_time_entry(p.org, p.owner, client=p.client, minutes=60)
+    second = await make_time_entry(
+        p.org, p.owner, client=p.client, minutes=60, entry_date=date(2026, 9, 14)
+    )
+    await draft(client, p.owner, p.org, p.client.id, time=[first], valuation_basis="team")
+    await draft(client, p.owner, p.org, p.client.id, time=[second])
+    with_basis, without = await audit_entries(p.id, "invoice.draft_created")
+    assert with_basis["metadata"]["valuation_basis"] == "team"
+    assert "valuation_basis" not in without["metadata"]
+    bad = await draft(client, p.owner, p.org, p.client.id, expect=422, valuation_basis="gold")
+    assert bad["code"] == "VALIDATION_ERROR"
