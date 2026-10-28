@@ -23,6 +23,7 @@ KEYS = [t.code for t in CATALOGUE] + [
     "staff_invitation",
     "account_created",
     "client_payment_reminder",
+    "client_payment_upcoming",
     "client_payment_final_notice",
     "client_statement",
 ]

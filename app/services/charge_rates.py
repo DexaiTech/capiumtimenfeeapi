@@ -7,7 +7,8 @@ The charge-out rate of a time entry is the first that exists of, most specific f
 3. ``client_staff``: a rule for the client and the person, else ``client``: the client's rule
    for everyone,
 4. ``job``: ``jobs.hourly_rate`` of the entry's job,
-5. ``service_grade``: a rule for the job's service and the person's grade,
+5. ``service_staff``: a rule for the job's service and the person (for every client), else
+   ``service_grade``: a rule for the job's service and the person's grade,
 6. ``staff``: a rule for the person,
 7. ``grade``: a rule for the person's grade, else the grade's default charge-out rate,
 
@@ -36,11 +37,14 @@ CHARGE_SOURCES = (
     "client_staff",
     "client",
     "job",
+    "service_staff",
     "service_grade",
     "staff",
     "grade",
     "default",
 )
+# Level 5 has two sources: the person's own rate for the service, else the grade's.
+STAFF_SERVICE_LABEL = "Staff rate for the service"
 LEVEL_LABELS = {
     1: "Client + service + staff",
     2: "Client + service",
@@ -254,16 +258,22 @@ class RateBook:
             rate=job.hourly_rate if job is not None else None,
             origin="job" if job is not None and job.hourly_rate is not None else None,
         )
-        grade_and_service = grade is not None and service is not None
+        # The person's own rate for the service wins over the grade's rate for the service.
+        rule5: RuleRow | None = None
+        source5 = "service_grade"
+        if service is not None:
+            rule5 = self._rule("charge", None, service, user, None, day)
+            if rule5 is not None:
+                source5 = "service_staff"
+            elif grade is not None:
+                rule5 = self._rule("charge", None, service, None, grade, day)
         yield _step(
             5,
-            "service_grade",
-            LEVEL_LABELS[5],
-            applicable=grade_and_service,
+            source5,
+            STAFF_SERVICE_LABEL if source5 == "service_staff" else LEVEL_LABELS[5],
+            applicable=service is not None and (grade is not None or rule5 is not None),
             reason="The job has no service." if service is None else "This person has no grade.",
-            rule=self._rule("charge", None, service, None, grade, day)
-            if grade_and_service
-            else None,
+            rule=rule5,
         )
         grade_only = self.rate_mode == "grade_only"
         yield _step(

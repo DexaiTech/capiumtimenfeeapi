@@ -12,6 +12,7 @@ from app.db.models import Organization, OrganizationMember, Permission, Role
 from app.db.models.organization import FixedFeeWipMode, RateMode
 from app.schemas.common import RequestModel
 from app.schemas.user import UserRead
+from app.utils.reminder_schedule import EARLIEST, LATEST, MAX_STEPS, effective_schedule
 
 
 class OrganizationRead(BaseModel):
@@ -80,6 +81,13 @@ class OrganizationRead(BaseModel):
     payment_reminder_days_after_due: int = Field(
         description="Days past the due date after which the automatic reminder goes (1-365)"
     )
+    payment_reminder_schedule: list[int] = Field(
+        description=(
+            "The days, counted from an invoice's due date, on which the client is reminded "
+            "until the invoice is paid: negative before the due date, 0 on it, positive after. "
+            "Without a schedule of its own it is the one day `payment_reminder_days_after_due`."
+        )
+    )
     mileage_rate: int = Field(description="Pence per mile claimed")
     expense_markup_bp: int = Field(
         description="Basis points added when an expense is recharged to the client (1000 = 10%)"
@@ -130,6 +138,9 @@ class OrganizationRead(BaseModel):
             invoice_approval_threshold=organization.invoice_approval_threshold,
             payment_reminders_enabled=organization.payment_reminders_enabled,
             payment_reminder_days_after_due=organization.payment_reminder_days_after_due,
+            payment_reminder_schedule=effective_schedule(
+                organization.payment_reminder_schedule, organization.payment_reminder_days_after_due
+            ),
             mileage_rate=organization.mileage_rate,
             expense_markup_bp=organization.expense_markup_bp,
             rate_mode=organization.rate_mode,
@@ -369,6 +380,15 @@ class OrganizationUpdate(RequestModel):
         le=365,
         description="Days past the due date after which the automatic reminder goes (1-365)",
     )
+    payment_reminder_schedule: list[int] | None = Field(
+        default=None,
+        min_length=1,
+        max_length=MAX_STEPS,
+        description=(
+            f"Reminder days from the due date: up to {MAX_STEPS}, each from {EARLIEST} (before) "
+            f"to {LATEST} (after), 0 on the due date. Replaces the schedule."
+        ),
+    )
     mileage_rate: int | None = Field(
         default=None, ge=0, le=1000, description="Pence per mile claimed (0-1000)"
     )
@@ -416,6 +436,17 @@ class OrganizationUpdate(RequestModel):
     _timezone = field_validator("timezone")(_known_timezone)
 
     _blank = field_validator(*_NULLABLE_SETTINGS, mode="before")(_blank_to_none)
+
+    @field_validator("payment_reminder_schedule")
+    @classmethod
+    def _reminder_days(cls, value: list[int] | None) -> list[int] | None:
+        if value is None:
+            return None
+        if any(not EARLIEST <= day <= LATEST for day in value):
+            raise ValueError(f"Each day is from {EARLIEST} to {LATEST}.")
+        if len(set(value)) != len(value):
+            raise ValueError("Each day can appear only once.")
+        return sorted(value)
 
     @field_validator("working_days")
     @classmethod

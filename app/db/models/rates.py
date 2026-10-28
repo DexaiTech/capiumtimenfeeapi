@@ -8,6 +8,7 @@ What a rule applies to is set by which of ``client_id``, ``service_id``, ``user_
 * ``client_service``: client and service
 * ``client_staff``: client and user
 * ``client``: client alone (everyone working for the client)
+* ``service_staff``: service and user (a person's own rate for one service, for every client)
 * ``service_grade``: service and grade
 * ``staff``: user alone
 * ``grade``: grade alone
@@ -48,6 +49,7 @@ RATE_LEVELS = (
     "client_service",
     "client_staff",
     "client",
+    "service_staff",
     "service_grade",
     "staff",
     "grade",
@@ -59,6 +61,7 @@ RATE_SOURCES = (
     "client_staff",
     "client",
     "job",
+    "service_staff",
     "service_grade",
     "staff",
     "grade",
@@ -86,6 +89,7 @@ def _scope_check() -> str:
             clause("client_service", True, True, False, False),
             clause("client_staff", True, False, True, False),
             clause("client", True, False, False, False),
+            clause("service_staff", False, True, True, False),
             clause("service_grade", False, True, False, True),
             clause("staff", False, False, True, False),
             clause("grade", False, False, False, True),
@@ -117,7 +121,7 @@ class RateRule(Base, IdMixin, OrgScopedMixin, TimestampMixin):
         CheckConstraint("kind IN ('charge', 'cost')", name="kind"),
         CheckConstraint(
             "level IN ('client_service_staff', 'client_service', 'client_staff', 'client', "
-            "'service_grade', 'staff', 'grade')",
+            "'service_staff', 'service_grade', 'staff', 'grade')",
             name="level",
         ),
         CheckConstraint(_scope_check(), name="scope"),

@@ -285,10 +285,13 @@ class DocumentSequence(Base, OrgScopedMixin, TimestampMixin):
         CheckConstraint("next_number >= 1", name="next_number"),
         CheckConstraint("padding BETWEEN 1 AND 10", name="padding"),
         CheckConstraint("prefix ~ '^[A-Za-z0-9/_-]{0,12}$'", name="prefix_format"),
+        CheckConstraint("suffix ~ '^[A-Za-z0-9/_-]{0,12}$'", name="suffix_format"),
     )
 
     kind: Mapped[str] = mapped_column(Text, nullable=False)
     prefix: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
+    # Printed after the number of an invoice, credit note or estimate; empty elsewhere.
+    suffix: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
     next_number: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
     padding: Mapped[int] = mapped_column(SmallInteger, nullable=False, server_default=text("5"))
 

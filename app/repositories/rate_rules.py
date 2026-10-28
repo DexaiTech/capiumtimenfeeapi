@@ -39,6 +39,7 @@ _LEVELS: dict[tuple[bool, bool, bool, bool], str] = {
     (True, True, False, False): "client_service",
     (True, False, True, False): "client_staff",
     (True, False, False, False): "client",
+    (False, True, True, False): "service_staff",
     (False, True, False, True): "service_grade",
     (False, False, True, False): "staff",
     (False, False, False, True): "grade",

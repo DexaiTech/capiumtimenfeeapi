@@ -645,6 +645,41 @@ _SYSTEM: tuple[TemplateSpec, ...] = (
         ),
     ),
     TemplateSpec(
+        key="client_payment_upcoming",
+        name="Payment due soon (to the client)",
+        description="The friendly note emailed to a client before its invoices fall due.",
+        category="system",
+        fields=(
+            "recipient_name",
+            "practice_name",
+            "app_name",
+            "client_name",
+            "invoice_count",
+            "invoice_list",
+            "total_due",
+            "bank_details",
+        ),
+        subject="Payment due soon: invoices from {{ practice_name }}",
+        html=(
+            "<p>Dear {{ recipient_name }},</p>"
+            "<p>This is a reminder that {{ invoice_count }} invoice(s) for {{ client_name }} "
+            "fall due for payment:</p>"
+            '<p style="white-space:pre-line;">{{ invoice_list }}</p>'
+            "<p>The total is <strong>{{ total_due }}</strong>. If you have already paid, "
+            "please ignore this note and accept our thanks.</p>"
+            '<p style="white-space:pre-line;">{{ bank_details }}</p>'
+            "<p>Thank you,<br>{{ practice_name }}</p>"
+        ),
+        text=(
+            "Dear {{ recipient_name }},\n\n"
+            "This is a reminder that {{ invoice_count }} invoice(s) for {{ client_name }} fall "
+            "due for payment:\n\n{{ invoice_list }}\n\n"
+            "The total is {{ total_due }}. If you have already paid, please ignore this note and "
+            "accept our thanks.\n\n{{ bank_details }}\n\n"
+            "Thank you,\n{{ practice_name }}"
+        ),
+    ),
+    TemplateSpec(
         key="client_payment_final_notice",
         name="Final payment notice (to the client)",
         description="The firmer notice emailed to a client whose invoices are still unpaid.",

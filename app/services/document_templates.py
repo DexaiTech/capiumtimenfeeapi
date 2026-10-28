@@ -41,6 +41,8 @@ async def pdf_template(
         show_logo=row.show_logo,
         show_bank_details=row.show_bank_details,
         footer_text=row.footer_text,
+        accent_color=row.accent_color,
+        watermark_text=row.watermark_text,
     )
 
 

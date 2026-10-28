@@ -84,6 +84,25 @@ class PdfTemplate:
     show_logo: bool = True
     show_bank_details: bool = True
     footer_text: str | None = None
+    # ``#RRGGBB``: the title, the practice name and the table headings.
+    accent_color: str | None = None
+    # Printed large and pale across the page of an issued document.
+    watermark_text: str | None = None
+
+
+def rgb(color: str | None) -> tuple[int, int, int] | None:
+    """The colour of a ``#RRGGBB`` text, or None when there is none or it is not one."""
+    if not color or len(color) != 7 or color[0] != "#":
+        return None
+    try:
+        return (int(color[1:3], 16), int(color[3:5], 16), int(color[5:7], 16))
+    except ValueError:
+        return None
+
+
+def _pale(color: tuple[int, int, int]) -> tuple[int, int, int]:
+    """The colour washed out to nearly white: a watermark must not hide the text over it."""
+    return tuple(round(255 - (255 - part) * 0.12) for part in color)  # type: ignore[return-value]
 
 
 @dataclass(frozen=True, slots=True)
@@ -160,9 +179,13 @@ class StatementData:
 
 
 class _Document(FPDF):  # type: ignore[misc]
-    def __init__(self, title: str, watermark: str | None) -> None:
+    def __init__(
+        self, title: str, watermark: str | None, accent: tuple[int, int, int] | None = None
+    ) -> None:
         super().__init__(orientation="P", unit="mm", format="A4")
         self.watermark = watermark
+        # The template's colour: None keeps the plain black and grey look.
+        self.accent = accent
         self.set_title(latin1(title))
         self.set_creator("Capium Time & Fees")
         self.set_compression(False)
@@ -173,10 +196,13 @@ class _Document(FPDF):  # type: ignore[misc]
     def header(self) -> None:
         if not self.watermark:
             return
-        self.set_font("Helvetica", "B", 90)
-        self.set_text_color(235, 235, 240)
+        # A long text is set smaller so that it still fits across the page.
+        size = 90 if len(self.watermark) <= 6 else max(28, int(560 / len(self.watermark)))
+        self.set_font("Helvetica", "B", size)
+        self.set_text_color(*(_pale(self.accent) if self.accent else (235, 235, 240)))
+        width = self.get_string_width(self.watermark)
         with self.rotation(45, self.w / 2, self.h / 2):
-            self.text(self.w / 2 - 70, self.h / 2 + 15, self.watermark)
+            self.text(self.w / 2 - width / 2, self.h / 2 + size / 6, self.watermark)
         self.set_text_color(0, 0, 0)
         self.set_xy(_MARGIN, _MARGIN)
 
@@ -186,6 +212,14 @@ class _Document(FPDF):  # type: ignore[misc]
         self.set_text_color(*_GREY)
         self.cell(0, 5, f"Page {self.page_no()} of {{nb}}", align="R")
         self.set_text_color(0, 0, 0)
+
+
+def _headings(pdf: Any) -> FontFace:
+    """The style of a table's heading row: bold, white on the accent colour when there is one."""
+    accent = getattr(pdf, "accent", None)
+    if accent is None:
+        return FontFace(emphasis="BOLD")
+    return FontFace(emphasis="BOLD", color=(255, 255, 255), fill_color=accent)
 
 
 def _write_lines(
@@ -209,8 +243,10 @@ def _head(
         registrations.append(f"VAT registration {letterhead.vat_number}")
     if letterhead.company_number:
         registrations.append(f"Company number {letterhead.company_number}")
+    accent = getattr(pdf, "accent", None)
     if letterhead.show_logo:
         pdf.set_font("Helvetica", "B", 16)
+        pdf.set_text_color(*(accent or (0, 0, 0)))
         pdf.multi_cell(110, 8, latin1(letterhead.name), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.set_text_color(*_GREY)
         _write_lines(pdf, letterhead.lines, size=9)
@@ -227,7 +263,9 @@ def _head(
 
     pdf.set_xy(130, _MARGIN)
     pdf.set_font("Helvetica", "B", 20)
+    pdf.set_text_color(*(accent or (0, 0, 0)))
     pdf.cell(65, 10, latin1(title), align="R", new_x=XPos.LEFT, new_y=YPos.NEXT)
+    pdf.set_text_color(0, 0, 0)
     pdf.set_font("Helvetica", "", 9)
     for label, value in facts:
         pdf.set_x(105)
@@ -270,6 +308,7 @@ def _vat_table(
     pdf.ln(4)
     pdf.set_font("Helvetica", "", 8)
     with pdf.table(
+        headings_style=_headings(pdf),
         col_widths=(30, 40, 40),
         width=110,
         align="LEFT",
@@ -300,6 +339,7 @@ def _lines_table(
     aligns = ["LEFT", "RIGHT", "RIGHT"] + (["RIGHT"] if registered else []) + ["RIGHT"]
     small = FontFace(size_pt=8, color=_GREY)
     with pdf.table(
+        headings_style=_headings(pdf),
         col_widths=widths,
         width=sum(widths),
         text_align=tuple(aligns),
@@ -351,7 +391,11 @@ def _summary_table(
     headings = ["Description"] + (["VAT"] if registered else []) + ["Amount"]
     aligns = ["LEFT"] + (["RIGHT"] if registered else []) + ["RIGHT"]
     with pdf.table(
-        col_widths=widths, width=sum(widths), text_align=tuple(aligns), line_height=5
+        headings_style=_headings(pdf),
+        col_widths=widths,
+        width=sum(widths),
+        text_align=tuple(aligns),
+        line_height=5,
     ) as table:
         head = table.row()
         for text in headings:
@@ -385,9 +429,12 @@ def render_invoice(
     template = template or PdfTemplate()
     currency = invoice.currency
     unissued = invoice.status in ("draft", "awaiting_approval", "approved")
-    watermark = "DRAFT" if unissued else ("VOID" if invoice.status == "void" else None)
+    # DRAFT and VOID speak for the document itself; the template's own text is for the rest.
+    watermark = (
+        "DRAFT" if unissued else ("VOID" if invoice.status == "void" else template.watermark_text)
+    )
     number = invoice.number or "DRAFT"
-    pdf = _Document(f"Invoice {number}", watermark)
+    pdf = _Document(f"Invoice {number}", watermark, rgb(template.accent_color))
     letterhead = Letterhead.of(organization, template)
     facts = [("Invoice number", number)]
     if invoice.issue_date:
@@ -439,7 +486,11 @@ def render_credit_note(
     template: PdfTemplate | None = None,
 ) -> bytes:
     currency = invoice.currency
-    pdf = _Document(f"Credit note {note.number}", None)
+    pdf = _Document(
+        f"Credit note {note.number}",
+        (template or PdfTemplate()).watermark_text,
+        rgb((template or PdfTemplate()).accent_color),
+    )
     facts = [
         ("Credit note", note.number),
         ("Date", long_date(note.issue_date)),
@@ -453,7 +504,11 @@ def render_credit_note(
     aligns = ["LEFT"] + (["RIGHT"] if registered else []) + ["RIGHT"]
     pdf.set_font("Helvetica", "", 9)
     with pdf.table(
-        col_widths=widths, width=sum(widths), text_align=tuple(aligns), line_height=5
+        headings_style=_headings(pdf),
+        col_widths=widths,
+        width=sum(widths),
+        text_align=tuple(aligns),
+        line_height=5,
     ) as table:
         head = table.row()
         for text in headings:
@@ -483,7 +538,11 @@ def render_statement(
     template: PdfTemplate | None = None,
 ) -> bytes:
     currency = data.currency
-    pdf = _Document(f"Statement {data.client.name}", None)
+    pdf = _Document(
+        f"Statement {data.client.name}",
+        (template or PdfTemplate()).watermark_text,
+        rgb((template or PdfTemplate()).accent_color),
+    )
     period = (
         f"{short_date(data.date_from)} to {short_date(data.date_to)}"
         if data.date_from
@@ -495,6 +554,7 @@ def render_statement(
     pdf.set_font("Helvetica", "", 9)
     widths = (24, 26, 70, 30, 30)  # the A4 text width: 180 mm
     with pdf.table(
+        headings_style=_headings(pdf),
         col_widths=widths,
         width=sum(widths),
         text_align=("LEFT", "LEFT", "LEFT", "RIGHT", "RIGHT"),

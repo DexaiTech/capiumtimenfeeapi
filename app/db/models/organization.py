@@ -74,6 +74,9 @@ class Organization(Base, IdMixin, TimestampMixin, SoftDeleteMixin):
             "payment_reminder_days_after_due BETWEEN 1 AND 365",
             name="payment_reminder_days_after_due",
         ),
+        CheckConstraint(
+            "cardinality(payment_reminder_schedule) <= 12", name="payment_reminder_schedule"
+        ),
         CheckConstraint("mileage_rate >= 0", name="mileage_rate"),
         CheckConstraint("expense_markup_bp BETWEEN 0 AND 100000", name="expense_markup_bp"),
         CheckConstraint("rate_mode IN ('staff_first', 'grade_only')", name="rate_mode"),
@@ -156,6 +159,11 @@ class Organization(Base, IdMixin, TimestampMixin, SoftDeleteMixin):
     )
     payment_reminder_days_after_due: Mapped[int] = mapped_column(
         SmallInteger, nullable=False, server_default=text("7")
+    )
+    # The days, from the due date, on which an unpaid invoice is reminded about (negative: before).
+    # Empty: the single reminder ``payment_reminder_days_after_due`` days after the due date.
+    payment_reminder_schedule: Mapped[list[int]] = mapped_column(
+        ARRAY(SmallInteger), nullable=False, server_default=text("'{}'")
     )
     # Pence per mile claimed, and the markup in basis points added when an expense is recharged.
     mileage_rate: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default=text("45"))

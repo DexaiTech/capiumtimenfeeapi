@@ -90,6 +90,7 @@ class OnboardingRepository:
                     DocumentSequence.kind == kind,
                     or_(
                         DocumentSequence.prefix != prefix,
+                        DocumentSequence.suffix != "",
                         DocumentSequence.padding != padding,
                         DocumentSequence.next_number > 1,
                     ),

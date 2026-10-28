@@ -21,7 +21,13 @@ DebtorSort = Literal[
     "oldest_due",
 ]
 SortOrder = Literal["asc", "desc"]
-ReminderTemplate = Literal["client_payment_reminder", "client_payment_final_notice"]
+# What a person can choose when reminding about overdue invoices.
+ManualReminderTemplate = Literal["client_payment_reminder", "client_payment_final_notice"]
+# Every template a reminder in the log may have used (the scheduled job also sends the note
+# before a due date).
+ReminderTemplate = Literal[
+    "client_payment_reminder", "client_payment_final_notice", "client_payment_upcoming"
+]
 SkipReason = Literal[
     "already_reminded_today", "not_overdue", "no_balance", "not_issued", "no_recipient"
 ]
@@ -111,7 +117,7 @@ class ReminderRequest(RequestModel):
     invoice_ids: list[uuid.UUID] | None = Field(
         default=None, min_length=1, max_length=500, description="Remind about these invoices"
     )
-    template: ReminderTemplate = Field(
+    template: ManualReminderTemplate = Field(
         default="client_payment_reminder",
         description="The email template: the reminder, or the firmer final notice",
     )

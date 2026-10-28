@@ -350,6 +350,7 @@ class TaskTemplatesUpdate(RequestModel):
 class SequenceRead(BaseModel):
     kind: str
     prefix: str
+    suffix: str
     padding: int
     next_number: int
     # How the next number will look, e.g. "INV-00042".
@@ -360,14 +361,23 @@ class SequenceRead(BaseModel):
         return cls(
             kind=sequence.kind,
             prefix=sequence.prefix,
+            suffix=sequence.suffix,
             padding=sequence.padding,
             next_number=sequence.next_number,
-            preview=format_number(sequence.prefix, sequence.next_number, sequence.padding),
+            preview=format_number(
+                sequence.prefix, sequence.next_number, sequence.padding, sequence.suffix
+            ),
         )
 
 
 class SequenceUpdate(RequestModel):
     prefix: str | None = Field(default=None, max_length=12, pattern=r"^[A-Za-z0-9/_-]{0,12}$")
+    suffix: str | None = Field(
+        default=None,
+        max_length=12,
+        pattern=r"^[A-Za-z0-9/_-]{0,12}$",
+        description="Printed after the number; invoices, credit notes and estimates only",
+    )
     padding: int | None = Field(default=None, ge=1, le=10)
     next_number: int | None = Field(default=None, ge=1, le=2_000_000_000)
 

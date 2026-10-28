@@ -50,6 +50,8 @@ async def test_a_new_practice_has_one_default_standard_template(client):
         "show_logo": True,
         "show_bank_details": True,
         "footer_text": None,
+        "accent_color": None,
+        "watermark_text": None,
         "is_default": True,
         "status": "active",
         "client_count": 0,

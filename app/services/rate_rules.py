@@ -50,7 +50,7 @@ from app.utils.practice_dates import end_of_day_utc, start_of_day_utc, today_in
 
 VALID_SCOPES = (
     "client + service + staff, client + service, client + staff, a client (everyone), "
-    "service + grade, a staff member or a grade"
+    "staff + service, service + grade, a staff member or a grade"
 )
 
 

@@ -123,7 +123,8 @@ class TimeEntry(Base, IdMixin, OrgScopedMixin, TimestampMixin):
         ),
         CheckConstraint(
             "rate_source IS NULL OR rate_source IN ('client_service_staff', 'client_service', "
-            "'client_staff', 'client', 'job', 'service_grade', 'staff', 'grade', 'default')",
+            "'client_staff', 'client', 'job', 'service_staff', 'service_grade', 'staff', 'grade', "
+            "'default')",
             name="rate_source",
         ),
         Index(

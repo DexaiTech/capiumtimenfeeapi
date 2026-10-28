@@ -49,6 +49,8 @@ from app.services.sequences import DEFAULT_SEQUENCES, format_number
 FORWARD_ONLY_SEQUENCES = frozenset({"invoice", "credit_note", "ticket", "estimate"})
 # Sequences whose numbers become codes: letters, digits, '_' and '-', at most 20 characters.
 CODE_SEQUENCES = {"client": "Client", "staff": "Staff"}
+# The numbers printed on documents: the only ones that take a suffix ("INV-00042/26").
+SUFFIX_SEQUENCES = frozenset({"invoice", "credit_note", "estimate"})
 CODE_MAX_LENGTH = 20
 _CODE_PREFIX = re.compile(r"^[A-Za-z0-9_-]*$")
 
@@ -595,6 +597,7 @@ class SettingsService:
                     organization_id=ctx.organization_id,
                     kind=kind,
                     prefix=prefix,
+                    suffix="",
                     padding=padding,
                     next_number=1,
                 )
@@ -629,7 +632,12 @@ class SettingsService:
                 )
             prefix = values.get("prefix", sequence.prefix)
             padding = values.get("padding", sequence.padding)
-            preview = format_number(prefix, new_next, padding)
+            suffix = values.get("suffix", sequence.suffix)
+            preview = format_number(prefix, new_next, padding, suffix)
+            if suffix and kind not in SUFFIX_SEQUENCES:
+                raise ValidationError.for_field(
+                    "suffix", "Only invoice, credit note and estimate numbers take a suffix."
+                )
             if kind in CODE_SEQUENCES:
                 label = CODE_SEQUENCES[kind]
                 if not _CODE_PREFIX.match(prefix):

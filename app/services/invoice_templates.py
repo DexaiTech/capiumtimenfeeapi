@@ -34,7 +34,16 @@ from app.services.policy import OrgContext
 
 NAME_INDEX = "uq_invoice_templates_organization_id_name_lower"
 DEFAULT_INDEX = "uq_invoice_templates_organization_id_default"
-_AUDITED = ("name", "layout", "show_logo", "show_bank_details", "footer_text", "status")
+_AUDITED = (
+    "name",
+    "layout",
+    "show_logo",
+    "show_bank_details",
+    "footer_text",
+    "accent_color",
+    "watermark_text",
+    "status",
+)
 
 
 def name_taken_error() -> ConflictError:

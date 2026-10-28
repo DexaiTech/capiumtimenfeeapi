@@ -25,8 +25,8 @@ DEFAULT_SEQUENCES: dict[str, tuple[str, int]] = {
 }
 
 
-def format_number(prefix: str, number: int, padding: int) -> str:
-    return f"{prefix}{number:0{padding}d}"
+def format_number(prefix: str, number: int, padding: int, suffix: str = "") -> str:
+    return f"{prefix}{number:0{padding}d}{suffix}"
 
 
 async def take_number(
@@ -57,7 +57,7 @@ async def take_number(
         # Re-read under the lock: a concurrent creator may have won the insert.
         sequence = (await session.execute(stmt)).scalar_one()
     number = sequence.next_number
-    formatted = format_number(sequence.prefix, number, sequence.padding)
+    formatted = format_number(sequence.prefix, number, sequence.padding, sequence.suffix)
     sequence.next_number += 1
     await session.flush()
     return number, formatted

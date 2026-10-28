@@ -1,8 +1,8 @@
 """Invoice templates: the layout, logo, bank details and footer an invoice is printed with.
 
 A practice has one default template; a client may choose another (``clients.invoice_template_id``).
-The PDF still draws every invoice with the practice letterhead and footer: reading the template
-there is the billing module's job.
+The PDF reads the template: its layout, letterhead, bank details, footer, accent colour and
+watermark.
 """
 
 from sqlalchemy import Boolean, CheckConstraint, Index, Text, UniqueConstraint, text
@@ -24,6 +24,13 @@ class InvoiceTemplate(Base, IdMixin, OrgScopedMixin, TimestampMixin, SoftDeleteM
         CheckConstraint(
             "footer_text IS NULL OR length(footer_text) BETWEEN 1 AND 1000",
             name="footer_text_length",
+        ),
+        CheckConstraint(
+            "accent_color IS NULL OR accent_color ~ '^#[0-9A-Fa-f]{6}$'", name="accent_color_format"
+        ),
+        CheckConstraint(
+            "watermark_text IS NULL OR watermark_text ~ '^[A-Za-z0-9 -]{1,24}$'",
+            name="watermark_text_format",
         ),
         CheckConstraint("NOT is_default OR status = 'active'", name="default_is_active"),
         Index(
@@ -49,6 +56,10 @@ class InvoiceTemplate(Base, IdMixin, OrgScopedMixin, TimestampMixin, SoftDeleteM
         Boolean, nullable=False, server_default=text("true")
     )
     footer_text: Mapped[str | None] = mapped_column(Text)
+    # ``#RRGGBB``: the title, the practice name and the table headings. Null: black and grey.
+    accent_color: Mapped[str | None] = mapped_column(Text)
+    # Printed large and pale across every page of an issued document. Null: none.
+    watermark_text: Mapped[str | None] = mapped_column(Text)
     is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default="active")
 

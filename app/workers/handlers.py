@@ -142,9 +142,9 @@ async def send_payment_reminders(
     session: AsyncSession, settings: Settings, payload: dict[str, Any]
 ) -> dict[str, Any] | None:
     """Daily, for every practice that switched payment reminders on: queue the reminder email
-    of each client with overdue invoices that were never reminded and are at least
-    ``payment_reminder_days_after_due`` days past due. Idempotent: an invoice is reminded at
-    most once a day (a unique index), and a scheduled reminder only once ever."""
+    of each client for the unpaid invoices whose next reminder day (a day of the practice's
+    reminder schedule, counted from the due date) has come. Idempotent: an invoice is reminded at
+    most once a day (a unique index) and once for each day of the schedule."""
     return dict(await run_scheduled_reminders(session))
 
 

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import and_, not_, or_, select, text
+from sqlalchemy import and_, func, or_, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -60,22 +60,42 @@ class PaymentReminderRepository:
         )
         return {i.id: i for i in (await self.session.execute(stmt)).scalars()}
 
-    async def due_for_scheduled(
+    async def scheduled_candidates(
+        self, organization_id: uuid.UUID, *, today: date, first_day: int
+    ) -> list[Invoice]:
+        """Issued invoices that still owe money and whose first reminder day (the due date plus
+        ``first_day``, which may be negative) has come."""
+        stmt = (
+            select(Invoice)
+            .where(
+                Invoice.organization_id == organization_id,
+                Invoice.status == "issued",
+                balance_expr() > 0,
+                Invoice.due_date.is_not(None),
+                Invoice.due_date <= today - timedelta(days=first_day),
+            )
+            .order_by(Invoice.client_id, Invoice.due_date, Invoice.number, Invoice.id)
+        )
+        return list((await self.session.execute(stmt)).scalars())
+
+    async def last_reminded_on(
         self,
         organization_id: uuid.UUID,
+        invoice_ids: Iterable[uuid.UUID],
         *,
-        today: date,
-        days_after_due: int,
         stale_before: datetime,
-    ) -> list[Invoice]:
-        """Overdue invoices at least ``days_after_due`` days past due that were never reminded.
-        A reminder blocks while it is sent, or queued and not older than ``stale_before`` (a
-        job that died leaves a queued row behind; it must not silence the invoice forever)."""
-        blocking = (
-            select(PaymentReminder.id)
+    ) -> dict[uuid.UUID, date]:
+        """The latest day each invoice was reminded about: a reminder that was sent, or queued
+        and not older than ``stale_before`` (a job that died leaves a queued row behind; it must
+        not silence the invoice forever). Manual and scheduled reminders both count."""
+        wanted = set(invoice_ids)
+        if not wanted:
+            return {}
+        stmt = (
+            select(PaymentReminder.invoice_id, func.max(PaymentReminder.sent_on))
             .where(
-                PaymentReminder.organization_id == Invoice.organization_id,
-                PaymentReminder.invoice_id == Invoice.id,
+                PaymentReminder.organization_id == organization_id,
+                PaymentReminder.invoice_id.in_(wanted),
                 or_(
                     PaymentReminder.status == "sent",
                     and_(
@@ -84,19 +104,9 @@ class PaymentReminderRepository:
                     ),
                 ),
             )
-            .exists()
+            .group_by(PaymentReminder.invoice_id)
         )
-        stmt = (
-            select(Invoice)
-            .where(
-                Invoice.organization_id == organization_id,
-                *_overdue(today),
-                Invoice.due_date <= today - timedelta(days=days_after_due),
-                not_(blocking),
-            )
-            .order_by(Invoice.client_id, Invoice.due_date, Invoice.number, Invoice.id)
-        )
-        return list((await self.session.execute(stmt)).scalars())
+        return {row[0]: row[1] for row in (await self.session.execute(stmt)).all()}
 
     async def reminded_on(
         self, organization_id: uuid.UUID, invoice_ids: Iterable[uuid.UUID], day: date

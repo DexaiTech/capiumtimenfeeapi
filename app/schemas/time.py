@@ -74,7 +74,8 @@ class TimeEntryRead(BaseModel):
         default=None,
         description=(
             "Level of the rate ladder that priced the entry: client_service_staff, "
-            "client_service, client_staff, client, job, service_grade, staff, grade or default; "
+            "client_service, client_staff, client, job, service_staff, service_grade, staff, grade "
+            "or default; "
             "null for time recorded before the ladder existed"
         ),
     )

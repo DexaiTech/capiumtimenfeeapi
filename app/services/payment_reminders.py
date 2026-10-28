@@ -1,12 +1,15 @@
-"""Payment reminders: emails to clients about their overdue invoices.
+"""Payment reminders: emails to clients about their unpaid invoices.
 
 One email per client lists the client's overdue invoices; each invoice gets a
 ``payment_reminders`` row (the rows of an email share a ``batch_id``). The email is sent by the
 ``send_payment_reminder_email`` job, so nothing is sent from a request. At most one reminder per
 invoice and day (practice time zone) is queued or sent: a unique index decides when two requests
-race. The daily scheduled job (``run_scheduled_reminders``) reminds, for practices that switched
-it on, every overdue invoice that is at least ``payment_reminder_days_after_due`` days past due
-and has never been reminded.
+race. The daily scheduled job (``run_scheduled_reminders``) follows, for practices that switched
+it on, the practice's reminder schedule: days counted from the due date (negative before it, 0 on
+it, positive after it). An unpaid invoice is reminded once for each day of the schedule as it
+comes, until it is paid; a practice without a schedule has the one reminder
+``payment_reminder_days_after_due`` days after the due date. Before and on the due date the
+friendly "payment due soon" note goes; after it, the reminder.
 """
 
 import uuid
@@ -52,11 +55,13 @@ from app.services.template_catalogue import TEMPLATES
 from app.services.template_render import RenderedEmail, render_email
 from app.utils.ids import new_id
 from app.utils.pagination import PageParams
+from app.utils.reminder_schedule import effective_schedule, latest_step_reached
 
 log = get_logger(__name__)
 
 SEND_JOB = "send_payment_reminder_email"
 DEFAULT_TEMPLATE: ReminderTemplate = "client_payment_reminder"
+UPCOMING_TEMPLATE: ReminderTemplate = "client_payment_upcoming"
 # A queued reminder older than this no longer silences its invoice for the scheduled job.
 STALE_AFTER = timedelta(days=1)
 
@@ -83,13 +88,14 @@ class _ClientPlan:
         return sum(d.outstanding for d in self.dues)
 
 
-def _ineligible(invoice: Invoice, today: date) -> SkipReason | None:
-    """Why an invoice cannot be reminded about, or None when it is overdue and owes money."""
+def _ineligible(invoice: Invoice, today: date, *, upcoming: bool = False) -> SkipReason | None:
+    """Why an invoice cannot be reminded about, or None when it is overdue (with ``upcoming``:
+    or about to fall due) and owes money."""
     if invoice.status != "issued":
         return "not_issued"
     if invoice.balance <= 0:
         return "no_balance"
-    if invoice.due_date is None or invoice.due_date >= today:
+    if invoice.due_date is None or (invoice.due_date >= today and not upcoming):
         return "not_overdue"
     return None
 
@@ -101,6 +107,7 @@ def _skip(invoice: Invoice, reason: SkipReason) -> ReminderSkipped:
 
 
 def _due(invoice: Invoice, today: date) -> _Due:
+    """``days_overdue`` is negative for an invoice that has not fallen due yet."""
     assert invoice.due_date is not None
     return _Due(invoice, (today - invoice.due_date).days, invoice.balance)
 
@@ -110,14 +117,17 @@ async def plan_reminders(
     organization: Organization,
     invoices: Sequence[Invoice],
     today: date,
+    *,
+    upcoming: bool = False,
 ) -> tuple[list[_ClientPlan], list[ReminderSkipped]]:
     """Group the invoices that can be reminded about by client and say why the others cannot:
-    not issued, nothing owed, not overdue, already reminded today, or no address to write to."""
+    not issued, nothing owed, not overdue, already reminded today, or no address to write to.
+    With ``upcoming`` an invoice that has not fallen due yet can be reminded about too."""
     refs = BillingReferenceRepository(session)
     skipped: list[ReminderSkipped] = []
     eligible: list[Invoice] = []
     for invoice in invoices:
-        reason = _ineligible(invoice, today)
+        reason = _ineligible(invoice, today, upcoming=upcoming)
         if reason is None:
             eligible.append(invoice)
         else:
@@ -146,7 +156,11 @@ async def plan_reminders(
 
 
 def _days_label(days: int) -> str:
-    return f"{days} day overdue" if days == 1 else f"{days} days overdue"
+    if days > 0:
+        return f"{days} day overdue" if days == 1 else f"{days} days overdue"
+    if days == 0:
+        return "today"
+    return "tomorrow" if days == -1 else f"in {-days} days"
 
 
 async def render_reminder(
@@ -212,7 +226,7 @@ async def _queue(
                 "source": source,
                 "sent_on": today,
                 "recipients": plan.to,
-                "days_overdue": due.days_overdue,
+                "days_overdue": max(due.days_overdue, 0),
                 "amount_due": due.outstanding,
                 "sent_by": user_id,
             }
@@ -440,32 +454,50 @@ async def run_scheduled_reminders(session: AsyncSession) -> dict[str, int]:
 
 async def queue_scheduled(session: AsyncSession, organization_id: uuid.UUID) -> tuple[int, int]:
     """Queue one practice's scheduled reminders; returns ``(emails, invoices)``. Does not
-    commit: the caller's transaction carries the rows."""
+    commit: the caller's transaction carries the rows.
+
+    An unpaid invoice is reminded when a day of the schedule has come (the due date plus that
+    many days) and it has not been reminded since: once for each day as it arrives, never twice
+    for the same one, and never once it is paid."""
     organization = await BillingReferenceRepository(session).get_organization(organization_id)
     if organization is None or not organization.payment_reminders_enabled:
         return 0, 0
     today = today_for(organization)
-    invoices = await PaymentReminderRepository(session).due_for_scheduled(
-        organization.id,
-        today=today,
-        days_after_due=organization.payment_reminder_days_after_due,
-        stale_before=now_utc() - STALE_AFTER,
+    schedule = effective_schedule(
+        organization.payment_reminder_schedule, organization.payment_reminder_days_after_due
     )
-    plans, _ = await plan_reminders(session, organization, invoices, today)
+    repo = PaymentReminderRepository(session)
+    candidates = await repo.scheduled_candidates(
+        organization.id, today=today, first_day=schedule[0]
+    )
+    last = await repo.last_reminded_on(
+        organization.id, [i.id for i in candidates], stale_before=now_utc() - STALE_AFTER
+    )
+    due: list[Invoice] = []
+    for invoice in candidates:
+        assert invoice.due_date is not None
+        step = latest_step_reached(schedule, invoice.due_date, today)
+        if step is not None and (invoice.id not in last or last[invoice.id] < step):
+            due.append(invoice)
     emails = reminded = 0
-    for plan in plans:
-        queued = await _queue(
-            session,
-            organization,
-            plan,
-            template=DEFAULT_TEMPLATE,
-            source="scheduled",
-            today=today,
-            user_id=None,
-        )
-        if queued:
-            emails += 1
-            reminded += len(queued)
+    for template, upcoming, group in (
+        (DEFAULT_TEMPLATE, False, [i for i in due if i.due_date and i.due_date < today]),
+        (UPCOMING_TEMPLATE, True, [i for i in due if i.due_date and i.due_date >= today]),
+    ):
+        plans, _ = await plan_reminders(session, organization, group, today, upcoming=upcoming)
+        for plan in plans:
+            queued = await _queue(
+                session,
+                organization,
+                plan,
+                template=template,
+                source="scheduled",
+                today=today,
+                user_id=None,
+            )
+            if queued:
+                emails += 1
+                reminded += len(queued)
     return emails, reminded
 
 
@@ -500,7 +532,8 @@ async def deliver_reminder_email(
     pending: list[tuple[PaymentReminder, _Due]] = []
     for row in queued:
         invoice = invoices.get(row.invoice_id)
-        if invoice is None or _ineligible(invoice, today) is not None:
+        upcoming = row.template == UPCOMING_TEMPLATE
+        if invoice is None or _ineligible(invoice, today, upcoming=upcoming) is not None:
             row.status = "skipped"
             row.error = "The invoice no longer needs a reminder."
         else:
@@ -534,7 +567,7 @@ async def deliver_reminder_email(
     for row, due in pending:
         row.status = "sent"
         row.sent_at = now
-        row.days_overdue = due.days_overdue
+        row.days_overdue = max(due.days_overdue, 0)
         row.amount_due = due.outstanding
     await session.flush()
     return {**payload, "sent_at": now.isoformat(), "invoices": len(pending)}
