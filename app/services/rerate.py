@@ -218,7 +218,12 @@ class RerateService:
             await charge_rates.resolve_many(
                 self.session,
                 org,
-                [RateQuery(e.user_id, e.client_id, e.job_id, e.entry_date) for e in priced],
+                [
+                    RateQuery(
+                        e.user_id, e.client_id, e.job_id, e.entry_date, overtime=e.is_overtime
+                    )
+                    for e in priced
+                ],
             )
         )
         plan_entries: list[PlanEntry] = []

@@ -320,6 +320,7 @@ class StaffService:
             for name in (
                 "job_title",
                 "chargeable_target_bp",
+                "overtime_multiplier_bp",
                 "start_date",
                 "leaving_date",
                 "working_minutes_per_day",

@@ -98,6 +98,14 @@ class OrganizationRead(BaseModel):
             "grade's, `grade_only` skips the staff-level rate so the grade rate applies"
         )
     )
+    overtime_enabled: bool = Field(
+        description="Whether overtime is on: time can then be marked as overtime and is priced "
+        "at its normal rates times the multiplier"
+    )
+    overtime_multiplier_bp: int = Field(
+        description="Basis points of the normal rate that overtime is paid and charged at "
+        "(15000 = 1.5x), unless the staff member has their own"
+    )
     email: str | None = Field(description="Practice contact email")
     phone: str | None = Field(description="Practice phone number")
     address_line1: str | None = Field(description="Address line 1")
@@ -144,6 +152,8 @@ class OrganizationRead(BaseModel):
             mileage_rate=organization.mileage_rate,
             expense_markup_bp=organization.expense_markup_bp,
             rate_mode=organization.rate_mode,
+            overtime_enabled=organization.overtime_enabled,
+            overtime_multiplier_bp=organization.overtime_multiplier_bp,
             email=organization.email,
             phone=organization.phone,
             address_line1=organization.address_line1,
@@ -404,6 +414,19 @@ class OrganizationUpdate(RequestModel):
             "`staff_first`: a staff member's own rate comes before their grade's; `grade_only`: "
             "the staff-level rate is skipped and the grade rate applies"
         ),
+    )
+    overtime_enabled: bool | None = Field(
+        default=None,
+        description=(
+            "Whether overtime is on. Off hides it everywhere; time already marked as overtime "
+            "keeps its value, and a new or re-rated entry is priced at its normal rate"
+        ),
+    )
+    overtime_multiplier_bp: int | None = Field(
+        default=None,
+        ge=10000,
+        le=100000,
+        description="Overtime rate as basis points of the normal rate (10000-100000; 15000 = 1.5x)",
     )
     email: EmailStr | None = Field(
         default=None, max_length=254, description="Contact email; null or blank clears it"

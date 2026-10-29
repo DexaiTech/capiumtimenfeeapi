@@ -24,6 +24,9 @@ class EmailTemplateRead(BaseModel):
     name: str
     description: str
     category: Literal["notification", "system"]
+    audience: Literal["external", "internal"] = Field(
+        description="`external` is sent to the practice's clients, `internal` to its own team"
+    )
     notification_type: str | None = Field(
         description="The notification type that sends this template, when there is one"
     )

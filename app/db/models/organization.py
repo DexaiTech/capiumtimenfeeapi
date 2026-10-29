@@ -38,6 +38,8 @@ GONE_STATUSES = ("removed", "left")
 # How a fixed fee counts as WIP, and which rates price time (see the columns below).
 FixedFeeWipMode = Literal["on_completion", "by_budget_progress"]
 RateMode = Literal["staff_first", "grade_only"]
+# How a practice locks: a lock covers one week, month, quarter or accounting year.
+LockGranularity = Literal["weekly", "monthly", "quarterly", "annually"]
 
 
 class Organization(Base, IdMixin, TimestampMixin, SoftDeleteMixin):
@@ -80,6 +82,18 @@ class Organization(Base, IdMixin, TimestampMixin, SoftDeleteMixin):
         CheckConstraint("mileage_rate >= 0", name="mileage_rate"),
         CheckConstraint("expense_markup_bp BETWEEN 0 AND 100000", name="expense_markup_bp"),
         CheckConstraint("rate_mode IN ('staff_first', 'grade_only')", name="rate_mode"),
+        CheckConstraint(
+            "overtime_multiplier_bp BETWEEN 10000 AND 100000", name="overtime_multiplier_bp"
+        ),
+        CheckConstraint(
+            "period_lock_granularity IN ('weekly', 'monthly', 'quarterly', 'annually')",
+            name="period_lock_granularity",
+        ),
+        CheckConstraint(
+            "financial_year_start_month BETWEEN 1 AND 12 AND "
+            "financial_year_start_day BETWEEN 1 AND 28",
+            name="financial_year_start",
+        ),
         Index(
             "uq_organizations_slug",
             "slug",
@@ -173,6 +187,29 @@ class Organization(Base, IdMixin, TimestampMixin, SoftDeleteMixin):
     # Which rates price time: ``staff_first`` takes a staff member's own rate before their grade's;
     # ``grade_only`` skips the staff-level rate (rung 6 of the ladder) so the grade rate applies.
     rate_mode: Mapped[RateMode] = mapped_column(Text, nullable=False, server_default="staff_first")
+    # Period locks: locks are exactly one period of this length inside the accounting year that
+    # starts on ``financial_year_start_month``/``_day`` (1 January: the calendar year). It stays
+    # unconfirmed (``period_lock_configured`` false) until someone makes the choice.
+    period_lock_granularity: Mapped[LockGranularity] = mapped_column(
+        Text, nullable=False, server_default="weekly"
+    )
+    financial_year_start_month: Mapped[int] = mapped_column(
+        SmallInteger, nullable=False, server_default=text("1")
+    )
+    financial_year_start_day: Mapped[int] = mapped_column(
+        SmallInteger, nullable=False, server_default=text("1")
+    )
+    period_lock_configured: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    # Overtime: when on, time marked as overtime is priced at its normal rates times the multiplier
+    # (basis points, 15000 = 1.5x) unless the staff member has their own.
+    overtime_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    overtime_multiplier_bp: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("15000")
+    )
     email: Mapped[str | None] = mapped_column(Text)
     phone: Mapped[str | None] = mapped_column(Text)
     address_line1: Mapped[str | None] = mapped_column(Text)
@@ -316,6 +353,10 @@ class OrganizationMember(Base, IdMixin, TimestampMixin):
             "status IN ('active', 'suspended', 'removed', 'inactive', 'left')", name="status"
         ),
         CheckConstraint("manager_user_id <> user_id", name="not_own_manager"),
+        CheckConstraint(
+            "overtime_multiplier_bp IS NULL OR overtime_multiplier_bp BETWEEN 10000 AND 100000",
+            name="overtime_multiplier_bp",
+        ),
         CheckConstraint("weekly_capacity_minutes BETWEEN 0 AND 10080", name="weekly_capacity"),
         CheckConstraint("working_minutes_per_day BETWEEN 1 AND 1440", name="working_minutes"),
         CheckConstraint(
@@ -382,6 +423,8 @@ class OrganizationMember(Base, IdMixin, TimestampMixin):
     chargeable_target_bp: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default=text("7500")
     )
+    # The person's own overtime multiplier (basis points); null: the practice's.
+    overtime_multiplier_bp: Mapped[int | None] = mapped_column(Integer)
     job_title: Mapped[str | None] = mapped_column(Text)
     initials: Mapped[str | None] = mapped_column(Text)
     joined_at: Mapped[datetime] = mapped_column(

@@ -1,10 +1,14 @@
 # Period locks
 
 A practice closes a period once its time, expenses and work in progress have been reported, so
-nobody can change the figures behind a closed month by accident. A practice locks whole **calendar
-months, quarters or years**, each on its own: **every day inside a locked period is closed**, every
-other day is open. Nothing is locked until somebody locks a period, and any one period can be
-unlocked again (with a reason) so that its data can be corrected.
+nobody can change the figures behind a closed month by accident. A practice locks whole **weeks,
+months, quarters or accounting years**, each on its own: **every day inside a locked period is
+closed**, every other day is open. Nothing is locked until somebody locks a period, and any one
+period can be unlocked again (with a reason) so that its data can be corrected.
+
+How a practice locks is a setting (`PUT /period-locks/settings`, see
+[Lock length and accounting year](#lock-length-and-accounting-year)): `weekly` until it chooses
+otherwise. A new lock is exactly one period of that length, never a free range.
 
 A lock closes three kinds of dated data, called *areas* in the API and in the error details:
 
@@ -24,9 +28,11 @@ All paths are under `/api/v1/organizations/{organization_id}`.
 
 | Method | Path | Permission | Purpose |
 |---|---|---|---|
-| GET | `/period-locks` | `period_lock.read` | The locked periods and the latest event |
+| GET | `/period-locks` | `period_lock.read` | The locked periods, the latest event and the `settings` |
+| GET | `/period-locks/calendar` | `period_lock.read` | The periods of one accounting year (`?year=`, default this one), each `open`, `locked`, `blocked` or `future`, and the years that can be shown |
+| PUT | `/period-locks/settings` | `period_lock.manage` | Choose the lock length (and the accounting year start) |
 | GET | `/period-locks/history` | `period_lock.read` | Every lock and unlock, newest first, cursor-paginated (`limit` 1-100, default 25; `cursor`) |
-| POST | `/period-locks` | `period_lock.manage` | Lock a month, quarter or year |
+| POST | `/period-locks` | `period_lock.manage` | Lock a week, month, quarter or year |
 | POST | `/period-locks/reopen` | `period_lock.reopen` | Unlock one locked period; needs a reason |
 
 Permission checks come before the body is read, so a caller without the permission gets 403
@@ -139,9 +145,27 @@ date that was refused: for a request that touches several dates (a bulk batch, a
 date to another, a claim with many lines) it is the **earliest** of them, and nothing at all is
 written.
 
+## Lock length and accounting year
+
+- `organizations.period_lock_granularity` is `weekly` (the default), `monthly`, `quarterly` or
+  `annually`. `PUT /period-locks/settings` takes `granularity` and, optionally,
+  `financial_year_start_month` (1-12) and `financial_year_start_day` (1-28; 1 January, the calendar
+  year, unless set). `period_lock_configured` is false until the first call: the screen asks once.
+  Changing the setting later is audited (`period_lock.settings_changed`) and touches no lock.
+- An accounting year is named by the calendar year it starts in. Months and quarters are counted from
+  its first day; a week runs from the practice's `week_start` for seven days and belongs to the year
+  it begins in, so a year has 52 or 53 weeks.
+- `POST /period-locks` takes `period_type` (`week`, `month`, `quarter`, `year`), `year` (the
+  accounting year) and `period` (the week 1-53, month 1-12 or quarter 1-4 of that year). The type must
+  be the one the setting makes (422 `PERIOD_LOCK_WRONG_LENGTH`), so a lock is always exactly one period
+  of the chosen length. `GET /period-locks/calendar` lists those periods, so a client never works dates out.
+- Locks made under another setting, and `legacy` locks, stay in force and can be unlocked; they are
+  listed apart from the grid. Practices that already had locks start `period_lock_configured` with the
+  length they used last (migration 060).
+
 ## Locking and unlocking
 
-- A month, quarter or calendar year is locked once it has ended ("today" is the practice's today,
+- A week, month, quarter or accounting year is locked once it has ended ("today" is the practice's today,
   its `timezone`), and never twice: locking an overlapping period is 422 `PERIOD_LOCK_OVERLAPS`,
   so a double click does not write two history rows.
 - Unlocking opens **only that period**; the others stay locked. It always says why. Unlocking a
@@ -256,7 +280,7 @@ well as one that moves it in: the old date is checked too.
 ## Data
 
 `locked_periods`: one row per locked period. Columns: `id`, `organization_id`, `period_type`
-(`month`, `quarter`, `year`, `legacy`), `start_date`, `end_date` (both inclusive), `reason`,
+(`week`, `month`, `quarter`, `year`, `legacy`), `start_date`, `end_date` (both inclusive), `reason`,
 `locked_by`, `locked_at`. `UNIQUE (organization_id, period_type, start_date)`; `start_date <=
 end_date`. Unlocking deletes the row (the history keeps the trace). Rows go with their practice.
 

@@ -165,6 +165,25 @@ async def reopen_timesheet(
     return ok(await service.reopen(org, timesheet_id, ctx), "Timesheet reopened")
 
 
+@router.delete(
+    "/timesheets/{timesheet_id}",
+    summary="Delete a timesheet",
+    description=(
+        "Deletes an `open` or `rejected` sheet together with its time entries, all or "
+        "nothing. Own sheets need `time.log`, others' `time.manage_all`. A submitted or "
+        "approved sheet answers 409 `INVALID_STATUS_TRANSITION` (recall or reopen it "
+        "first); time that is billed, in a draft or written off 409 "
+        "`TIMESHEET_HAS_BILLED_TIME`; a locked period 409 `PERIOD_LOCKED`."
+    ),
+    responses=error_responses(403, 404, 409),
+)
+async def delete_timesheet(
+    timesheet_id: uuid.UUID, org: OrgContextDep, service: TimesheetServiceDep, ctx: ContextDep
+) -> ApiResponse[None]:
+    await service.delete(org, timesheet_id, ctx)
+    return ok(message="Timesheet deleted")
+
+
 @router.get(
     "/approvals",
     summary="Approvals queue",

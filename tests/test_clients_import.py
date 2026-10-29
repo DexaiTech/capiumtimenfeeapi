@@ -259,3 +259,15 @@ async def test_import_permissions(client):
     assert (await upload(client, owner, org, content)).status_code == 200
     outsider = await staff(other, "owner")
     assert (await upload(client, outsider, org, content)).status_code == 404
+
+
+async def test_a_deleted_clients_code_can_be_imported_again(client):
+    owner, org = await practice(client)
+    gone = await create_client(client, owner, org, "Gone Ltd", code="BRAVO")
+    await client.delete(org_url(org, f"/clients/{gone['id']}"), headers=owner.headers)
+    response = await upload(
+        client, owner, org, csv_of("Name,Code", "Bravo Partners,BRAVO"), dry_run=False
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["data"]["created"] == 1
+    assert await client_count(org) == 1

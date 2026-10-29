@@ -584,12 +584,28 @@ class ClientsService:
     async def _ensure_code_free(
         self, ctx: OrgContext, code: str, exclude_id: uuid.UUID | None = None
     ) -> None:
-        if await self.clients.code_taken(ctx.organization_id, code, exclude_id=exclude_id):
-            message = "Another client already uses this code."
+        holder = await self.clients.code_holder(ctx.organization_id, code, exclude_id=exclude_id)
+        if holder is not None:
+            # An archived client still holds its code until it is deleted or given another one.
+            message = f"The code {code} is already used by {holder.name}"
+            message += (
+                " (archived). Change that client's code, or delete it, to use the code again."
+                if holder.status == "archived"
+                else ". Choose another code."
+            )
             raise ConflictError(
                 message,
                 code="CLIENT_CODE_TAKEN",
-                details=[{"field": "code", "code": "duplicate", "message": message}],
+                details=[
+                    {
+                        "field": "code",
+                        "code": "duplicate",
+                        "message": message,
+                        "client_id": str(holder.id),
+                        "client_name": holder.name,
+                        "client_status": holder.status,
+                    }
+                ],
             )
 
     async def create(

@@ -1,4 +1,4 @@
-"""Period locks: locking a month, quarter or year, unlocking one, the history, permissions,
+"""Period locks: locking a week, month, quarter or year, unlocking one, the history, permissions,
 isolation, the immutability of the history and the races between locking and writing."""
 
 import asyncio
@@ -59,7 +59,14 @@ def last_year(org: dict) -> int:
 
 async def test_a_new_practice_has_nothing_locked(client):
     owner, org = await practice(client)
-    assert await get_state(client, owner, org) == {"periods": [], "last_event": None}
+    state = await get_state(client, owner, org)
+    assert state["periods"] == [] and state["last_event"] is None
+    assert state["settings"] == {
+        "granularity": "weekly",
+        "financial_year_start_month": 1,
+        "financial_year_start_day": 1,
+        "configured": False,
+    }
     assert (await history(client, owner, org)).json()["data"] == []
 
 
@@ -426,7 +433,7 @@ async def test_locks_and_history_go_with_the_practice(client):
 @pytest.mark.parametrize(
     ("period_type", "start", "end"),
     [
-        ("week", "2023-01-01", "2023-01-07"),
+        ("day", "2023-01-01", "2023-01-01"),
         ("month", "2023-02-01", "2023-01-31"),
     ],
 )

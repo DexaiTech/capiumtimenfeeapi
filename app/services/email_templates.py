@@ -32,6 +32,7 @@ from app.services.template_catalogue import (
     MERGE_FIELDS,
     NOTIFICATION_KEYS,
     TEMPLATES,
+    Audience,
     TemplateSpec,
     sample_values,
 )
@@ -110,11 +111,17 @@ class EmailTemplateService:
 
     # --- Reads ---------------------------------------------------------------------------
 
-    async def list_templates(self, ctx: OrgContext) -> list[EmailTemplateRead]:
+    async def list_templates(
+        self, ctx: OrgContext, audience: Audience | None = None
+    ) -> list[EmailTemplateRead]:
         policy.ensure_any(ctx, *ADMIN_PERMISSIONS)
         rows = await self.repo.all(ctx.organization_id)
         names = await self.repo.user_names({r.updated_by for r in rows.values() if r.updated_by})
-        return [self._view(spec, rows.get(spec.key), names) for spec in TEMPLATES.values()]
+        return [
+            self._view(spec, rows.get(spec.key), names)
+            for spec in TEMPLATES.values()
+            if audience is None or spec.audience == audience
+        ]
 
     async def get(self, ctx: OrgContext, key: str) -> EmailTemplateRead:
         policy.ensure_any(ctx, *ADMIN_PERMISSIONS)
@@ -265,6 +272,7 @@ class EmailTemplateService:
             name=spec.name,
             description=spec.description,
             category=spec.category,
+            audience=spec.audience,
             notification_type=spec.key if spec.key in NOTIFICATION_KEYS else None,
             merge_fields=[
                 MergeFieldRead(

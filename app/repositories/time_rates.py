@@ -64,6 +64,18 @@ class RateLookupRepository:
         )
         return {row[0]: row[1] for row in (await self.session.execute(stmt)).all()}
 
+    async def member_overtime(
+        self, organization_id: uuid.UUID, user_ids: Collection[uuid.UUID]
+    ) -> dict[uuid.UUID, int | None]:
+        """Each person's own overtime multiplier in basis points (null: the practice's)."""
+        if not user_ids:
+            return {}
+        stmt = select(OrganizationMember.user_id, OrganizationMember.overtime_multiplier_bp).where(
+            OrganizationMember.organization_id == organization_id,
+            OrganizationMember.user_id.in_(list(user_ids)),
+        )
+        return {row[0]: row[1] for row in (await self.session.execute(stmt)).all()}
+
     async def grade_defaults(
         self, organization_id: uuid.UUID, grade_ids: Collection[uuid.UUID]
     ) -> dict[uuid.UUID, tuple[int | None, int | None]]:

@@ -58,6 +58,7 @@ queue** (used by the worker), so the client-work job code lives in `time_jobs.py
 | POST | `/timesheets/{id}/approve` | `timesheet.approve` | `submitted` → `approved`, optional `{decision_note}` |
 | POST | `/timesheets/{id}/reject` | `timesheet.approve` | `submitted` → `rejected`, `{decision_note}` required |
 | POST | `/timesheets/{id}/reopen` | `timesheet.approve` | `approved` → `open` when no entry is billed |
+| DELETE | `/timesheets/{id}` | `time.log` (own) / `time.manage_all` | Delete an `open`/`rejected` sheet and its time, when none of it is billed (409 otherwise) |
 | GET | `/approvals` | any member | Submitted sheets of the people the caller manages (all with `time.read_all`), oldest week first |
 | POST | `/approvals/bulk-approve` | `timesheet.approve` | `{timesheet_ids}` (1–100), atomically |
 | GET | `/timesheets/missing` | `time.read_all`, else the people the caller manages | Staff whose timesheet for a week is not submitted; `week_start`, `user_id`, `manager_user_id` |

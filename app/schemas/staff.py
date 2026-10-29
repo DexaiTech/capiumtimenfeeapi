@@ -97,6 +97,10 @@ class StaffRead(BaseModel):
     working_days: list[int] = Field(description="ISO weekdays, 1 = Monday")
     weekly_capacity_minutes: int
     chargeable_target_bp: int
+    overtime_multiplier_bp: int | None = Field(
+        description="Their own overtime multiplier (basis points, 15000 = 1.5x); null: the "
+        "practice's. Applies only while the practice has overtime on"
+    )
     start_date: date | None
     leaving_date: date | None
     # The standard rates that apply to them today (no client, job or service): null without
@@ -140,6 +144,7 @@ class StaffRead(BaseModel):
             working_days=list(member.working_days),
             weekly_capacity_minutes=member.weekly_capacity_minutes,
             chargeable_target_bp=member.chargeable_target_bp,
+            overtime_multiplier_bp=member.overtime_multiplier_bp,
             start_date=member.start_date,
             leaving_date=member.leaving_date,
             charge_rate=shown.charge_rate if shown else None,
@@ -238,6 +243,13 @@ class StaffUpdate(RequestModel):
     working_minutes_per_day: WorkingMinutes | None = None
     working_days: list[int] | None = Field(default=None, min_length=1, max_length=7)
     chargeable_target_bp: TargetBp | None = None
+    overtime_multiplier_bp: int | None = Field(
+        default=None,
+        ge=10000,
+        le=100000,
+        description="Their own overtime multiplier in basis points (15000 = 1.5x); null clears "
+        "it, so the practice's applies",
+    )
     start_date: date | None = None
     leaving_date: date | None = None
 

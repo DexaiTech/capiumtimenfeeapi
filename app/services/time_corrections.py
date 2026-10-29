@@ -379,6 +379,7 @@ class TimeCorrectionService:
                         client.id if client else None,
                         job.id if job else None,
                         new_date,
+                        overtime=entry.is_overtime,
                     )
                 ],
             )

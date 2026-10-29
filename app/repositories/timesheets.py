@@ -217,6 +217,26 @@ class TimesheetRepository:
         )
         return list((await self.session.execute(stmt)).scalars())
 
+    async def lock_entries(
+        self, organization_id: uuid.UUID, timesheet_id: uuid.UUID
+    ) -> list[TimeEntry]:
+        """The sheet's entries, locked (id order)."""
+        stmt = (
+            select(TimeEntry)
+            .where(
+                TimeEntry.organization_id == organization_id,
+                TimeEntry.timesheet_id == timesheet_id,
+            )
+            .order_by(TimeEntry.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        return list((await self.session.execute(stmt)).scalars())
+
+    async def delete(self, sheet: Timesheet) -> None:
+        await self.session.delete(sheet)
+        await self.session.flush()
+
     async def list_page(
         self,
         organization_id: uuid.UUID,

@@ -1,8 +1,8 @@
 """Period locks: the day up to which a practice has closed its time, expenses and WIP.
 
-* ``locked_periods``: one row per locked month, quarter or calendar year (``legacy`` rows hold a
-  lock that was set through a free date before periods existed). A day is locked when it lies in
-  any row. Unlocking a period deletes its row.
+* ``locked_periods``: one row per locked week, month, quarter or accounting year (``legacy`` rows
+  hold a lock that was set through a free date before periods existed). A day is locked when it
+  lies in any row. Unlocking a period deletes its row.
 * ``period_locks``: one row per practice, kept as the serialisation point. Every write that
   creates, edits or deletes dated time, expense or WIP data reads it ``FOR SHARE``
   (``app/services/period_locks.py``) and a lock or an unlock takes it ``FOR UPDATE``, so a change
@@ -33,7 +33,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.db.base import Base, IdMixin, OrgScopedMixin, TimestampMixin
 
 EventType = Literal["locked", "reopened"]
-PeriodType = Literal["month", "quarter", "year", "legacy"]
+PeriodType = Literal["week", "month", "quarter", "year", "legacy"]
 
 
 class PeriodLock(Base, IdMixin, OrgScopedMixin, TimestampMixin):
@@ -49,12 +49,12 @@ class PeriodLock(Base, IdMixin, OrgScopedMixin, TimestampMixin):
 
 
 class LockedPeriod(Base, IdMixin, OrgScopedMixin):
-    """A locked month, quarter or calendar year (both ends inclusive)."""
+    """A locked week, month, quarter or accounting year (both ends inclusive)."""
 
     __tablename__ = "locked_periods"
     __table_args__ = (
         CheckConstraint(
-            "period_type IN ('month', 'quarter', 'year', 'legacy')", name="period_type"
+            "period_type IN ('week', 'month', 'quarter', 'year', 'legacy')", name="period_type"
         ),
         CheckConstraint("start_date <= end_date", name="range"),
         UniqueConstraint(
@@ -92,7 +92,7 @@ class PeriodLockEvent(Base, IdMixin, OrgScopedMixin):
         CheckConstraint("reason IS NULL OR length(reason) BETWEEN 1 AND 500", name="reason"),
         CheckConstraint("event_type <> 'reopened' OR reason IS NOT NULL", name="reopen_reason"),
         CheckConstraint(
-            "period_type IS NULL OR (period_type IN ('month', 'quarter', 'year', 'legacy') "
+            "period_type IS NULL OR (period_type IN ('week', 'month', 'quarter', 'year', 'legacy') "
             "AND period_start IS NOT NULL AND period_end IS NOT NULL)",
             name="period",
         ),

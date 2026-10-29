@@ -6,7 +6,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
-from app.db.models import LockedPeriod, PeriodLockEvent
+from app.db.models import LockedPeriod, Organization, PeriodLockEvent
+from app.db.models.organization import LockGranularity
 from app.db.models.period_locks import EventType, PeriodType
 from app.schemas.common import RequestModel
 from app.utils.lock_periods import period_label
@@ -28,11 +29,15 @@ class PeriodLockEventRead(BaseModel):
     id: uuid.UUID = Field(description="Id of the event")
     event_type: EventType = Field(description="`locked` or `reopened` (unlocked)")
     period_type: PeriodType | None = Field(
-        description="`month`, `quarter`, `year` or `legacy`; null on events from before periods"
+        description=(
+            "`week`, `month`, `quarter`, `year` or `legacy`; null on events from before periods"
+        )
     )
     period_start: date | None = Field(description="First day of the period")
     period_end: date | None = Field(description="Last day of the period")
-    period_label: str | None = Field(description="`March 2026`, `Q1 2026`, `2026`")
+    period_label: str | None = Field(
+        description="`Week of 06/04/2026`, `March 2026`, `Q1 2026`, `2026`"
+    )
     previous_locked_through: date | None = Field(
         description="Events from before periods only: the single lock date before the event"
     )
@@ -68,16 +73,16 @@ class PeriodLockEventRead(BaseModel):
 
 
 class LockedPeriodRead(BaseModel):
-    """One locked month, quarter or year."""
+    """One locked week, month, quarter or year."""
 
     id: uuid.UUID = Field(description="Id of the lock: pass it to unlock the period")
     period_type: PeriodType = Field(
-        description="`month`, `quarter` or `year`; `legacy` is a lock set through a date before "
-        "periods existed (it can be unlocked, not created)"
+        description="`week`, `month`, `quarter` or `year`; `legacy` is a lock set through a date "
+        "before periods existed (it can be unlocked, not created)"
     )
     start_date: date = Field(description="First locked day")
     end_date: date = Field(description="Last locked day (inclusive)")
-    label: str = Field(description="`March 2026`, `Q1 2026`, `2026`")
+    label: str = Field(description="`Week of 06/04/2026`, `March 2026`, `Q1 2026`, `2026`")
     reason: str | None = Field(description="Note given when it was locked")
     locked_by: uuid.UUID | None = Field(description="Who locked it")
     locked_by_name: str | None = Field(description="Full name of that person")
@@ -98,13 +103,38 @@ class LockedPeriodRead(BaseModel):
         )
 
 
+class PeriodLockSettingsRead(BaseModel):
+    """How the practice locks: the length of a lock and when its accounting year starts."""
+
+    granularity: LockGranularity = Field(
+        description="`weekly` (the default), `monthly`, `quarterly` or `annually`: a new lock is "
+        "exactly one period of this length"
+    )
+    financial_year_start_month: int = Field(description="Month the accounting year starts (1-12)")
+    financial_year_start_day: int = Field(description="Day of that month (1-28)")
+    configured: bool = Field(
+        description="False until the practice has made its choice (the first-time set-up)"
+    )
+
+    @classmethod
+    def from_model(cls, organization: Organization) -> "PeriodLockSettingsRead":
+        return cls(
+            granularity=organization.period_lock_granularity,
+            financial_year_start_month=organization.financial_year_start_month,
+            financial_year_start_day=organization.financial_year_start_day,
+            configured=organization.period_lock_configured,
+        )
+
+
 class PeriodLockRead(BaseModel):
     """The practice's current locks."""
 
+    settings: PeriodLockSettingsRead = Field(description="How new locks are made")
     periods: list[LockedPeriodRead] = Field(
         description=(
-            "The locked periods, oldest first. Time, expenses and WIP dated inside any of them "
-            "cannot be created, edited or deleted. Empty when nothing is locked"
+            "The locked periods, oldest first, of any length (locks made under an earlier "
+            "setting stay). Time, expenses and WIP dated inside any of them cannot be created, "
+            "edited or deleted. Empty when nothing is locked"
         )
     )
     last_event: PeriodLockEventRead | None = Field(
@@ -113,21 +143,89 @@ class PeriodLockRead(BaseModel):
 
 
 class PeriodLockCreate(RequestModel):
-    period_type: Literal["month", "quarter", "year"] = Field(
-        description="What to lock: a calendar `month`, `quarter` or `year`"
+    period_type: Literal["week", "month", "quarter", "year"] = Field(
+        description="What to lock; must be the practice's granularity (`weekly`: `week`, "
+        "`monthly`: `month`, `quarterly`: `quarter`, `annually`: `year`)"
     )
-    year: int = Field(ge=EARLIEST_LOCK_YEAR, le=LATEST_LOCK_YEAR, description="The calendar year")
+    year: int = Field(
+        ge=EARLIEST_LOCK_YEAR,
+        le=LATEST_LOCK_YEAR,
+        description="The accounting year, named by the calendar year it starts in",
+    )
     period: int | None = Field(
         default=None,
         ge=1,
-        le=12,
-        description="The month (1-12) or quarter (1-4); omitted for a year",
+        le=53,
+        description="The week (1-53), month (1-12) or quarter (1-4) of the accounting year; "
+        "omitted for a year",
     )
     reason: str | None = Field(
         default=None, max_length=500, description="Optional note kept in the history"
     )
 
     _blank = field_validator("reason", mode="before")(_blank_to_none)
+
+
+class PeriodLockSettingsUpdate(RequestModel):
+    granularity: LockGranularity = Field(
+        description="`weekly`, `monthly`, `quarterly` or `annually`"
+    )
+    financial_year_start_month: int | None = Field(
+        default=None, ge=1, le=12, description="Month the accounting year starts; default as is"
+    )
+    financial_year_start_day: int | None = Field(
+        default=None, ge=1, le=28, description="Day of that month (1-28); default as is"
+    )
+
+
+class LockPeriodRow(BaseModel):
+    """One period of the accounting year and whether it is locked."""
+
+    period_type: Literal["week", "month", "quarter", "year"] = Field(
+        description="Send with `year` and `period` to `POST /period-locks` to lock it"
+    )
+    year: int = Field(description="The accounting year it belongs to")
+    period: int = Field(description="Its number in the year (week 1-53, month 1-12, quarter 1-4)")
+    start_date: date = Field(description="First day")
+    end_date: date = Field(description="Last day (inclusive)")
+    label: str = Field(description="`Week of 06/04/2026`, `March 2026`, `Q1 2026`, `2026`")
+    status: Literal["open", "locked", "blocked", "future"] = Field(
+        description=(
+            "`locked`: this period is locked (`lock_id` unlocks it); `blocked`: another lock "
+            "overlaps it (`blocked_by`); `future`: it has not ended, so it cannot be locked yet; "
+            "`open`"
+        )
+    )
+    lock_id: uuid.UUID | None = Field(description="The lock to pass to unlock; when `locked`")
+    blocked_by: str | None = Field(description="Label of the overlapping lock; when `blocked`")
+    locked_at: datetime | None = Field(description="When it was locked (UTC); when `locked`")
+    locked_by_name: str | None = Field(description="Who locked it; when `locked`")
+
+
+class LockYearSummary(BaseModel):
+    year: int = Field(description="The accounting year")
+    label: str = Field(description="`2026`, or `2026/27` when the year starts after 1 January")
+    start_date: date
+    end_date: date
+    locked: int = Field(description="Periods of the year that are locked")
+    total: int = Field(description="Periods of the year")
+
+
+class PeriodLockCalendar(BaseModel):
+    """The periods of one accounting year, for the lock screen."""
+
+    settings: PeriodLockSettingsRead
+    year: int = Field(description="The accounting year shown")
+    label: str
+    start_date: date
+    end_date: date
+    periods: list[LockPeriodRow] = Field(
+        description="Every period of the year of the practice's granularity, in date order "
+        "(52 or 53 weeks, 12 months, 4 quarters or the year)"
+    )
+    years: list[LockYearSummary] = Field(
+        description="The accounting years that can be shown, newest first, with their lock counts"
+    )
 
 
 class PeriodLockReopen(RequestModel):

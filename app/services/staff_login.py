@@ -65,6 +65,7 @@ _PROFILE = (
     "working_days",
     "weekly_capacity_minutes",
     "chargeable_target_bp",
+    "overtime_multiplier_bp",
     "start_date",
     "leaving_date",
 )

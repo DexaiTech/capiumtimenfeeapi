@@ -2,7 +2,7 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 
 from app.dependencies.common import ContextDep, SessionDep, SettingsDep
 from app.dependencies.organization import OrgContextDep
@@ -14,6 +14,7 @@ from app.schemas.email_templates import (
     EmailTemplateWrite,
 )
 from app.services.email_templates import EmailTemplateService
+from app.services.template_catalogue import Audience
 
 router = APIRouter(prefix="/organizations/{organization_id}", tags=["Email templates"])
 
@@ -39,14 +40,21 @@ _FIELDS = (
     description=(
         "Every template of the catalogue (the notification emails and the practice-facing "
         "system emails) with its effective subject and bodies: the practice's own version when "
-        "`customised`, else the built-in one. Each lists its allowed merge fields." + _ACCESS
+        "`customised`, else the built-in one. Each lists its allowed merge fields and its "
+        "`audience`: `external` for the emails sent to clients, `internal` for those sent to "
+        "the team; `audience` filters the list." + _ACCESS
     ),
     responses=error_responses(403, 404),
 )
 async def list_email_templates(
-    org: OrgContextDep, service: TemplateServiceDep
+    org: OrgContextDep,
+    service: TemplateServiceDep,
+    audience: Annotated[
+        Audience | None,
+        Query(description="Only the emails for clients (`external`) or the team (`internal`)"),
+    ] = None,
 ) -> ApiResponse[list[EmailTemplateRead]]:
-    return ok(await service.list_templates(org))
+    return ok(await service.list_templates(org, audience))
 
 
 @router.get(

@@ -19,6 +19,10 @@ cost rate is the person's ``staff`` cost rule, else the grade's cost rule or def
 else 0, in either mode.
 
 The entry's service is the service of its job. The person's grade is their current grade.
+
+Overtime: in a practice that has it on, a query marked ``overtime`` is priced at the rates above
+times the person's own multiplier, else the practice's (basis points, 15000 = 1.5x), rounded half
+up, for the charge-out and the cost rate alike. Everything else is priced as before.
 """
 
 import uuid
@@ -64,6 +68,8 @@ class RateQuery:
     entry_date: date
     # Overrides the job's service (what-if previews); null = the job's own service.
     service_id: uuid.UUID | None = None
+    # Overtime time; ignored unless the practice has overtime on.
+    overtime: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -141,6 +147,11 @@ def _step(
     )
 
 
+def _times_bp(rate: int, bp: int) -> int:
+    """``rate`` x ``bp`` / 10000, rounded half up."""
+    return (rate * bp + 5000) // 10000
+
+
 class RateBook:
     """Everything needed to price many queries, loaded with four queries in total."""
 
@@ -151,8 +162,12 @@ class RateBook:
         grades: dict[uuid.UUID, uuid.UUID | None],
         defaults: dict[uuid.UUID, tuple[int | None, int | None]],
         rules: dict[RuleKey, list[RuleRow]],
+        overtime: dict[uuid.UUID, int | None] | None = None,
     ) -> None:
         self.default_rate = organization.default_charge_rate
+        self.overtime_enabled = organization.overtime_enabled
+        self.overtime_default_bp = organization.overtime_multiplier_bp
+        self.overtime = overtime or {}
         self.rate_mode = organization.rate_mode
         self.jobs = jobs
         self.grades = grades
@@ -176,7 +191,12 @@ class RateBook:
         rules = await repo.rules(
             org_id, client_ids=client_ids, user_ids=user_ids, grade_ids=grade_ids
         )
-        return cls(organization, jobs, grades, defaults, rules)
+        overtime = None
+        if organization.overtime_enabled and any(q.overtime for q in queries):
+            overtime = await repo.member_overtime(
+                org_id, {q.user_id for q in queries if q.overtime}
+            )
+        return cls(organization, jobs, grades, defaults, rules, overtime)
 
     def context(self, query: RateQuery) -> _Context:
         job = self.jobs.get(query.job_id) if query.job_id else None
@@ -331,9 +351,14 @@ class RateBook:
         charge = next(s for s in self.charge_steps(c) if s.exists)
         cost = next(s for s in self.cost_steps(c) if s.exists)
         assert charge.rate is not None and cost.rate is not None
+        charge_rate, cost_rate = charge.rate, cost.rate
+        if query.overtime and self.overtime_enabled:
+            bp = self.overtime.get(query.user_id) or self.overtime_default_bp
+            charge_rate = _times_bp(charge_rate, bp)
+            cost_rate = _times_bp(cost_rate, bp)
         return ResolvedRate(
-            charge.rate,
-            cost.rate,
+            charge_rate,
+            cost_rate,
             charge.source,
             cost.source,
             charge.rule.id if charge.rule else None,

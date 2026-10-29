@@ -66,6 +66,13 @@ class TimeEntryRead(BaseModel):
         ),
     )
     is_billable: bool
+    is_overtime: bool = Field(
+        default=False,
+        description=(
+            "Marked as overtime: priced at the normal rates times the overtime multiplier "
+            "(`charge_rate` and `cost_rate` include it). Only in a practice with overtime on"
+        ),
+    )
     charge_rate: int = Field(description="Snapshot, minor units per hour")
     charge_value: int = Field(description="minutes x charge_rate / 60, rounded half up")
     cost_rate: int | None = Field(description="Null without rate.read")
@@ -119,6 +126,7 @@ class TimeEntryRead(BaseModel):
             description=e.description,
             internal_note=e.internal_note if show_note else None,
             is_billable=e.is_billable,
+            is_overtime=e.is_overtime,
             charge_rate=e.charge_rate,
             charge_value=e.charge_value,
             cost_rate=e.cost_rate if show_cost else None,
@@ -157,6 +165,13 @@ class TimeEntryCreate(RequestModel):
             "with no client; true otherwise"
         ),
     )
+    is_overtime: bool | None = Field(
+        default=None,
+        description=(
+            "Overtime: priced at the normal rates times the multiplier. Default false; true "
+            "needs overtime switched on for the practice (422)"
+        ),
+    )
 
     _note = field_validator("internal_note")(blank_note_to_none)
 
@@ -176,12 +191,15 @@ class TimeEntryUpdate(RequestModel):
     description: Description | None = None
     internal_note: InternalNote | None = Field(default=None, description=NOTE_DESCRIPTION)
     is_billable: bool | None = None
+    is_overtime: bool | None = Field(
+        default=None, description="Overtime; true needs overtime switched on for the practice"
+    )
 
     _note = field_validator("internal_note")(blank_note_to_none)
 
     @model_validator(mode="after")
     def _validate(self) -> Self:
-        for field in ("entry_date", "minutes"):
+        for field in ("entry_date", "minutes", "is_overtime"):
             if field in self.model_fields_set and getattr(self, field) is None:
                 raise ValueError(f"{field}: This field cannot be null")
         return self

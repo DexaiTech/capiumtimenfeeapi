@@ -134,6 +134,8 @@ _FIELDS = (
 MERGE_FIELDS: dict[str, MergeField] = {field.name: field for field in _FIELDS}
 
 type Category = Literal["notification", "system"]
+# Who reads the email: the practice's clients ("external") or its own people ("internal").
+type Audience = Literal["external", "internal"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -148,6 +150,7 @@ class TemplateSpec:
     text: str
     # Fields a template must use (a one-time link, without which the email is useless).
     required: tuple[str, ...] = ()
+    audience: Audience = "internal"
 
 
 _H1 = '<h1 style="font-size:20px;margin:0 0 12px;">'
@@ -497,6 +500,7 @@ _SYSTEM: tuple[TemplateSpec, ...] = (
         name="Invoice email",
         description="The email that carries an invoice PDF to the client.",
         category="system",
+        audience="external",
         fields=(
             "recipient_name",
             "practice_name",
@@ -612,6 +616,7 @@ _SYSTEM: tuple[TemplateSpec, ...] = (
         name="Payment reminder (to the client)",
         description="The reminder emailed to a client about its overdue invoices.",
         category="system",
+        audience="external",
         fields=(
             "recipient_name",
             "practice_name",
@@ -649,6 +654,7 @@ _SYSTEM: tuple[TemplateSpec, ...] = (
         name="Payment due soon (to the client)",
         description="The friendly note emailed to a client before its invoices fall due.",
         category="system",
+        audience="external",
         fields=(
             "recipient_name",
             "practice_name",
@@ -684,6 +690,7 @@ _SYSTEM: tuple[TemplateSpec, ...] = (
         name="Final payment notice (to the client)",
         description="The firmer notice emailed to a client whose invoices are still unpaid.",
         category="system",
+        audience="external",
         fields=(
             "recipient_name",
             "practice_name",
@@ -721,6 +728,7 @@ _SYSTEM: tuple[TemplateSpec, ...] = (
         name="Client statement",
         description="The email that carries a client's statement of account (PDF attached).",
         category="system",
+        audience="external",
         fields=(
             "recipient_name",
             "practice_name",

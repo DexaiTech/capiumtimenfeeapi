@@ -266,17 +266,18 @@ class ClientRepository:
         stmt = stmt.execution_options(populate_existing=True)
         return (await self.session.execute(stmt)).scalar_one_or_none()
 
-    async def code_taken(
+    async def code_holder(
         self, organization_id: uuid.UUID, code: str, exclude_id: uuid.UUID | None = None
-    ) -> bool:
-        stmt = select(Client.id).where(
+    ) -> Client | None:
+        """The live (not deleted) client using ``code``, if any."""
+        stmt = select(Client).where(
             Client.organization_id == organization_id,
             Client.code == code,
             Client.deleted_at.is_(None),
         )
         if exclude_id is not None:
             stmt = stmt.where(Client.id != exclude_id)
-        return (await self.session.execute(stmt.limit(1))).first() is not None
+        return (await self.session.execute(stmt.limit(1))).scalar_one_or_none()
 
     async def codes_taken(self, organization_id: uuid.UUID, codes: set[str]) -> set[str]:
         if not codes:

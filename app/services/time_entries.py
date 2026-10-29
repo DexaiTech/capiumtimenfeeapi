@@ -99,6 +99,7 @@ class _Draft:
     names: dict[str, Any] = field(default_factory=dict)
     internal_note: str | None = None
     task_id: uuid.UUID | None = None
+    is_overtime: bool = False
 
 
 def _f(prefix: str, name: str) -> str:
@@ -367,6 +368,7 @@ class TimeEntryService:
             if job is not None:
                 ensure_job_open(job)
             billable = self.resolve_billable(item.is_billable, job, activity, client, prefix)
+            overtime = self.resolve_overtime(org, item.is_overtime, prefix)
             drafts.append(
                 _Draft(
                     user_id=owner,
@@ -385,6 +387,7 @@ class TimeEntryService:
                     },
                     internal_note=item.internal_note,
                     task_id=task.id if task else None,
+                    is_overtime=overtime,
                 )
             )
 
@@ -408,7 +411,10 @@ class TimeEntryService:
         rates = await charge_rates.resolve_many(
             self.session,
             org,
-            [RateQuery(d.user_id, d.client_id, d.job_id, d.entry_date) for d in drafts],
+            [
+                RateQuery(d.user_id, d.client_id, d.job_id, d.entry_date, overtime=d.is_overtime)
+                for d in drafts
+            ],
         )
         ids: list[uuid.UUID] = []
         for draft, rate in zip(drafts, rates, strict=True):
@@ -426,6 +432,7 @@ class TimeEntryService:
                 description=draft.description,
                 internal_note=draft.internal_note,
                 is_billable=draft.is_billable,
+                is_overtime=draft.is_overtime,
                 charge_rate=rate.charge_rate,
                 cost_rate=rate.cost_rate,
                 charge_value=time_value(draft.minutes, rate.charge_rate),
@@ -565,6 +572,11 @@ class TimeEntryService:
                 )
                 self._ensure_day_cap(logged.get(new_date, 0) + new_minutes, new_date, "")
 
+            overtime = (
+                self.resolve_overtime(org, data.is_overtime, "")
+                if "is_overtime" in fields
+                else entry.is_overtime
+            )
             [rate] = await charge_rates.resolve_many(
                 self.session,
                 org,
@@ -574,6 +586,7 @@ class TimeEntryService:
                         client.id if client else None,
                         job.id if job else None,
                         new_date,
+                        overtime=overtime,
                     )
                 ],
             )
@@ -586,6 +599,7 @@ class TimeEntryService:
                 "activity_code_id": activity.id if activity else None,
                 "description": data.description if "description" in fields else entry.description,
                 "is_billable": billable,
+                "is_overtime": overtime,
                 "timesheet_id": new_sheet.id,
                 "charge_rate": rate.charge_rate,
                 "cost_rate": rate.cost_rate,
@@ -753,6 +767,15 @@ class TimeEntryService:
         return requested
 
     @staticmethod
+    def resolve_overtime(org: Organization, requested: bool | None, prefix: str) -> bool:
+        """Overtime is marked only in a practice that has it on."""
+        if requested and not org.overtime_enabled:
+            raise ValidationError.for_field(
+                _f(prefix, "is_overtime"), "Overtime is not switched on for this practice."
+            )
+        return bool(requested)
+
+    @staticmethod
     def _ensure_sheet_editable(sheet: Timesheet) -> None:
         if sheet.status not in EDITABLE_SHEET_STATUSES:
             raise TimeLockedError(
@@ -807,6 +830,7 @@ class TimeEntryService:
                 **({"task_id": str(entry.task_id)} if entry.task_id else {}),
                 "job_id": str(entry.job_id) if entry.job_id else None,
                 "is_billable": entry.is_billable,
+                **({"is_overtime": True} if entry.is_overtime else {}),
                 "charge_rate": entry.charge_rate,
                 "charge_value": entry.charge_value,
                 **extra,

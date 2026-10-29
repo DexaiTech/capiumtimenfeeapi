@@ -20,10 +20,15 @@ from app.repositories.time_entries import TimeEntryRepository
 from app.repositories.time_refs import TimeReferenceRepository
 from app.repositories.timesheets import SheetTotals, TimesheetRepository
 from app.schemas.time import DayTotal, TimeEntryRead, TimesheetDetail, TimesheetRead
-from app.services import audit, notification_events
+from app.services import audit, notification_events, period_locks
+from app.services.job_budget_alerts import refresh_job_budgets
 from app.services.policy import OrgContext, has_permission
 from app.services.time_entries import TimeEntryService, show_cost
-from app.services.time_rules import InvalidTransitionError, practice_now
+from app.services.time_rules import (
+    EDITABLE_SHEET_STATUSES,
+    InvalidTransitionError,
+    practice_now,
+)
 from app.services.time_visibility import can_see_note
 from app.utils.pagination import Page, PageParams
 
@@ -251,6 +256,56 @@ class TimesheetService:
             await self._save(ctx, rctx, "timesheet.reopened", sheet, "approved")
             result = await self._detail(ctx, sheet)
         return result
+
+    async def delete(self, ctx: OrgContext, timesheet_id: uuid.UUID, rctx: RequestContext) -> None:
+        """Delete an ``open`` or ``rejected`` sheet together with its own time. Nothing is
+        deleted when any of that time is billed, in a draft or written off, or in a locked
+        period."""
+        async with unit_of_work(self.session):
+            sheet = await self._lock(ctx, timesheet_id)
+            self.time.ensure_can_write(ctx, sheet.user_id)
+            self._ensure_status(sheet, EDITABLE_SHEET_STATUSES, "deleted")
+            entries = await self.sheets.lock_entries(ctx.organization_id, sheet.id)
+            if any(e.billing_status != "unbilled" for e in entries):
+                raise TimesheetBilledError(
+                    "Some of this timesheet's time has been billed or written off; "
+                    "it cannot be deleted."
+                )
+            await period_locks.assert_open_many(
+                self.session, ctx.organization_id, {e.entry_date for e in entries}, "time"
+            )
+            totals = (await self.sheets.totals(ctx.organization_id, [sheet.id])).get(
+                sheet.id, SheetTotals()
+            )
+            for entry in entries:
+                await self.time._audit(ctx, rctx, "time_entry.deleted", entry, {})
+                await self.entries.delete(entry)
+            names = await self.refs.user_names(ctx.organization_id, [sheet.user_id])
+            await audit.record(
+                self.session,
+                "timesheet.deleted",
+                ctx=rctx,
+                actor_user_id=ctx.user.id,
+                organization_id=ctx.organization_id,
+                target_type="timesheet",
+                target_id=sheet.id,
+                meta={
+                    "user_id": str(sheet.user_id),
+                    "user_name": names.get(sheet.user_id),
+                    "week_start": sheet.week_start.isoformat(),
+                    "old_status": sheet.status,
+                    "entry_count": totals.entry_count,
+                    "total_minutes": totals.total_minutes,
+                },
+            )
+            await self.sheets.delete(sheet)
+            await refresh_job_budgets(
+                self.session,
+                ctx.organization_id,
+                [e.job_id for e in entries],
+                actor_user_id=ctx.user.id,
+                rctx=rctx,
+            )
 
     # --- Helpers -------------------------------------------------------------------------
 

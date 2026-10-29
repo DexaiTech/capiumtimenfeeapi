@@ -92,6 +92,45 @@ async def test_the_list_has_every_template_with_its_merge_fields(client):
     assert one == cat["budget_alert"]
 
 
+EXTERNAL_KEYS = [
+    "invoice",
+    "client_payment_reminder",
+    "client_payment_upcoming",
+    "client_payment_final_notice",
+    "client_statement",
+]
+
+
+async def test_templates_are_split_into_client_and_team_emails(client):
+    owner, org = await practice(client)
+    everything = ok_data(await client.get(url(org), headers=owner.headers))
+    assert {t["key"]: t["audience"] for t in everything} == {
+        key: "external" if key in EXTERNAL_KEYS else "internal" for key in KEYS
+    }
+    external = ok_data(
+        await client.get(url(org), params={"audience": "external"}, headers=owner.headers)
+    )
+    internal = ok_data(
+        await client.get(url(org), params={"audience": "internal"}, headers=owner.headers)
+    )
+    assert [t["key"] for t in external] == EXTERNAL_KEYS
+    assert [t["key"] for t in internal] == [k for k in KEYS if k not in EXTERNAL_KEYS]
+    one = ok_data(await client.get(url(org, "budget_alert"), headers=owner.headers))
+    assert one["audience"] == "internal"
+    bad = await client.get(url(org), params={"audience": "public"}, headers=owner.headers)
+    assert bad.status_code == 422
+
+
+def test_the_pickers_of_client_emails_only_offer_external_templates():
+    from typing import get_args
+
+    from app.schemas.debtors import ManualReminderTemplate, ReminderTemplate
+    from app.services.statement_sends import TEMPLATE as STATEMENT_TEMPLATE
+
+    for key in (*get_args(ManualReminderTemplate), *get_args(ReminderTemplate), STATEMENT_TEMPLATE):
+        assert TEMPLATES[key].audience == "external", key
+
+
 @pytest.mark.parametrize(
     ("role", "allowed"),
     [

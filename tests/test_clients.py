@@ -614,3 +614,80 @@ async def test_client_vat_default_applies_when_service_has_none(client):
     data = (await client.get(org_url(org, f"/clients/{acme['id']}"), headers=owner.headers)).json()
     assert data["data"]["recurring_fees"]["annual_vat"] == 0
     assert data["data"]["recurring_fees"]["annual_net"] == 12_000
+
+
+# --- Client codes ------------------------------------------------------------------------------
+
+
+async def test_a_deleted_clients_code_can_be_typed_again_on_create_and_edit(client):
+    owner, org = await practice(client)
+    gone = await create_client(client, owner, org, "Gone Ltd", code="ACME")
+    other = await create_client(client, owner, org, "Other Ltd", code="OTHER")
+    deleted = await client.delete(org_url(org, f"/clients/{gone['id']}"), headers=owner.headers)
+    assert deleted.status_code == 200
+    reused = await create_client(client, owner, org, "New Acme Ltd", code="acme")
+    assert reused["code"] == "ACME" and reused["id"] != gone["id"]
+    # The same goes for an existing client being given the code of a deleted one.
+    second = await create_client(client, owner, org, "Second Ltd", code="SECOND")
+    await client.delete(org_url(org, f"/clients/{reused['id']}"), headers=owner.headers)
+    moved = await client.patch(
+        org_url(org, f"/clients/{second['id']}"), headers=owner.headers, json={"code": "ACME"}
+    )
+    assert moved.status_code == 200 and moved.json()["data"]["code"] == "ACME"
+    assert other["code"] == "OTHER"
+    live = await scalar(
+        "SELECT count(*) FROM clients WHERE organization_id = :o AND code = 'ACME'"
+        " AND deleted_at IS NULL",
+        o=org["id"],
+    )
+    assert live == 1
+
+
+async def test_the_sequence_does_not_hand_out_a_live_clients_code_after_deletes(client):
+    owner, org = await practice(client)
+    first = await create_client(client, owner, org, "First")
+    assert first["code"] == "C0001"
+    await client.delete(org_url(org, f"/clients/{first['id']}"), headers=owner.headers)
+    await create_client(client, owner, org, "Typed", code="C0002")
+    assert (await create_client(client, owner, org, "Next"))["code"] == "C0003"
+
+
+async def test_a_taken_code_names_the_client_that_holds_it(client):
+    owner, org = await practice(client)
+    holder = await create_client(client, owner, org, "Acme Ltd", code="ACME")
+    response = await client.post(
+        org_url(org, "/clients"), headers=owner.headers, json={"name": "Copy", "code": "ACME"}
+    )
+    assert response.status_code == 409
+    problem = error(response)
+    assert problem["code"] == "CLIENT_CODE_TAKEN"
+    assert problem["message"] == "The code ACME is already used by Acme Ltd. Choose another code."
+    assert problem["details"] == [
+        {
+            "field": "code",
+            "code": "duplicate",
+            "message": problem["message"],
+            "client_id": holder["id"],
+            "client_name": "Acme Ltd",
+            "client_status": "active",
+        }
+    ]
+
+
+async def test_an_archived_client_keeps_its_code_until_it_is_changed_or_deleted(client):
+    owner, org = await practice(client)
+    old = await create_client(client, owner, org, "Old Ltd", code="OLD")
+    url = org_url(org, f"/clients/{old['id']}")
+    assert (
+        await client.patch(url, headers=owner.headers, json={"status": "archived"})
+    ).status_code == 200
+    body = {"name": "New Ltd", "code": "OLD"}
+    blocked = await client.post(org_url(org, "/clients"), headers=owner.headers, json=body)
+    assert blocked.status_code == 409
+    assert "(archived)" in error(blocked)["message"]
+    assert error(blocked)["details"][0]["client_status"] == "archived"
+    # The accountant frees the code by renumbering the archived client.
+    renumbered = await client.patch(url, headers=owner.headers, json={"code": "OLD-ARCH"})
+    assert renumbered.status_code == 200
+    created = await client.post(org_url(org, "/clients"), headers=owner.headers, json=body)
+    assert created.status_code == 201, created.text

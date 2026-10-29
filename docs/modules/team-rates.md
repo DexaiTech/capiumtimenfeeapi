@@ -389,6 +389,14 @@ preview always shows what saving or re-rating will do: in `grade_only` mode the 
 comes back with `applicable: false` and the reason "This practice prices by grade only: staff rates are not
 used.". Changing the mode never touches recorded entries; they follow it only when they are edited or re-rated.
 
+**Overtime.** The practice setting `overtime_enabled` (default false) and `overtime_multiplier_bp` (basis points,
+default 15000 = 1.5x) switch on time marked `is_overtime` (`POST`/`PATCH /time-entries`; 422 while the setting is
+off). A staff member can have their own multiplier (`overtime_multiplier_bp` on `PATCH /staff/{id}`; null: the
+practice's). An overtime entry is priced at the ladder's charge rate **and** cost rate times the multiplier, rounded
+half up, so `charge_rate`, `cost_rate` and the values on the entry already include it; the rate source is unchanged.
+The same resolver serves saving, corrections and re-rating (an entry keeps its mark and its multiplier). Nothing
+changes for time that is not marked, or while the setting is off.
+
 ## Period rules
 
 * Rules of one kind and scope never overlap: 409 `RATE_OVERLAP` with `details.conflicts` = the rules in the

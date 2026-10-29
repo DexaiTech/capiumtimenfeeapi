@@ -1,5 +1,10 @@
 """Helpers for the period-lock tests: dates relative to the practice's today, locking through the
-API or straight in the database, and the rows the lock keeps."""
+API or straight in the database, and the rows the lock keeps.
+
+A practice locks one length of period (weekly unless it chose otherwise): ``lock_period`` switches
+the practice to the length of the period it is asked to lock first, so tests that only need a
+locked period do not repeat the set-up.
+"""
 
 import uuid
 from datetime import date
@@ -18,6 +23,7 @@ __all__ = [
     "lock_period",
     "locked_periods",
     "org_url",
+    "set_granularity",
     "set_lock",
     "today",
     "unlock_period",
@@ -33,6 +39,31 @@ def today(org: dict) -> date:
     return today_in(org["timezone"])
 
 
+_GRANULARITY = {"week": "weekly", "month": "monthly", "quarter": "quarterly", "year": "annually"}
+
+
+async def set_granularity(
+    org: dict, granularity: str, start: tuple[int, int] = (1, 1), *, configured: bool = True
+) -> None:
+    """Set how the practice locks straight in the database."""
+    async with get_sessionmaker()() as session:
+        await session.execute(
+            text(
+                "UPDATE organizations SET period_lock_granularity = :g, "
+                "financial_year_start_month = :m, financial_year_start_day = :d, "
+                "period_lock_configured = :c WHERE id = :org"
+            ),
+            {
+                "g": granularity,
+                "m": start[0],
+                "d": start[1],
+                "c": configured,
+                "org": uuid.UUID(org["id"]),
+            },
+        )
+        await session.commit()
+
+
 async def lock_period(
     client: AsyncClient,
     actor: Actor,
@@ -40,8 +71,12 @@ async def lock_period(
     period_type: str,
     year: int,
     period: int | None = None,
+    *,
+    align: bool = True,
     **body: Any,
 ) -> Response:
+    if align and period_type in _GRANULARITY:
+        await set_granularity(org, _GRANULARITY[period_type])
     payload: dict[str, Any] = {"period_type": period_type, "year": year, **body}
     if period is not None:
         payload["period"] = period

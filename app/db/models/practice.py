@@ -1,4 +1,4 @@
-"""Practice set-up: VAT rates, services, activity codes, grades and number sequences.
+"""Practice set-up: VAT rates, services, activity codes, grades, segments and number sequences.
 
 Conventions shared by every business table:
 
@@ -24,6 +24,7 @@ from sqlalchemy import (
     SmallInteger,
     Text,
     UniqueConstraint,
+    func,
     text,
 )
 from sqlalchemy.dialects.postgresql import UUID
@@ -304,3 +305,62 @@ __all__ = [
     "ServiceActivityCode",
     "VatRate",
 ]
+
+
+class Segment(Base, IdMixin, OrgScopedMixin, TimestampMixin):
+    """A client segment (Gold, Retail, ...) the practice defines in its settings.
+
+    Clients keep the segment as text (``clients.segment``), matched to a row here ignoring case:
+    a value nobody defined still works, it is just not listed. Renaming a segment renames it on
+    its clients.
+    """
+
+    __tablename__ = "segments"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "id", name="uq_segments_organization_id_id"),
+        CheckConstraint("length(name) BETWEEN 1 AND 40", name="name_length"),
+        CheckConstraint(
+            "description IS NULL OR length(description) BETWEEN 1 AND 500",
+            name="description_length",
+        ),
+        Index(
+            "uq_segments_organization_id_name_lower",
+            "organization_id",
+            text("lower(name)"),
+            unique=True,
+        ),
+    )
+
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+
+
+class StaffSegment(Base, IdMixin, OrgScopedMixin):
+    """A staff member looking after the clients of a segment."""
+
+    __tablename__ = "staff_segments"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["organization_id", "user_id"],
+            ["organization_members.organization_id", "organization_members.user_id"],
+            name="fk_staff_segments_organization_id_user_id_members",
+        ),
+        ForeignKeyConstraint(
+            ["organization_id", "segment_id"],
+            ["segments.organization_id", "segments.id"],
+            name="fk_staff_segments_organization_id_segment_id_segments",
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint(
+            "organization_id", "user_id", "segment_id", name="uq_staff_segments_user_id_segment_id"
+        ),
+        Index("ix_staff_segments_organization_id_segment_id", "organization_id", "segment_id"),
+    )
+
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    segment_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )

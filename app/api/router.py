@@ -42,6 +42,7 @@ from app.api.v1 import (
     recurring,
     reports,
     roles,
+    segments,
     settings,
     staff,
     statement_sends,
@@ -76,6 +77,7 @@ api_router.include_router(grades.router)
 api_router.include_router(roles.permissions_router)
 api_router.include_router(roles.router)
 api_router.include_router(settings.router)
+api_router.include_router(segments.router)
 api_router.include_router(period_locks.router)
 api_router.include_router(onboarding.router)
 api_router.include_router(rates.router)
