@@ -10,7 +10,8 @@ change is a row of the append-only history and an audit entry.
 Enforcement is :func:`assert_open` / :func:`assert_open_many`. Every write path that creates,
 edits or deletes dated time, expense or WIP data calls one of them inside its unit of work,
 before it writes (docs/modules/period-locks.md lists the call sites). Reads, invoices and
-payments are never blocked. :func:`locked_dates` serves re-rating, which skips locked time.
+payments are never blocked. :func:`locked_dates` serves re-rating, which skips locked time;
+:func:`locked_through` tells the time reads which entries lie in a locked period.
 """
 
 import calendar
@@ -147,6 +148,26 @@ async def locked_dates(
         period = _covering(periods, day)
         if period is not None:
             result[day] = f"Period locked until {_uk(period.end_date)}"
+    return result
+
+
+async def locked_through(
+    session: AsyncSession, organization_id: uuid.UUID, days: Collection[date]
+) -> dict[date, date]:
+    """``{day: last day of its locked period}`` for each of ``days`` that lies in a locked period.
+
+    For reads (the ``period_locked_through`` of a time entry, so the UI can say why it cannot be
+    edited or deleted before it tries): nothing is share-locked. Days that are not locked are left
+    out.
+    """
+    if not days:
+        return {}
+    periods = await PeriodLockRepository(session).list_periods(organization_id)
+    result: dict[date, date] = {}
+    for day in set(days):
+        period = _covering(periods, day)
+        if period is not None:
+            result[day] = period.end_date
     return result
 
 

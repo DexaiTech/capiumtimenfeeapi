@@ -183,7 +183,9 @@ activity_name, description, internal_note` (`null` unless the caller owns the en
 `time.read_all` or `time.manage_all`), `is_billable, charge_rate, charge_value, cost_rate,
 cost_value` (cost fields `null` without `rate.read`), `rate_source` (the level of the rate
 ladder that priced the entry, see `docs/modules/team-rates.md`; `null` for entries saved before
-it existed), `billing_status, is_locked, created_by, created_at, updated_at`.
+it existed), `billing_status, is_locked, period_locked_through` (the last day of the locked period
+the entry's date lies in, `null` when it is open: such time cannot be edited or deleted; filled in
+by the list, one entry and the day view), `created_by, created_at, updated_at`.
 
 **TimeEntryCreate**: `user_id?, entry_date, minutes (1–1440), client_id?, job_id?,
 activity_code_id?, description?, internal_note? (up to 2000 characters), is_billable?`.

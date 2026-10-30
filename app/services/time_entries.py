@@ -180,10 +180,17 @@ class TimeEntryService:
             params,
         )
         cost = show_cost(ctx)
+        # Which entries lie in a locked period, so the UI can say why they cannot change.
+        locked = await period_locks.locked_through(
+            self.session, ctx.organization_id, {v.entry.entry_date for v in page.items}
+        )
         return Page(
             items=[
                 TimeEntryRead.from_view(
-                    v, show_cost=cost, show_note=can_see_note(ctx, v.entry.user_id)
+                    v,
+                    show_cost=cost,
+                    show_note=can_see_note(ctx, v.entry.user_id),
+                    locked_through=locked.get(v.entry.entry_date),
                 )
                 for v in page.items
             ],
@@ -195,10 +202,13 @@ class TimeEntryService:
         if not views:
             raise NotFoundError("Time entry not found.")
         self.ensure_can_read(ctx, views[0].entry.user_id)
+        day = views[0].entry.entry_date
+        locked = await period_locks.locked_through(self.session, ctx.organization_id, [day])
         return TimeEntryRead.from_view(
             views[0],
             show_cost=show_cost(ctx),
             show_note=can_see_note(ctx, views[0].entry.user_id),
+            locked_through=locked.get(day),
         )
 
     async def week(
