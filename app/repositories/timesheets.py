@@ -5,7 +5,7 @@ from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from datetime import date
 
-from sqlalchemy import and_, case, exists, func, or_, select, update
+from sqlalchemy import ColumnElement, Exists, and_, case, exists, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -33,7 +33,7 @@ class SheetTotals:
 EXEMPT_PERMISSION = "timesheet.exempt"
 
 
-def sheet_counts_as_approved():
+def sheet_counts_as_approved() -> ColumnElement[bool]:
     """A sheet whose time counts as approved: approved, or its owner needs no approval."""
     return or_(Timesheet.status == "approved", Timesheet.approval_exempt.is_(True))
 
@@ -60,7 +60,7 @@ class TimesheetRepository:
             Permission.code == EXEMPT_PERMISSION,
         )
 
-        def own(effect: str):
+        def own(effect: str) -> Exists:
             return exists().where(
                 MemberPermissionOverride.organization_id == Timesheet.organization_id,
                 MemberPermissionOverride.user_id == Timesheet.user_id,
