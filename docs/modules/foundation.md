@@ -107,6 +107,7 @@ target is looked up, so a caller without the permission gets 403 for any id.
 | `invoice_approval_required` | boolean |
 | `mileage_rate` | integer pence per mile, 0–1000 |
 | `expense_markup_bp` | integer basis points, 0–100 000 (1000 = 10%) |
+| `cost_plus_markup_bp` | integer basis points, 0–100 000 (5000 = 50%) |
 | `rate_mode` | `staff_first` or `grade_only` |
 | `country` | ISO 3166 alpha-2, upper case |
 | `vat_number`, `company_number` (≤ 20), `email` (valid address), `phone` (≤ 40), `address_line1`, `address_line2` (≤ 200), `city` (≤ 100), `postcode` (≤ 20), `bank_details` (≤ 500), `invoice_footer` (≤ 1000) | nullable: `null`, `""` or blanks clear them; text is trimmed |
@@ -129,6 +130,7 @@ their own `time_increment_minutes`):
 | `invoice_approval_threshold` | 0 | With approval on, invoices above it (gross) need it; 0 = every invoice |
 | `mileage_rate` | 45 (45p a mile) | The rate a mileage expense is priced at |
 | `expense_markup_bp` | 0 | Basis points added when an expense is recharged to the client |
+| `cost_plus_markup_bp` | 5 000 (50%) | The margin on cost of the "cost plus" basis of the recovery analysis (`docs/modules/reports.md`) |
 | `rate_mode` | `staff_first` | `grade_only` skips the staff-level rate when time is priced (`docs/domain.md`, "Rates") |
 
 Out-of-range values are 422 `VALIDATION_ERROR` with the setting in `details[0].field` (a

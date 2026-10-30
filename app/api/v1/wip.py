@@ -12,8 +12,10 @@ from app.repositories.wip import WipSummaryFilters, WriteOffFilters
 from app.schemas.billing import ClientWipRead, WipClientSummary, WriteOffCreate, WriteOffRead
 from app.schemas.billing_summary import ClientBillingSummary
 from app.schemas.common import ApiResponse, error_responses, ok, ok_page
+from app.schemas.recovery import ClientRecovery
 from app.services.billing_summary import BillingSummaryService
 from app.services.policy import OrgContext
+from app.services.recovery import RecoveryService
 from app.services.wip import WipService
 from app.services.wip_views import WipViewService
 
@@ -32,9 +34,14 @@ def get_billing_summary_service(session: SessionDep) -> BillingSummaryService:
     return BillingSummaryService(session)
 
 
+def get_recovery_service(session: SessionDep) -> RecoveryService:
+    return RecoveryService(session)
+
+
 WipServiceDep = Annotated[WipService, Depends(get_wip_service)]
 ViewServiceDep = Annotated[WipViewService, Depends(get_view_service)]
 SummaryServiceDep = Annotated[BillingSummaryService, Depends(get_billing_summary_service)]
+RecoveryServiceDep = Annotated[RecoveryService, Depends(get_recovery_service)]
 WipReader = Annotated[OrgContext, Depends(require("wip.read"))]
 WipWriter = Annotated[OrgContext, Depends(require("wip.write_off"))]
 
@@ -108,8 +115,10 @@ async def client_wip(
         "would come to (`basis_values`: contract, job, team). Budget against actual is "
         "`actual_cost` (the people who did the work; needs `rate.read`), `budgeted_cost` (the "
         "job's `budget_cost`) and `agreed_price` (the fixed fee, else the fee budget), tracked "
-        "separately. Also returned when nothing can be billed yet, so the hours are always "
-        "visible. Requires `wip.read`."
+        "separately. `recovery` values the time ready to bill at the task rate, at each "
+        "person's own charge-out rate, at cost and at cost plus the practice's `markup_bp`, for "
+        "comparing the invoice being raised with them. Also returned when nothing can be billed "
+        "yet, so the hours are always visible. Requires `wip.read`."
     ),
     responses=error_responses(403, 404),
 )
@@ -117,6 +126,29 @@ async def client_billing_summary(
     client_id: uuid.UUID, org: WipReader, service: SummaryServiceDep
 ) -> ApiResponse[ClientBillingSummary]:
     return ok(await service.client_summary(org, client_id))
+
+
+@router.get(
+    "/clients/{client_id}/recovery",
+    summary="A client's invoices and recovery",
+    description=(
+        "For each job of the client with billable time (and the work without a job), all dates: "
+        "the billable minutes and their invoice value (`invoiced_value` on issued invoices plus "
+        "`to_bill_value`: what a draft bills, else what the job's terms will bill: the fixed fee "
+        "still to bill spread over the unbilled time, or the time's value on an hourly job) "
+        "against the task rate (`task_value`), each person's own charge-out rate "
+        "(`staff_value`) and cost plus the practice's `cost_plus_markup_bp` "
+        "(`cost_plus_value`), with the revenue left on the table on each basis (`*_shortfall`, "
+        "negative for over-recovery) and the recovery (`*_recovery_bp`), plus the client's "
+        "totals. Cost, cost plus and margin need `rate.read` (null otherwise). The figures are "
+        "those of `GET /reports/recovery-analysis` for the client. Requires `wip.read`."
+    ),
+    responses=error_responses(403, 404),
+)
+async def client_recovery(
+    client_id: uuid.UUID, org: WipReader, service: RecoveryServiceDep
+) -> ApiResponse[ClientRecovery]:
+    return ok(await service.client_recovery(org, client_id))
 
 
 @router.post(

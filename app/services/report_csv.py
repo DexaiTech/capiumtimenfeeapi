@@ -161,6 +161,24 @@ _RECOVERY_MEASURES = (
     Column("net_adjustment", "Net write-up/off"),
     Column("recovery_bp", "Recovery %", "bp"),
 )
+_RECOVERY_ANALYSIS_MEASURES = (
+    Column("minutes", "Hours", "hours"),
+    Column("invoiced_value", "Invoiced"),
+    Column("to_bill_value", "Still to bill"),
+    Column("invoice_value", "Invoice value"),
+    Column("task_value", "At task rate"),
+    Column("task_shortfall", "Left on table (task rate)"),
+    Column("task_recovery_bp", "Recovery % (task rate)", "bp"),
+    Column("staff_value", "At staff rates"),
+    Column("staff_shortfall", "Left on table (staff rates)"),
+    Column("staff_recovery_bp", "Recovery % (staff rates)", "bp"),
+    Column("cost_value", "Cost"),
+    Column("cost_plus_value", "Cost plus markup"),
+    Column("cost_plus_shortfall", "Left on table (cost plus)"),
+    Column("cost_plus_recovery_bp", "Recovery % (cost plus)", "bp"),
+    Column("margin_value", "Margin"),
+    Column("margin_bp", "Margin %", "bp"),
+)
 _BILLING_MEASURES = (
     Column("invoice_count", "Invoices", "int"),
     Column("invoiced_net", "Invoiced net"),
@@ -252,6 +270,10 @@ def _recovery_columns(group_by: str | None) -> list[Column]:
     return _grouped(group_by, _RECOVERY_MEASURES, client=group_by == "job")
 
 
+def _recovery_analysis_columns(group_by: str | None) -> list[Column]:
+    return _grouped(group_by, _RECOVERY_ANALYSIS_MEASURES, client=group_by == "job")
+
+
 def _billing_columns(group_by: str | None) -> list[Column]:
     first = "Partner" if group_by == "partner" else "Month"
     return [Column("name", first, "text"), *_BILLING_MEASURES]
@@ -277,6 +299,7 @@ _COLUMNS: dict[str, Callable[[str | None], Sequence[Column]]] = {
     "expenses": _expense_columns,
     "payments": _payment_columns,
     "missing-timesheets": lambda _: _MISSING,
+    "recovery-analysis": _recovery_analysis_columns,
 }
 
 

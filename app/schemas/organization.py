@@ -106,6 +106,10 @@ class OrganizationRead(BaseModel):
         description="Basis points of the normal rate that overtime is paid and charged at "
         "(15000 = 1.5x), unless the staff member has their own"
     )
+    cost_plus_markup_bp: int = Field(
+        description="Basis points added to the cost of the work for the cost-plus value of the "
+        "recovery analysis (5000 = 50%: time that cost 50.00 is worth 75.00)"
+    )
     email: str | None = Field(description="Practice contact email")
     phone: str | None = Field(description="Practice phone number")
     address_line1: str | None = Field(description="Address line 1")
@@ -154,6 +158,7 @@ class OrganizationRead(BaseModel):
             rate_mode=organization.rate_mode,
             overtime_enabled=organization.overtime_enabled,
             overtime_multiplier_bp=organization.overtime_multiplier_bp,
+            cost_plus_markup_bp=organization.cost_plus_markup_bp,
             email=organization.email,
             phone=organization.phone,
             address_line1=organization.address_line1,
@@ -427,6 +432,15 @@ class OrganizationUpdate(RequestModel):
         ge=10000,
         le=100000,
         description="Overtime rate as basis points of the normal rate (10000-100000; 15000 = 1.5x)",
+    )
+    cost_plus_markup_bp: int | None = Field(
+        default=None,
+        ge=0,
+        le=100000,
+        description=(
+            "Basis points (0-100000) added to the cost of the work for the cost-plus value of the "
+            "recovery analysis; 5000 = 50%"
+        ),
     )
     email: EmailStr | None = Field(
         default=None, max_length=254, description="Contact email; null or blank clears it"

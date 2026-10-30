@@ -3,6 +3,7 @@ value. Every method is scoped to one organization."""
 
 import uuid
 from dataclasses import dataclass
+from datetime import date
 from typing import Any
 
 from sqlalchemy import ColumnElement, Integer, and_, case, func, select
@@ -32,6 +33,19 @@ class TimeRollup:
     billed_value: int = 0
     cost_value: int = 0
     ready_cost_value: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class ReadyPiece:
+    """Time ready to bill of one job, person, day and overtime flag."""
+
+    job_id: uuid.UUID | None
+    user_id: uuid.UUID
+    entry_date: date
+    is_overtime: bool
+    minutes: int
+    charge_value: int
+    cost_value: int
 
 
 class BillingSummaryRepository:
@@ -90,6 +104,32 @@ class BillingSummaryRepository:
             wip_time_clause(require_approval),
         )
         return {row[0]: int(row[1]) for row in (await self.session.execute(stmt)).all()}
+
+    async def ready_time_pieces(
+        self, organization_id: uuid.UUID, client_id: uuid.UUID, *, require_approval: bool
+    ) -> list[ReadyPiece]:
+        """The time ready to bill per job, person, day and overtime flag, with its value and cost
+        (the recovery comparison of the invoicing screen values it at the staff rates too)."""
+        keys = (TimeEntry.job_id, TimeEntry.user_id, TimeEntry.entry_date, TimeEntry.is_overtime)
+        stmt = (
+            select(
+                *keys,
+                func.coalesce(func.sum(TimeEntry.minutes), 0),
+                func.coalesce(func.sum(TimeEntry.charge_value), 0),
+                func.coalesce(func.sum(TimeEntry.cost_value), 0),
+            )
+            .where(
+                TimeEntry.organization_id == organization_id,
+                TimeEntry.client_id == client_id,
+                wip_time_clause(require_approval),
+            )
+            .group_by(*keys)
+            .order_by(*keys)
+        )
+        return [
+            ReadyPiece(row[0], row[1], row[2], row[3], int(row[4]), int(row[5]), int(row[6]))
+            for row in (await self.session.execute(stmt)).all()
+        ]
 
     async def disbursements_by_job(
         self, organization_id: uuid.UUID, client_id: uuid.UUID

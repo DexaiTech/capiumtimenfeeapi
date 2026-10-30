@@ -1,4 +1,5 @@
-"""The expenses, payments and missing-timesheets reports (docs/modules/reports.md).
+"""The expenses, payments, missing-timesheets and recovery analysis reports
+(docs/modules/reports.md).
 
 They share the date rules, the filter checks and the paging of ``ReportService``; their figures
 come from the same tables and rules as the screens they summarise (``GET /expenses``,
@@ -16,6 +17,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import AuthorizationError, NotFoundError, ValidationError
 from app.repositories.reports import DateRange, ItemFilter
 from app.repositories.reports_ext import ExpenseFilter, ReportExtRepository
+from app.schemas.recovery import (
+    RecoveryAnalysisFilters,
+    RecoveryAnalysisQuery,
+    RecoveryAnalysisReport,
+    RecoveryAnalysisTotals,
+)
 from app.schemas.reports_ext import (
     MAX_MISSING_WEEKS,
     ExpenseRow,
@@ -37,6 +44,8 @@ from app.schemas.reports_ext import (
 from app.schemas.time_views import MissingTimesheet
 from app.services.expense_access import ExpenseAccess, sees_all
 from app.services.policy import OrgContext, ensure_any, has_permission
+from app.services.recovery import RecoveryService
+from app.services.recovery_values import COST_PERMISSION, Tally, figures
 from app.services.report_paging import window
 from app.services.reports import ReportService, bucket_days, months_between
 from app.services.time_rules import practice_today, week_start_for
@@ -268,6 +277,39 @@ class ExtendedReportService(ReportService):
                 name = _METHOD_NAMES.get(str(key), str(key))
             rows.append(PaymentRow(key=str(key), code=r["code"], name=name, **ids, **measures(r)))
         return rows
+
+    # --- Recovery analysis -------------------------------------------------------------
+
+    async def recovery_analysis(
+        self, ctx: OrgContext, q: RecoveryAnalysisQuery
+    ) -> RecoveryAnalysisReport:
+        """``report.financial`` (checked by the route). The billable time worked in the range
+        (default: all of it) against what it was invoiced at, per job, client or person."""
+        self._check_order(q.date_from, q.date_to)
+        period = DateRange(q.date_from, q.date_to)
+        f = ItemFilter(
+            client_id=q.client_id,
+            job_id=q.job_id,
+            user_id=q.user_id,
+            partner_user_id=q.partner_user_id,
+            manager_user_id=q.manager_user_id,
+            service_id=q.service_id,
+        )
+        await self._check_refs(ctx, f)
+        markup = ctx.organization.cost_plus_markup_bp if q.markup_bp is None else q.markup_bp
+        show_cost = has_permission(ctx, COST_PERMISSION)
+        recovery = RecoveryService(self.session)
+        pieces = await recovery.pieces(ctx.organization, period, f)
+        rows = await recovery.report_rows(
+            ctx.organization_id, pieces, q.group_by, markup, show_cost
+        )
+        totals = RecoveryAnalysisTotals(**figures(Tally.of(pieces), markup, show_cost))
+        filters = RecoveryAnalysisFilters(
+            **q.model_dump(exclude={"format", "limit", "offset", "markup_bp"}),
+            markup_bp=markup,
+        )
+        page_rows, page = window(rows, q)
+        return RecoveryAnalysisReport(rows=page_rows, totals=totals, filters=filters, page=page)
 
     # --- Missing timesheets -------------------------------------------------------------
 

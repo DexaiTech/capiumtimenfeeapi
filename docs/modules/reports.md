@@ -30,6 +30,7 @@ Tests: `tests/test_reports_*.py` (the first eight reports) and `tests/test_repor
 | GET | `/reports/expenses` | `report.read` or `report.financial` | Expense lines by type, person, client, job, month or claim status: net, VAT, gross, billable, recharged, to reimburse. Everyone's with `expense.read_all`, else one's own |
 | GET | `/reports/payments` | `report.financial` | Payments received by month, client or method: received, allocated, on account, voided or reversed |
 | GET | `/reports/missing-timesheets` | `report.read` | Staff with no submitted timesheet, per person and week over a range of weeks: logged against expected, state, reminders |
+| GET | `/reports/recovery-analysis` | `report.financial` | Per job, client or person: billable hours and invoice value against the task rate, the staff charge-out rates and cost plus a markup: revenue left on the table and recovery on each basis (cost figures need `rate.read`) |
 | GET | `/dashboard` | any member | The caller's week, timer, unsubmitted weeks, jobs due; approvals waiting; practice figures with `report.financial` |
 
 The ten reports of the spec (Featurte.md 2.17) are: Time Analysis = `time-summary`, Utilisation =
@@ -195,6 +196,54 @@ most **26 weeks**, none that has not started (the current week is allowed).
   `rejected_count`, `logged_minutes`, `expected_minutes`, `shortfall_minutes`, `missing_day_count`.
 * `filters` also echo `week_from`, `week_to` (the `week_start` of the first and last week) and
   `status`; `date_from`/`date_to` are the first and last day covered.
+
+## Recovery analysis (APT52)
+
+### GET /reports/recovery-analysis
+
+"Invoices and Recovery": how the value of the work compares with what it was invoiced at, so a
+practice can see where it under- or over-recovers. The same figures are on the client's
+**Invoices & Recovery** tab (`GET /clients/{client_id}/recovery`, `wip.read`, all dates, per job
+plus the client's totals) and, for the work ready to bill, on the invoicing screen
+(`GET /clients/{client_id}/billing-summary` → `breakdown.recovery` per job and in `totals`).
+Code: `app/services/recovery.py` (the pieces, the rows, the client view),
+`app/services/recovery_values.py` (the arithmetic shared with the billing summary),
+`app/repositories/recovery.py`, `app/schemas/recovery.py`; tests `tests/test_recovery.py`.
+
+Scope: the **billable** time entries worked in `date_from`..`date_to` (both optional; default: all
+of it, as job profitability) matching `client_id`, `job_id`, `user_id`, `partner_user_id`,
+`manager_user_id`, `service_id`. `group_by`: `job` (default; a row per job and its client, "No
+job" for time on the client without one), `client` or `person`. `markup_bp` (0–100000) overrides
+the practice's markup for a what-if.
+
+Each row (and `totals`) holds:
+
+| Field | Meaning |
+|---|---|
+| `minutes` | Billable minutes |
+| `invoiced_value` | What issued invoices billed for the time: the live allocations' `billed_value` (a fixed-fee line is spread over the time it clears by value, so the job's invoices add up to the fee) |
+| `to_bill_value` | What the time not on an issued invoice will bill: its draft's `billed_value`; else, unbilled, the **fixed fee still to bill** (fee less the fixed-fee lines on live invoices) spread over **all** the job's unbilled time by value (so a date or person filter takes its share, not the whole fee), or on an hourly job (or no job) the time's own value; nothing for written-off time or a non-billable job |
+| `invoice_value` | `invoiced_value + to_bill_value` |
+| `task_value` | The time at the **task rate**: the rates it was priced at (`time_entries.charge_value`: the job's own rate, a service rate, a client rate, else the person's or grade's – the ladder of `docs/modules/team-rates.md`) |
+| `staff_value` | The time at each **person's own charge-out rate** on the day it was worked: the ladder resolved with no client, service or job (`charge_rates.resolve_many`), so the staff rate (the grade's in `grade_only` mode), else the grade's, else the practice default; overtime at the multiplier as everywhere |
+| `cost_value` | What the time cost (`time_entries.cost_value`) |
+| `cost_plus_value` | `cost_value × (1 + markup_bp / 10000)`, rounded half up once per row (so a total can differ by a penny from the sum of its rows) |
+| `task_shortfall`, `staff_shortfall`, `cost_plus_shortfall` | That potential `− invoice_value`: **revenue left on the table** when positive, over-recovery when negative |
+| `task_recovery_bp`, `staff_recovery_bp`, `cost_plus_recovery_bp` | `invoice_value /` that potential (basis points; `null` when it is 0) |
+| `margin_value`, `margin_bp` | `invoice_value − cost_value`, and over `invoice_value` |
+
+Rows also carry `key`, `code` (job number, client code or initials), `name`, `client_name` (job
+rows), the id of the group (`job_id` + `client_id`, `client_id` or `user_id`) and, for jobs,
+`billing_basis` and `fixed_fee`. `filters` echo `markup_bp` as used. Without `rate.read` the cost,
+cost-plus and margin fields are `null` in the JSON and empty in every download.
+
+The ticket's examples, as the tests check them (`tests/test_recovery.py`): a £1,500 fixed fee for
+20 hours of time priced at £100 an hour by someone whose own rate is £80: invoice £1,500, task
+£2,000 (£500 left on the table), staff £1,600 (£100 left). Ten hours at £50 and ten at £150: staff
+value £2,000. Cost £50 an hour with the default 50% markup: cost plus £75 an hour.
+
+`organizations.cost_plus_markup_bp` (migration 065; default 5000 = 50%, 0–100000) is a practice
+setting (`PATCH /organizations/{id}`, `organization.update`).
 
 ## Errors
 

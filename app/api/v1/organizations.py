@@ -128,8 +128,9 @@ async def get_organization(
         "`invoice_approval_required`, `invoice_approval_threshold` (pence, 0 to 100000000), "
         "`payment_reminders_enabled`, `payment_reminder_days_after_due` (1 to 365), "
         "`mileage_rate` (pence per mile, 0 to 1000), `expense_markup_bp` (basis points, 0 to "
-        "100000) and `rate_mode` (`staff_first` or `grade_only`). Optional text fields are "
-        "cleared with `null` or an empty string. The slug and the currency cannot be changed "
+        "100000), `rate_mode` (`staff_first` or `grade_only`) and `cost_plus_markup_bp` (basis "
+        "points, 0 to 100000, the margin on cost of the recovery analysis). Optional text fields "
+        "are cleared with `null` or an empty string. The slug and the currency cannot be changed "
         "(422). Every change is audited with its old and new value. Requires "
         "`organization.update`."
     ),
