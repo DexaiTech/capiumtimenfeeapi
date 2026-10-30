@@ -29,6 +29,7 @@ from app.api.v1 import (
     job_calendar,
     job_tasks,
     jobs,
+    leads,
     members,
     notifications,
     onboarding,
@@ -85,6 +86,7 @@ api_router.include_router(rate_rules.router)
 api_router.include_router(clients.router)
 api_router.include_router(client_overview.router)
 api_router.include_router(central_clients.router)
+api_router.include_router(leads.router)
 api_router.include_router(opening_balances.router)
 api_router.include_router(integrations.router)
 # After the sync-log route: its static paths come before the /integrations/{key} routes inside.
