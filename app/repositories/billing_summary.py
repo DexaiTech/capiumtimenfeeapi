@@ -3,8 +3,9 @@ value. Every method is scoped to one organization."""
 
 import uuid
 from dataclasses import dataclass
+from typing import Any
 
-from sqlalchemy import Integer, and_, case, func, select
+from sqlalchemy import ColumnElement, Integer, and_, case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Disbursement, Job, TimeEntry
@@ -47,12 +48,12 @@ class BillingSummaryRepository:
         ready = wip_time_clause(require_approval)
         contract = entry.rate_source.in_(CONTRACT_SOURCES)
 
-        def minutes_where(*conditions):
+        def minutes_where(*conditions: ColumnElement[bool]) -> ColumnElement[int]:
             return func.coalesce(
                 func.sum(case((and_(*conditions), entry.minutes), else_=0)), 0
             ).cast(Integer)
 
-        def value_where(column, *conditions):
+        def value_where(column: Any, *conditions: ColumnElement[bool]) -> ColumnElement[Any]:
             return func.coalesce(func.sum(case((and_(*conditions), column), else_=0)), 0)
 
         stmt = (

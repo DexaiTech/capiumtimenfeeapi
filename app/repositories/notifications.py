@@ -6,9 +6,10 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import exists, func, or_, select, update
+from sqlalchemy import Exists, exists, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import InstrumentedAttribute
 
 from app.db.models import (
     MemberPermissionOverride,
@@ -270,7 +271,7 @@ class NotificationSettingsRepository:
         plus what was granted to them, less what was denied them."""
         wanted = list(codes)
 
-        def override(effect: str, code_column):
+        def override(effect: str, code_column: InstrumentedAttribute[str]) -> Exists:
             return (
                 select(MemberPermissionOverride.id)
                 .where(
