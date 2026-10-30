@@ -298,4 +298,67 @@ class EngagementJobRun(Base, IdMixin, OrgScopedMixin, TimestampMixin):
     error: Mapped[str | None] = mapped_column(Text)
 
 
-__all__ = ["Client", "ClientContact", "ClientService", "EngagementJobRun"]
+class Lead(Base, IdMixin, OrgScopedMixin, TimestampMixin):
+    """A prospective client the practice is pursuing, and what winning it cost.
+
+    ``acquisition_cost`` and ``onboarding_cost`` are in pence. Converting the lead creates a
+    client from it and sets ``converted_client_id`` and ``converted_at`` (together, once). An
+    archived lead (``archived_at`` set) is hidden from the open list until it is unarchived.
+    """
+
+    __tablename__ = "leads"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "id", name="uq_leads_organization_id_id"),
+        _member_fk("created_by", "leads"),
+        ForeignKeyConstraint(
+            ["organization_id", "converted_client_id"],
+            ["clients.organization_id", "clients.id"],
+            name="fk_leads_organization_id_converted_client_id_clients",
+        ),
+        CheckConstraint("length(name) BETWEEN 1 AND 200", name="name_length"),
+        CheckConstraint(
+            "client_type IN ('individual', 'sole_trader', 'partnership', 'llp', "
+            "'limited_company', 'trust', 'charity', 'other')",
+            name="client_type",
+        ),
+        CheckConstraint(
+            "source IS NULL OR length(source) BETWEEN 1 AND 100", name="source_length"
+        ),
+        CheckConstraint("acquisition_cost >= 0", name="acquisition_cost"),
+        CheckConstraint("onboarding_cost >= 0", name="onboarding_cost"),
+        CheckConstraint(
+            "(converted_client_id IS NULL) = (converted_at IS NULL)", name="converted_together"
+        ),
+        Index("ix_leads_organization_id_created_at", "organization_id", "created_at", "id"),
+        # A client comes from at most one lead.
+        Index(
+            "uq_leads_organization_id_converted_client_id",
+            "organization_id",
+            "converted_client_id",
+            unique=True,
+            postgresql_where=text("converted_client_id IS NOT NULL"),
+        ),
+    )
+
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    client_type: Mapped[str] = mapped_column(Text, nullable=False, server_default="limited_company")
+    # The person the practice deals with; becomes the client's primary contact.
+    contact_name: Mapped[str | None] = mapped_column(Text)
+    email: Mapped[str | None] = mapped_column(Text)
+    phone: Mapped[str | None] = mapped_column(Text)
+    # Where the lead came from: "Referral", "Website", ...
+    source: Mapped[str | None] = mapped_column(Text)
+    notes: Mapped[str | None] = mapped_column(Text)
+    acquisition_cost: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, server_default=text("0")
+    )
+    onboarding_cost: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, server_default=text("0")
+    )
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    converted_client_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    converted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+
+
+__all__ = ["Client", "ClientContact", "ClientService", "EngagementJobRun", "Lead"]

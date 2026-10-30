@@ -6,7 +6,8 @@ Tests: `tests/test_settings.py`, `tests/test_rates.py`, `tests/test_clients*.py`
 `tests/clients_helpers.py`). No schema change in the original release (migration `007` is still a
 no-op); the Clients 360 release adds migrations `016`–`018` (central clients, the billing settings
 and invoice templates, the activity indexes): see "Clients 360" at the end of this document,
-`docs/modules/central-clients.md` and `docs/modules/invoice-templates.md`.
+`docs/modules/central-clients.md` and `docs/modules/invoice-templates.md`. Leads (migration
+`063`, ticket APT49) are described in "Leads" at the end of this document.
 
 All paths are under `/api/v1/organizations/{organization_id}`. Responses use the standard
 envelope; money is integer pence, rates are pence per hour, VAT rates basis points. Another
@@ -323,6 +324,7 @@ From the Clients 360 release also `client.central_enabled`, `client.central_link
 (`docs/modules/invoice-templates.md`). The audit entries of payments, credit notes,
 disbursements and WIP write-offs now carry `client_id` in their metadata, like the other billing
 entries, so they show in the client's activity.
+Leads write `lead.created|updated|archived|unarchived|converted` (see "Leads").
 
 ## Clients 360
 
@@ -392,3 +394,49 @@ minutes, dates ISO in the practice time zone. **A section the caller may not see
 Cost values and margins are **never** part of the overview, so `rate.read` changes nothing here.
 `ytd_from` is 1 January of the current year in the practice time zone; `last_30d_from` is
 today minus 29 days.
+
+## Leads
+
+Ticket APT49, migration `063`. Code: `app/api/v1/leads.py` → `app/services/leads.py` →
+`app/repositories/leads.py`; schemas in `app/schemas/leads.py`; model `Lead` in
+`app/db/models/clients.py` (table `leads`). Tests: `tests/test_leads.py`.
+
+A lead is a prospective client and what winning it cost: `acquisition_cost` and
+`onboarding_cost` (integer pence, 0 and up). One click converts it into a client; a lead the
+practice no longer pursues is archived (and can be unarchived).
+
+| Method | Path | Permission | Purpose |
+|---|---|---|---|
+| GET | `/leads?status=&q=` | `client.read` | One status (`open` default, `converted`, `archived`), newest first; `q` searches name, contact name and email. Keyset-paginated (`limit`, `cursor`). |
+| GET | `/leads/summary` | `client.read` | Per status: `{count, acquisition_cost, onboarding_cost, total_cost}`. Declared before `/leads/{lead_id}`. |
+| POST | `/leads` | `client.create` | Add (`name` 1-200; `client_type` as clients, default `limited_company`; `contact_name` ≤ 120, `email`, `phone` ≤ 40, `source` ≤ 100, `notes` ≤ 5000; the two costs). 201. |
+| GET | `/leads/{lead_id}` | `client.read` | One lead. |
+| PATCH | `/leads/{lead_id}` | `client.update` | Change any field; text fields accept null. The costs stay editable after conversion. |
+| POST | `/leads/{lead_id}/archive` · `/unarchive` | `client.delete` | Set / clear `archived_at`. Doing it twice changes nothing. |
+| POST | `/leads/{lead_id}/convert` | `client.create` | Body `{code?}` (optional; may be empty). Creates the client and links it. |
+
+**LeadRead**: the columns (`id, name, client_type, contact_name, email, phone, source, notes,
+acquisition_cost, onboarding_cost, archived_at, converted_client_id, converted_at, created_by,
+created_at, updated_at`) plus `total_cost` (the sum of the two costs), `status` (derived:
+`archived` if archived, else `converted` if converted, else `open`) and
+`converted_client: {id, code, name} | null` (null until converted, and once that client is
+deleted; `converted_client_id` stays).
+
+Rules:
+
+* **Converting** runs `ClientsService.create` inside the same transaction, so the client gets the
+  same validation, code generation and `client.created` entry as `POST /clients`. The client is
+  `active` and takes the lead's `name`, `client_type`, `email`, `phone` and `notes`; with a
+  `contact_name` it also gets a primary contact (`name`, `email`, `phone`). `code` defaults to the
+  client sequence; a taken code is 409 `CLIENT_CODE_TAKEN` and the lead stays open.
+* A lead converts once: 409 `LEAD_ALREADY_CONVERTED` (`details.client_id`). The lead row is
+  locked (`FOR UPDATE`) while converting, so two clicks at once make one client; a partial unique
+  index on `(organization_id, converted_client_id)` also keeps one lead per client.
+* An archived lead does not convert: 409 `LEAD_ARCHIVED` (unarchive it first). A converted lead
+  can be archived; archiving never touches the client.
+* Deleting the client later leaves the lead `converted` with `converted_client: null`.
+* Audit (`target_type: "lead"`, readable in `GET /audit-logs/history` with `client.read`):
+  `lead.created` (`name` and the costs), `lead.updated` (`changes`, only when something
+  changed), `lead.archived`, `lead.unarchived`, `lead.converted` (`name`, `client_id`,
+  `client_code`; the `client_id` puts it in the client's activity too). As for every entry,
+  keys ending in `cost` are shown as null in the trail to people without `rate.read`.
