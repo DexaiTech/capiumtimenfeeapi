@@ -3,7 +3,9 @@
 A grade names a level of staff (Partner, Manager, ...) with default cost and charge-out rates
 and a default chargeable target. The default rates are the baseline of the grade's rate level:
 dated rate rules for the grade override them while in force. Changing a default rate is
-recorded in the rate history like any other rate change, and never rewrites recorded time.
+recorded in the rate history like any other rate change, and never rewrites recorded time
+(except that a default cost rate fills in the cost of the grade's unbilled time recorded with
+none: ``app/services/time_costs.py``).
 
 * Name and code are unique per practice (case-insensitive): 409 ``GRADE_NAME_TAKEN`` /
   ``GRADE_CODE_TAKEN``.
@@ -23,7 +25,7 @@ from app.repositories.grades import GradeFilters, GradeRepository
 from app.repositories.rate_history import RateHistoryRepository
 from app.schemas.grades import GradeCreate, GradeRead, GradeUpdate
 from app.schemas.settings import DeleteOutcome
-from app.services import policy
+from app.services import policy, time_costs
 from app.services.common import apply_changes, duplicate_error, record_audit
 from app.services.policy import OrgContext
 from app.utils.pagination import Page, PageParams
@@ -124,6 +126,12 @@ class GradeService:
                     "grade",
                     grade.id,
                     {"code": grade.code, "name": grade.name, "changes": changes},
+                )
+            if "default_cost_rate" in changes and grade.default_cost_rate:
+                # The grade's staff whose time was recorded with no cost now have one.
+                people = await time_costs.grade_members(self.session, org_id, grade.id)
+                await time_costs.fill_missing_costs(
+                    self.session, ctx, rctx, people, target_type="grade", target_id=grade.id
                 )
             result = await self._read(ctx, grade)
         return result

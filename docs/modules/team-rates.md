@@ -371,13 +371,16 @@ person), 2, 3 (the client's rate for the person, else the client's rate for ever
 rate; undated), 5 (the job's service and the person's *current* grade), 6, 7 (a grade rule in force, else the
 grade's `default_charge_rate`), and finally the practice's `default_charge_rate`. A rule counts only on the days
 inside its period. The **cost rate** is the person's `staff` cost rule, else the grade's cost rule, else the
-grade's `default_cost_rate`, else 0.
+grade's `default_cost_rate`, else (`staff_first`) the person's first `staff` cost rule when the day is before it
+starts, else 0. The cost never depends on the client, the job or its billing basis (APT51).
 
 The result and its source are saved on each entry when it is saved (`charge_rate`, `cost_rate`, values and
 `rate_source`, one of `client_service_staff, client_service, client_staff, client, job, service_grade, staff,
 grade, default`). A rate change never touches recorded entries. An unbilled entry is re-priced only when it
 is itself changed (the Time module's rule: an edit re-takes the rate from the ladder as it is then) or by
-re-rating.
+re-rating. The exception is a missing cost: a cost rule for a person or a grade, a grade's default cost rate,
+or a move to another grade fills in the cost of the person's unbilled, unlocked time recorded with a cost of 0
+(charge-out untouched; audit `time_entries.costed`). Migration 064 did the same once for existing time.
 
 **Rate mode.** The practice setting `rate_mode` (`PATCH /organizations/{id}`, `organization.update`, default
 `staff_first`) can be `grade_only`: level 6 (a `staff` charge rule) is then **skipped**, so a person's own rate
@@ -471,7 +474,7 @@ the choice. Each `LadderStep` has `applicable` (false when the query lacks what 
 `exists`, `rate`, `origin` (`rule`, `job`, `grade_default`, `practice_default`, `none`), the `rule`
 (`{id, effective_from, effective_to}`) and `selected` (exactly one step per ladder). The charge ladder is levels
 1 to 7 (the client's rate for everyone is `source: "client"`, level 3) followed by the practice default
-(`level: null`, `source: "default"`); the cost ladder is `staff`, `grade`, `none`.
+(`level: null`, `source: "default"`); the cost ladder is `staff`, `grade`, `staff_first`, `none`.
 
 ```json
 {"on_date": "2026-09-15", "staff": {"id": "…", "code": "S002", "full_name": "Sam Staff"},

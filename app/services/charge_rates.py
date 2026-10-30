@@ -16,7 +16,8 @@ and finally ``default``: ``organizations.default_charge_rate``. A rule counts on
 inside its effective period. In the practice's ``grade_only`` rate mode level 6 is skipped, so a
 person's own rate never prices time and the grade's rate does (levels 1-5 are unchanged). The
 cost rate is the person's ``staff`` cost rule, else the grade's cost rule or default cost rate,
-else 0, in either mode.
+else (``staff_first``) the person's first cost rule when the day is before it starts, else 0,
+in either mode. The cost never depends on the client, the job or how the job is billed.
 
 The entry's service is the service of its job. The person's grade is their current grade.
 
@@ -78,7 +79,7 @@ class ResolvedRate:
     cost_rate: int
     # The level that supplied the charge-out rate (one of ``CHARGE_SOURCES``).
     source: str
-    # ``staff``, ``grade`` or ``none`` (cost 0).
+    # ``staff``, ``grade``, ``staff_first`` or ``none`` (cost 0).
     cost_source: str = "none"
     charge_rule_id: uuid.UUID | None = None
     cost_rule_id: uuid.UUID | None = None
@@ -325,6 +326,7 @@ class RateBook:
         )
 
     def cost_steps(self, c: _Context) -> Iterator[Step]:
+        own = self.rules.get(("cost", None, None, c.user_id, None), ())
         yield _step(
             None,
             "staff",
@@ -343,6 +345,17 @@ class RateBook:
             rule=grade_rule,
             rate=grade_default if grade_rule is None else None,
             origin="grade_default" if grade_rule is None and grade_default is not None else None,
+        )
+        # Time dated before the person's first cost rate starts is costed at that first rate
+        # (rules are oldest first): a rate added "from today" still costs the time already in.
+        first = own[0] if own and c.day < own[0].effective_from else None
+        yield _step(
+            None,
+            "staff_first",
+            "Staff's first cost rate (time before it starts)",
+            applicable=bool(own),
+            reason="This person has no cost rate of their own.",
+            rule=first,
         )
         yield _step(None, "none", "No cost rate (zero)", rate=0, origin="none")
 

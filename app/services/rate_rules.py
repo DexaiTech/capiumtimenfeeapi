@@ -10,7 +10,9 @@ Rules (docs/domain.md, "Rates"):
   start day can be corrected afterwards. Unused rules can be changed and deleted freely.
 * Recorded time keeps the rate it was saved with: changing a rule, its start day included, never
   rewrites an entry (use re-rating for unbilled time: it takes the rate from the ladder as it is
-  now, so nobody has to enter the time again).
+  now, so nobody has to enter the time again). The one exception is a missing cost: a cost rule
+  for a person or a grade fills in the cost of their unbilled time recorded with none
+  (``app/services/time_costs.py``).
 * Every create, change, end-date and delete is appended to ``rate_changes`` (the history) and
   to the audit log in the same transaction.
 """
@@ -43,7 +45,7 @@ from app.repositories.rate_rules import (
 )
 from app.repositories.settings import ServiceRepository
 from app.schemas.rate_rules import RateRuleCreate, RateRuleUpdate
-from app.services import audit, policy
+from app.services import audit, policy, time_costs
 from app.services.policy import OrgContext
 from app.utils.pagination import Page, PageParams
 from app.utils.practice_dates import end_of_day_utc, start_of_day_utc, today_in
@@ -324,6 +326,7 @@ class RateRuleService:
             view = await self.rules.view(org_id, rule.id)
             assert view is not None
             await self._audit(ctx, rctx, audit_action, rule, rule_meta(view))
+        await self.fill_missing_costs(ctx, rctx, rule)
         return rule
 
     async def delete_rule(
@@ -424,7 +427,28 @@ class RateRuleService:
             await self._audit(
                 ctx, rctx, audit_action, rule, {**rule_meta(view), "changes": changes}
             )
+        if changes:
+            await self.fill_missing_costs(ctx, rctx, rule)
         return view, changes
+
+    async def fill_missing_costs(
+        self, ctx: OrgContext, rctx: RequestContext, rule: RateRule
+    ) -> None:
+        """A cost rule for a person or a grade gives their unbilled time that was recorded with
+        no cost its cost (``app/services/time_costs.py``); nothing else is rewritten."""
+        if rule.kind != "cost" or rule.rate <= 0:
+            return
+        if rule.user_id is not None:
+            people = [rule.user_id]
+        elif rule.grade_id is not None:
+            people = await time_costs.grade_members(
+                self.session, ctx.organization_id, rule.grade_id
+            )
+        else:
+            return
+        await time_costs.fill_missing_costs(
+            self.session, ctx, rctx, people, target_type="rate_rule", target_id=rule.id
+        )
 
     # --- Internals ------------------------------------------------------------------------
     async def _log(
