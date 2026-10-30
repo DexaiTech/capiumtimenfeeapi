@@ -321,9 +321,7 @@ class Lead(Base, IdMixin, OrgScopedMixin, TimestampMixin):
             "'limited_company', 'trust', 'charity', 'other')",
             name="client_type",
         ),
-        CheckConstraint(
-            "source IS NULL OR length(source) BETWEEN 1 AND 100", name="source_length"
-        ),
+        CheckConstraint("source IS NULL OR length(source) BETWEEN 1 AND 100", name="source_length"),
         CheckConstraint("acquisition_cost >= 0", name="acquisition_cost"),
         CheckConstraint("onboarding_cost >= 0", name="onboarding_cost"),
         CheckConstraint(

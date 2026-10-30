@@ -196,15 +196,14 @@ async def test_archiving_and_unarchiving(client):
     archived = ok_data(await act(client, owner, org, lead, "archive"))
     assert archived["status"] == "archived" and archived["archived_at"]
     # Twice changes nothing.
-    assert ok_data(await act(client, owner, org, lead, "archive"))["archived_at"] == (
-        archived["archived_at"]
+    assert (
+        ok_data(await act(client, owner, org, lead, "archive"))["archived_at"]
+        == (archived["archived_at"])
     )
     assert await listed(client, owner, org) == []
     back = ok_data(await act(client, owner, org, lead, "unarchive"))
     assert back["status"] == "open" and back["archived_at"] is None
-    assert [e["target_id"] for e in await audit_entries(org["id"], "lead.archived")] == [
-        lead["id"]
-    ]
+    assert [e["target_id"] for e in await audit_entries(org["id"], "lead.archived")] == [lead["id"]]
     assert len(await audit_entries(org["id"], "lead.unarchived")) == 1
 
 
@@ -228,9 +227,7 @@ async def test_converting_creates_the_client_and_its_primary_contact(client):
     assert converted["status"] == "converted" and converted["converted_at"]
     ref = converted["converted_client"]
     assert ref["id"] == converted["converted_client_id"] and ref["name"] == "Bloggs Bakery Ltd"
-    detail = ok_data(
-        await client.get(org_url(org, f"/clients/{ref['id']}"), headers=owner.headers)
-    )
+    detail = ok_data(await client.get(org_url(org, f"/clients/{ref['id']}"), headers=owner.headers))
     assert detail["code"] == ref["code"]
     assert (detail["client_type"], detail["status"], detail["email"], detail["phone"]) == (
         "partnership",
@@ -281,9 +278,7 @@ async def test_a_lead_converts_once(client):
     assert again.status_code == 409
     assert error(again)["code"] == "LEAD_ALREADY_CONVERTED"
     assert error(again)["details"] == {"client_id": first["converted_client_id"]}
-    clients = await scalar(
-        "SELECT count(*) FROM clients WHERE organization_id = :o", o=org["id"]
-    )
+    clients = await scalar("SELECT count(*) FROM clients WHERE organization_id = :o", o=org["id"])
     assert clients == 1
 
 
@@ -294,9 +289,7 @@ async def test_two_clicks_at_once_make_one_client(client):
         act(client, owner, org, lead, "convert"), act(client, owner, org, lead, "convert")
     )
     assert sorted(r.status_code for r in responses) == [200, 409]
-    clients = await scalar(
-        "SELECT count(*) FROM clients WHERE organization_id = :o", o=org["id"]
-    )
+    clients = await scalar("SELECT count(*) FROM clients WHERE organization_id = :o", o=org["id"])
     assert clients == 1
 
 

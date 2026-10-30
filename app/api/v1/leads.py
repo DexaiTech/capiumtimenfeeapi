@@ -54,9 +54,7 @@ async def list_leads(
         str | None, Query(max_length=200, description="Search name, contact name and email")
     ] = None,
 ) -> ApiResponse[list[LeadRead]]:
-    page = await service.list_leads(
-        org, params, status=status, q=q.strip() or None if q else None
-    )
+    page = await service.list_leads(org, params, status=status, q=q.strip() or None if q else None)
     return ok_page(page.items, page.next_cursor)
 
 
@@ -141,8 +139,7 @@ async def archive_lead(
     "/leads/{lead_id}/unarchive",
     summary="Unarchive a lead",
     description=(
-        "Brings an archived lead back to the open (or converted) list. Requires "
-        "`client.delete`."
+        "Brings an archived lead back to the open (or converted) list. Requires `client.delete`."
     ),
     responses=error_responses(403, 404),
 )

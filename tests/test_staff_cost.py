@@ -52,9 +52,7 @@ async def test_the_actual_cost_of_a_fixed_fee_job_is_the_staff_cost_rate(client:
     await new_rate(
         client, p.owner, p.org, kind="cost", user_id=ada.id, rate=6_000, effective_from=RATE_FROM
     )
-    job = await make_job(
-        p.org, p.client, "Year End", billing_basis="fixed", fixed_fee=150_000
-    )
+    job = await make_job(p.org, p.client, "Year End", billing_basis="fixed", fixed_fee=150_000)
 
     entry = await log_time(client, ada, p.org, job_id=job.id, minutes=90, entry_date=LOGGED)
 
@@ -69,9 +67,7 @@ async def test_time_recorded_without_a_cost_takes_the_cost_rate_once_it_is_added
     ada = await staff(p.org)
     job = await make_job(p.org, p.client, "Annual Accounts", hourly_rate=10_000)
     open_entry = await log_time(client, ada, p.org, job_id=job.id, minutes=60, entry_date=LOGGED)
-    billed_entry = await log_time(
-        client, ada, p.org, job_id=job.id, minutes=30, entry_date=LOGGED
-    )
+    billed_entry = await log_time(client, ada, p.org, job_id=job.id, minutes=30, entry_date=LOGGED)
     assert (await entry_row(open_entry["id"])).cost_value == 0
     await bill(billed_entry["id"])
 
