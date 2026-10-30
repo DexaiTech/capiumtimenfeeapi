@@ -115,6 +115,7 @@ def test_every_table_that_refers_to_a_client_is_handled_by_the_merge():
         "rate_rerun_items",
         "wip_movements",
         "wip_snapshot_items",
+        "leads",
     }
 
 
