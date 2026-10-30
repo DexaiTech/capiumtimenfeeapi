@@ -57,12 +57,15 @@ CONFLICT_RULES: tuple[str, ...] = ("client_contacts", "client_services", "rate_r
 # all: the database enforces it append-only (no UPDATE), which is also why it has no foreign key.
 # The live WIP view resolves a movement's client through any merge chain instead (see
 # ``adjustment_atoms`` in ``app/repositories/wip_atoms.py``). ``wip_snapshot_items`` records the
-# client and job as they were on a past date and must not change after the fact.
+# client and job as they were on a past date and must not change after the fact. A lead keeps the
+# client it was converted into (the merged client stays, archived, and points on to the target);
+# moving it could also break "a client comes from at most one lead".
 HISTORY: tuple[str, ...] = (
     "rate_changes",
     "rate_rerun_items",
     "wip_movements",
     "wip_snapshot_items",
+    "leads",
 )
 MOVED_TABLES: tuple[str, ...] = (*REPOINTED, *CONFLICT_RULES)
 HANDLED_TABLES: frozenset[str] = frozenset((*MOVED_TABLES, *HISTORY))
