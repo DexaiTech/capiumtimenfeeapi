@@ -435,6 +435,8 @@ Rules:
 * An archived lead does not convert: 409 `LEAD_ARCHIVED` (unarchive it first). A converted lead
   can be archived; archiving never touches the client.
 * Deleting the client later leaves the lead `converted` with `converted_client: null`.
+* A central merge leaves the lead on the client it was converted into (`leads` is history in
+  `app/repositories/client_merge.py`); that client stays, archived, with `merged_into`.
 * Audit (`target_type: "lead"`, readable in `GET /audit-logs/history` with `client.read`):
   `lead.created` (`name` and the costs), `lead.updated` (`changes`, only when something
   changed), `lead.archived`, `lead.unarchived`, `lead.converted` (`name`, `client_id`,
