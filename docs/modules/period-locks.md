@@ -259,6 +259,7 @@ Exact behaviour:
 | `wip` | `WipService` | create write-off | `written_off_on` (today in the practice's time zone when not sent) |
 | `wip` | `WipService` | reverse write-off | the write-off's own `written_off_on` |
 | re-rating | `rerate` | re-rate a period | `locked_dates`: locked entries are skipped with the reason |
+| missing cost | `time_costs` | a cost rate added for a person or grade fills in time with no cost | `locked_dates`: locked entries are left as they are |
 
 A change of a time entry or disbursement that moves it **out of** a locked period is refused as
 well as one that moves it in: the old date is checked too.

@@ -47,7 +47,7 @@ from app.schemas.staff import (
     StaffUpdate,
     UsageRead,
 )
-from app.services import charge_rates, policy
+from app.services import charge_rates, policy, time_costs
 from app.services.charge_rates import RateQuery, ResolvedRate
 from app.services.common import apply_changes, record_audit
 from app.services.members import ensure_initials_free, ensure_not_last_owner
@@ -355,6 +355,11 @@ class StaffService:
                         "staff_code": member.staff_code,
                         "changes": changes,
                     },
+                )
+            if "grade_id" in changes:
+                # A new grade may give their time recorded with no cost a cost rate.
+                await time_costs.fill_missing_costs(
+                    self.session, ctx, rctx, [user_id], target_type="member", target_id=user_id
                 )
             result = await self.detail(ctx, await self.fetch_row(ctx, user_id))
         return result

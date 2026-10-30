@@ -83,6 +83,7 @@ ACTION_LABELS: dict[str, str] = {
     "rate.deleted": "Rate removed",
     "rate.rerun": "Rates re-run over time entries",
     "time_entries.revalued": "Time entries re-valued",
+    "time_entries.costed": "Missing cost filled in on time entries",
     "job.created": "Job created",
     "job.updated": "Job updated",
     "job.status_changed": "Job status changed",

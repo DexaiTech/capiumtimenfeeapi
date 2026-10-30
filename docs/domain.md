@@ -185,7 +185,10 @@ decides the level. The charge-out rate of a time entry is the first that exists 
 
 then `organizations.default_charge_rate`. A rule counts only on the days inside its period.
 The cost rate is the person's staff cost rule, else the grade's cost rule, else the grade's
-default cost rate, else 0 (cost rules exist only for staff and grades).
+default cost rate, else (`staff_first`) the person's first staff cost rule when the day is
+before it starts, else 0 (cost rules exist only for staff and grades). The cost never depends
+on the client, the job or the job's billing basis: a cost rate added "from today" also costs
+the time already recorded for earlier days.
 
 * **Rate mode** (`organizations.rate_mode`): `staff_first` (default) uses the ladder above.
   `grade_only` **skips level 6**: a person's own `staff` rate never prices time and their
@@ -199,7 +202,11 @@ default cost rate, else 0 (cost rules exist only for staff and grades).
 * The rate, its source (`rate_source`: the level that priced it) and the value are
   snapshotted on the entry when it is saved. A rate change never rewrites recorded time;
   an edit of an unbilled entry re-takes its rate from the ladder again, and unbilled time is
-  moved to new rates only by re-rating.
+  moved to new rates only by re-rating. The one exception is a **missing cost**: when a cost
+  rate appears for a person (their own cost rule, their grade's cost rule or default cost rate,
+  or a move to a grade that has one), their unbilled, unlocked time recorded with a cost of 0
+  takes its cost from the ladder; the charge-out side is untouched (audit
+  `time_entries.costed`, `app/services/time_costs.py`).
 * Rules of one kind and scope never overlap (409 `RATE_OVERLAP`; an exclusion constraint makes
   it hold under concurrency). `close_previous` ends the earlier open-ended rule the day before.
 * A rule is **used** when any time entry falls inside its scope and period. A used rule cannot be

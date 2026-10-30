@@ -78,7 +78,9 @@ async def test_staff_rate_history_by_entry_date(client: AsyncClient) -> None:
     organization = await _org(org)
     async with get_sessionmaker()() as session:
         cases = {
-            date(2025, 12, 31): (organization.default_charge_rate, 0),
+            # Before the first rate: the practice default charge, and the first cost rate
+            # (APT51: a person who has a cost never costs nothing).
+            date(2025, 12, 31): (organization.default_charge_rate, 1_000),
             date(2026, 1, 1): (6_000, 1_000),
             date(2026, 9, 7): (6_000, 1_000),
             date(2026, 9, 8): (7_000, 1_500),
