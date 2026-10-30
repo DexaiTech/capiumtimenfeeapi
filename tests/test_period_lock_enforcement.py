@@ -160,6 +160,43 @@ async def test_locked_time_cannot_be_deleted(client):
     assert await count_rows("SELECT count(*) FROM time_entries") == 2
 
 
+async def test_time_reads_say_which_entries_lie_in_a_locked_period(client):
+    """``period_locked_through`` lets the UI disable edit and delete with the reason, up front."""
+    p, worker, lock = await scene(client)
+    inside = await make_time_entry(
+        p.org, worker, client=p.client, entry_date=lock, timesheet_status="open"
+    )
+    outside = await make_time_entry(
+        p.org, worker, client=p.client, entry_date=lock + DAY, timesheet_status="open"
+    )
+
+    listed = ok_data(
+        await client.get(
+            p.url("/time-entries"),
+            headers=worker.headers,
+            params={"date_from": str(lock - DAY), "date_to": str(lock + DAY)},
+        )
+    )
+    through = {item["id"]: item["period_locked_through"] for item in listed}
+    assert through == {str(inside.id): str(lock), str(outside.id): None}
+    # The lock is not the sheet's: `is_locked` keeps its meaning.
+    assert all(item["is_locked"] is False for item in listed)
+
+    one = ok_data(await client.get(p.url(f"/time-entries/{inside.id}"), headers=worker.headers))
+    assert one["period_locked_through"] == str(lock)
+    day = ok_data(
+        await client.get(
+            p.url("/time-entries/day"), headers=worker.headers, params={"date": str(lock + DAY)}
+        )
+    )
+    assert [item["period_locked_through"] for item in day["entries"]] == [None]
+
+    # Unlocked, the same entry is open again.
+    await set_lock(p.org, None)
+    one = ok_data(await client.get(p.url(f"/time-entries/{inside.id}"), headers=worker.headers))
+    assert one["period_locked_through"] is None
+
+
 async def test_a_timer_started_in_a_period_that_gets_locked_cannot_be_stopped(client):
     p = await new_practice(client)
     worker = await staff(p.org)

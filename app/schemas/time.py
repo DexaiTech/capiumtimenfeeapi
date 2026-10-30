@@ -90,6 +90,14 @@ class TimeEntryRead(BaseModel):
     is_locked: bool = Field(
         description="True when the sheet is submitted/approved or the entry is not unbilled"
     )
+    period_locked_through: date | None = Field(
+        default=None,
+        description=(
+            "The last day of the locked period the entry's date lies in (Settings > Period "
+            "Lock): the entry cannot be edited or deleted until it is unlocked. Null when the "
+            "date is open. Filled in by the list, one entry and the day view"
+        ),
+    )
     is_opening_balance: bool = Field(
         default=False,
         description="Set by the opening-balance import; shown apart from newly recorded time",
@@ -100,7 +108,12 @@ class TimeEntryRead(BaseModel):
 
     @classmethod
     def from_view(
-        cls, view: EntryView, *, show_cost: bool, show_note: bool = False
+        cls,
+        view: EntryView,
+        *,
+        show_cost: bool,
+        show_note: bool = False,
+        locked_through: date | None = None,
     ) -> "TimeEntryRead":
         e = view.entry
         return cls(
@@ -137,6 +150,7 @@ class TimeEntryRead(BaseModel):
                 view.timesheet_status not in EDITABLE_SHEET_STATUSES
                 or e.billing_status != "unbilled"
             ),
+            period_locked_through=locked_through,
             is_opening_balance=e.is_opening_balance,
             created_by=e.created_by,
             created_at=e.created_at,

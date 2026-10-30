@@ -10,6 +10,7 @@ from app.repositories.time_entries import TimerRepository
 from app.repositories.time_overview import TimeOverviewRepository
 from app.schemas.time import TimeEntryRead, TimerRead
 from app.schemas.time_views import MAX_CALENDAR_DAYS, CalendarDay, TimeCalendar, TimeDay
+from app.services import period_locks
 from app.services.policy import OrgContext
 from app.services.time_entries import TimeEntryService, show_cost
 from app.services.time_rules import practice_date, week_start_for
@@ -47,6 +48,7 @@ class TimeViewService:
         start = week_start_for(org, day)
         sheet = await self.time.sheets.find(org.id, person, start)
         cost = show_cost(ctx)
+        locked = await period_locks.locked_through(self.session, org.id, [day])
         total = sum(v.entry.minutes for v in views)
         billable = sum(v.entry.minutes for v in views if v.entry.is_billable)
         target = pattern.target_on(day)
@@ -66,7 +68,10 @@ class TimeViewService:
             is_working_day=pattern.is_working_day(day),
             entries=[
                 TimeEntryRead.from_view(
-                    v, show_cost=cost, show_note=can_see_note(ctx, v.entry.user_id)
+                    v,
+                    show_cost=cost,
+                    show_note=can_see_note(ctx, v.entry.user_id),
+                    locked_through=locked.get(day),
                 )
                 for v in views
             ],
