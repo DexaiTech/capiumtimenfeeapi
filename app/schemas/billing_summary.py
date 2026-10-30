@@ -6,6 +6,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from app.schemas.billing import ClientRef
+from app.schemas.recovery import RecoveryPotentials
 
 BillingBasis = Literal["contract", "job", "team"]
 
@@ -71,6 +72,13 @@ class Breakdown(BaseModel):
         description="The price agreed with the client: the fixed fee, else the fee budget"
     )
     basis_values: BasisValues
+    recovery: RecoveryPotentials = Field(
+        description=(
+            "The time ready to bill at the task rate (its value), at each person's own charge-out "
+            "rate, at cost and at cost plus the practice's markup: what the invoice being raised "
+            "is compared with (the recovery comparison)"
+        )
+    )
 
 
 class JobBilling(BaseModel):
@@ -91,6 +99,11 @@ class ClientBillingSummary(BaseModel):
     jobs: list[JobBilling]
     totals: Breakdown
     show_cost: bool = Field(description="Whether the caller may see cost (`rate.read`)")
+    markup_bp: int = Field(
+        description=(
+            "The practice's cost-plus markup (basis points) behind `recovery.cost_plus_value`"
+        )
+    )
     time_costs: dict[uuid.UUID, int] | None = Field(
         description=(
             "The cost of each time entry ready to bill, by entry id, for billing on the team's "

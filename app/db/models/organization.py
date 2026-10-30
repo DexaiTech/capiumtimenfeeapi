@@ -81,6 +81,7 @@ class Organization(Base, IdMixin, TimestampMixin, SoftDeleteMixin):
         ),
         CheckConstraint("mileage_rate >= 0", name="mileage_rate"),
         CheckConstraint("expense_markup_bp BETWEEN 0 AND 100000", name="expense_markup_bp"),
+        CheckConstraint("cost_plus_markup_bp BETWEEN 0 AND 100000", name="cost_plus_markup_bp"),
         CheckConstraint("rate_mode IN ('staff_first', 'grade_only')", name="rate_mode"),
         CheckConstraint(
             "overtime_multiplier_bp BETWEEN 10000 AND 100000", name="overtime_multiplier_bp"
@@ -209,6 +210,11 @@ class Organization(Base, IdMixin, TimestampMixin, SoftDeleteMixin):
     )
     overtime_multiplier_bp: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default=text("15000")
+    )
+    # Recovery analysis: the margin (basis points, 5000 = 50%) added to the cost of the people who
+    # did the work to give the "cost plus" value it is compared with.
+    cost_plus_markup_bp: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("5000")
     )
     email: Mapped[str | None] = mapped_column(Text)
     phone: Mapped[str | None] = mapped_column(Text)

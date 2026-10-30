@@ -26,6 +26,7 @@ FINANCIAL = (
     "billing-summary",
     "job-profitability",
     "vat-summary",
+    "recovery-analysis",
 )
 READ = ("time-summary", "utilisation")
 ALL = FINANCIAL + READ

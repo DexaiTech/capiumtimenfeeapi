@@ -52,6 +52,7 @@ TITLES = {
     "expenses": "Expenses",
     "payments": "Payments",
     "missing-timesheets": "Missing Timesheets",
+    "recovery-analysis": "Recovery Analysis",
 }
 _EXTENSIONS: dict[str, str] = {"csv": "csv", "xlsx": "xlsx", "pdf": "pdf"}
 _MEDIA_TYPES: dict[str, str] = {
@@ -370,6 +371,9 @@ class ReportExporter:
         method = getattr(filters, "method", None)
         if method:
             lines.append(f"Method: {str(method).replace('_', ' ')}")
+        markup = getattr(filters, "markup_bp", None)
+        if markup is not None:
+            lines.append(f"Cost-plus markup: {_percent(markup)}")
         billable = getattr(filters, "is_billable", None)
         if billable is not None:
             lines.append(f"Billable: {'yes' if billable else 'no'}")

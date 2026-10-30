@@ -1,7 +1,8 @@
 """The client's billing summary (Billing > Prepare invoice): for each of the client's jobs the
 contract terms, the hours spent and what the work is worth, split by where the value comes from
 (the practice's own rates, rates agreed with the client, a fixed fee, other costs), what billing on
-each basis would come to, and the cost against the budget and the agreed price.
+each basis would come to, the cost against the budget and the agreed price, and the time ready to
+bill at the task rate, the staff charge-out rates and cost plus (the recovery comparison).
 
 Read only. The figures are those of the WIP ledger (``app/repositories/wip.py``) and the budget
 tracking (``app/repositories/job_budgets.py``) taken together, so nothing here can disagree with
@@ -9,6 +10,7 @@ them.
 """
 
 import uuid
+from collections import defaultdict
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,8 +25,10 @@ from app.schemas.billing_summary import (
     ClientBillingSummary,
     JobBilling,
 )
+from app.schemas.recovery import RecoveryPotentials
 from app.services.billing_common import get_client_or_404
 from app.services.policy import OrgContext, has_permission
+from app.services.recovery_values import Tally, potentials, staff_values
 
 
 def _money(pence: int, currency: str) -> str:
@@ -53,6 +57,7 @@ def _breakdown(
     fixed_fee_billed: int,
     *,
     show_cost: bool,
+    recovery: RecoveryPotentials,
 ) -> Breakdown:
     fixed = job.fixed_fee if job is not None and job.billing_basis == "fixed" else None
     agreed = fixed if fixed is not None else (job.budget_fee if job is not None else None)
@@ -86,6 +91,7 @@ def _breakdown(
             job=job_left + other_costs if job_left is not None else None,
             team=time.ready_cost_value + other_costs if show_cost else None,
         ),
+        recovery=recovery,
     )
 
 
@@ -94,7 +100,7 @@ def _optional_sum(values: list[int | None]) -> int | None:
     return sum(found) if found else None
 
 
-def _totals(parts: list[Breakdown], *, show_cost: bool) -> Breakdown:
+def _totals(parts: list[Breakdown], *, show_cost: bool, recovery: RecoveryPotentials) -> Breakdown:
     def total(name: str) -> int:
         return sum(getattr(p, name) for p in parts)
 
@@ -121,6 +127,7 @@ def _totals(parts: list[Breakdown], *, show_cost: bool) -> Breakdown:
             job=_optional_sum([p.basis_values.job for p in parts]),
             team=_optional_sum([p.basis_values.team for p in parts]) if show_cost else None,
         ),
+        recovery=recovery,
     )
 
 
@@ -142,6 +149,11 @@ class BillingSummaryService:
         jobs = await self.repo.jobs(org.id, client.id)
         fixed_ids = [j.id for j in jobs if j.billing_basis == "fixed"]
         billed = await self.wip.fixed_fee_billed(org.id, fixed_ids)
+        ready = await self._ready_by_job(ctx, client.id)
+        markup = org.cost_plus_markup_bp
+
+        def recovery_of(tally: Tally) -> RecoveryPotentials:
+            return RecoveryPotentials(**potentials(tally, markup, show_cost))
 
         rows: list[JobBilling] = []
         parts: list[Breakdown] = []
@@ -154,6 +166,7 @@ class BillingSummaryService:
                 disbursements.get(job.id, 0),
                 billed.get(job.id, 0),
                 show_cost=show_cost,
+                recovery=recovery_of(ready.get(job.id, Tally())),
             )
             # A job with nothing on it is left out: the page is about work to bill.
             if rollup.logged_minutes == 0 and figures.other_costs == 0 and job.fixed_fee is None:
@@ -180,8 +193,16 @@ class BillingSummaryService:
                 for name in TimeRollup.__slots__:
                     setattr(loose_time, name, getattr(loose_time, name) + getattr(rollup, name))
         loose_costs = sum(v for k, v in disbursements.items() if k is None or k not in known)
+        loose_ready = Tally.of(v for k, v in ready.items() if k is None or k not in known)
         if loose_time.logged_minutes or loose_costs:
-            figures = _breakdown(None, loose_time, loose_costs, 0, show_cost=show_cost)
+            figures = _breakdown(
+                None,
+                loose_time,
+                loose_costs,
+                0,
+                show_cost=show_cost,
+                recovery=recovery_of(loose_ready),
+            )
             parts.append(figures)
             rows.append(
                 JobBilling(
@@ -207,7 +228,35 @@ class BillingSummaryService:
         return ClientBillingSummary(
             client=ClientRef.from_model(client),
             jobs=rows,
-            totals=_totals(parts, show_cost=show_cost),
+            totals=_totals(
+                parts, show_cost=show_cost, recovery=recovery_of(Tally.of(ready.values()))
+            ),
             show_cost=show_cost,
+            markup_bp=markup,
             time_costs=time_costs,
         )
+
+    async def _ready_by_job(
+        self, ctx: OrgContext, client_id: uuid.UUID
+    ) -> dict[uuid.UUID | None, Tally]:
+        """The time ready to bill per job on every basis of the recovery comparison."""
+        org = ctx.organization
+        pieces = await self.repo.ready_time_pieces(
+            org.id, client_id, require_approval=org.require_timesheet_approval
+        )
+        staff = await staff_values(
+            self.session,
+            org,
+            [(p.user_id, p.entry_date, p.is_overtime, p.minutes) for p in pieces],
+        )
+        found: dict[uuid.UUID | None, Tally] = defaultdict(Tally)
+        for piece, staff_value in zip(pieces, staff, strict=True):
+            found[piece.job_id].add(
+                Tally(
+                    minutes=piece.minutes,
+                    task_value=piece.charge_value,
+                    staff_value=staff_value,
+                    cost_value=piece.cost_value,
+                )
+            )
+        return dict(found)

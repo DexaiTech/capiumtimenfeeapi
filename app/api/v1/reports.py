@@ -1,5 +1,5 @@
-"""Reports: debtors, utilisation, recoverability, billing, profitability, expenses, payments
-and missing timesheets. HTTP only. (The WIP report is in ``wip_reports``.)
+"""Reports: debtors, utilisation, recoverability, billing, profitability, expenses, payments,
+missing timesheets and the recovery analysis. HTTP only. (The WIP report is in ``wip_reports``.)
 
 Every report answers ``{rows, totals, filters}`` in the envelope (the others with a ``page``), or a
 file with ``?format=csv|xlsx|pdf``. The rules live in ``ReportService``.
@@ -14,6 +14,7 @@ from app.core.context import RequestContext
 from app.dependencies.common import ContextDep, SessionDep
 from app.dependencies.organization import OrgContextDep, require
 from app.schemas.common import ApiResponse, error_responses, ok
+from app.schemas.recovery import RecoveryAnalysisQuery, RecoveryAnalysisReport
 from app.schemas.reports import (
     AgedDebtorsQuery,
     AgedDebtorsReport,
@@ -358,3 +359,35 @@ async def missing_timesheets_report(
     exporter.ensure_allowed(org, query.format)
     report = await service.missing_timesheets(org, query)
     return await _deliver("missing-timesheets", report, query.format, org, ctx, exporter)
+
+
+@router.get(
+    "/reports/recovery-analysis",
+    summary="Recovery analysis",
+    description=(
+        "Per job, client or person: the billable time worked in the range (default: all of it) "
+        "and its invoice value (`invoiced_value`, what issued invoices billed for it, fixed fees "
+        "spread over the time, plus `to_bill_value`, what a draft bills it at or, not yet on an "
+        "invoice, what the job's terms will: the fixed fee still to bill or the time's value), "
+        "against what it would have billed at the task rate (`task_value`, the rates the time was "
+        "priced at: the job's or service's rate, a client rate, else the person's), at each "
+        "person's own charge-out rate (`staff_value`) and at cost plus the practice's markup "
+        "(`cost_plus_value`; `markup_bp` overrides `cost_plus_markup_bp` for a what-if). Each "
+        "`*_shortfall` is that potential less the invoice value: revenue left on the table when "
+        "positive, over-recovery when negative; each `*_recovery_bp` is the invoice value over "
+        "it. Filters: client, job, person (`user_id`), partner, manager, service. Requires "
+        "`report.financial`." + _COST_NOTE + _PAGING_NOTE + _EXPORT_NOTE
+    ),
+    response_model=ApiResponse[RecoveryAnalysisReport],
+    responses=_FILE_RESPONSES,
+)
+async def recovery_analysis_report(
+    org: FinancialDep,
+    service: ExtendedServiceDep,
+    exporter: ExporterDep,
+    ctx: ContextDep,
+    query: Annotated[RecoveryAnalysisQuery, Query()],
+) -> Any:
+    exporter.ensure_allowed(org, query.format)
+    report = await service.recovery_analysis(org, query)
+    return await _deliver("recovery-analysis", report, query.format, org, ctx, exporter)
