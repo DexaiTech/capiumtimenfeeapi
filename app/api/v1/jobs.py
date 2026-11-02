@@ -10,6 +10,7 @@ from app.dependencies.common import ContextDep, SessionDep
 from app.dependencies.organization import PageParamsDep, require
 from app.schemas.bulk import BulkChangeResult
 from app.schemas.common import ApiResponse, error_responses, ok, ok_page
+from app.schemas.job_rates import ClientJobRates
 from app.schemas.jobs import (
     JobAssigneesSet,
     JobBulkAction,
@@ -21,6 +22,7 @@ from app.schemas.jobs import (
     JobStatusChange,
     JobUpdate,
 )
+from app.services.job_rates import JobRateService
 from app.services.policy import OrgContext
 from app.services.time_jobs import JobService
 
@@ -178,6 +180,27 @@ async def update_job(
     ctx: ContextDep,
 ) -> ApiResponse[JobRead]:
     return ok(await service.update(org, job_id, body, ctx), "Job updated")
+
+
+@router.get(
+    "/clients/{client_id}/job-rates",
+    summary="The rates of a client's jobs",
+    description=(
+        "For each live job of the client (newest first): its billing basis and fixed fee, its "
+        "own hourly rate (`job_rate`, the client's rate agreed for the job; set or clear it with "
+        "`PATCH /jobs/{id}` `hourly_rate`), the task (service) rates it otherwise follows, a "
+        "rate agreed with the client for everyone that comes first (`client_rule`) and `source`: "
+        "what its time is billed at. Rules are those in force today. Rule rates are null "
+        "without `rate.read`. Requires `job.read`."
+    ),
+    responses=error_responses(403, 404),
+)
+async def client_job_rates(
+    client_id: uuid.UUID,
+    org: Annotated[OrgContext, Depends(require("job.read"))],
+    session: SessionDep,
+) -> ApiResponse[ClientJobRates]:
+    return ok(await JobRateService(session).client_job_rates(org, client_id))
 
 
 @router.post(
