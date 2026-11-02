@@ -435,10 +435,18 @@ async def test_vat_rate_resolution_order(client):
         disbursements=[chosen],
     )
     rates = {line["description"].split(" (")[0]: line for line in invoice["lines"]}
-    assert rates["Books"]["vat_rate_bp"] == 500 and rates["Books"]["vat_rate_id"] == str(reduced)
-    assert rates["Books"]["vat_amount"] == 600
+    # The client's own code beats the service's (APT63).
+    assert rates["Books"]["vat_rate_bp"] == 0 and rates["Books"]["vat_rate_id"] == str(zero)
+    assert rates["Books"]["vat_amount"] == 0
     assert rates["Ad hoc"]["vat_rate_id"] == str(zero)
     assert invoice["lines"][2]["vat_rate_id"] == str(exempt)
+
+    # A client without a default: the service's code.
+    books_job = await make_job(p.org, p.client, "Books", service_id=books)
+    on_books = await make_time_entry(p.org, p.owner, client=p.client, job=books_job)
+    serviced = await draft(client, p.owner, p.org, p.client.id, time=[on_books])
+    assert serviced["lines"][0]["vat_rate_bp"] == 500
+    assert serviced["lines"][0]["vat_rate_id"] == str(reduced)
 
     # A client without a default and a job without a service: the practice default (20%).
     entry = await make_time_entry(p.org, p.owner, client=p.client)
@@ -457,6 +465,42 @@ async def test_vat_rate_resolution_order(client):
         json={"vat_rate_id": None},
     )
     assert reset.json()["data"]["lines"][0]["vat_rate_bp"] == 2000
+
+
+async def test_client_wip_gives_the_service_vat_code_the_draft_charges(client):
+    """APT63: the prepare screen estimates each line's VAT from the client's WIP. A client's
+    own code comes before the job's service code; without one the service's code applies, so
+    the WIP says it, and the draft charges exactly what the screen shows."""
+    p = await new_practice(client)
+    standard = await vat_rate_id(p.org, "standard")
+    reduced = await vat_rate_id(p.org, "reduced")
+    books = await service_id(p.org, "BOOKS")
+    reduced_client = await make_client(p.org, "Reduced Ltd", default_vat_rate_id=reduced)
+    service_job = await make_job(p.org, reduced_client, "Books", service_id=books)
+    plain_job = await make_job(p.org, reduced_client, "Ad hoc")
+    on_service = await make_time_entry(p.org, p.owner, client=reduced_client, job=service_job)
+    on_client = await make_time_entry(p.org, p.owner, client=reduced_client, job=plain_job)
+
+    wip = await client.get(
+        org_url(p.org, f"/clients/{reduced_client.id}/wip"), headers=p.owner.headers
+    )
+    assert wip.status_code == 200, wip.text
+    items = {item["id"]: item for item in wip.json()["data"]["items"]}
+    assert items[str(on_service.id)]["service_id"] == str(books)
+    assert items[str(on_service.id)]["service_vat_rate_id"] == str(standard)
+    assert items[str(on_client.id)]["service_id"] is None
+    assert items[str(on_client.id)]["service_vat_rate_id"] is None
+
+    invoice = await draft(client, p.owner, p.org, reduced_client.id, time=[on_service, on_client])
+    rates = {line["description"].split(" (")[0]: line["vat_rate_id"] for line in invoice["lines"]}
+    # The client's 5% beats the service's 20%.
+    assert rates == {"Books": str(reduced), "Ad hoc": str(reduced)}
+
+    # A client without a default: the service's 20%.
+    books_job = await make_job(p.org, p.client, "Books", service_id=books)
+    on_books = await make_time_entry(p.org, p.owner, client=p.client, job=books_job)
+    serviced = await draft(client, p.owner, p.org, p.client.id, time=[on_books])
+    assert serviced["lines"][0]["vat_rate_id"] == str(standard)
 
 
 async def test_vat_is_rounded_per_line_half_up(client):

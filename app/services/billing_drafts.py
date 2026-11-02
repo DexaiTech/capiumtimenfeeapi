@@ -2,7 +2,7 @@
 
 Shared by estimates (convert to invoice) and recurring schedules (a run). Lines are priced
 here: net = round(quantity x unit_amount), VAT resolved the way invoice lines do it (the
-chosen rate, else the service's, the client's, the practice's), snapshotted on the line.
+chosen rate, else the client's, the service's, the practice's), snapshotted on the line.
 """
 
 import uuid

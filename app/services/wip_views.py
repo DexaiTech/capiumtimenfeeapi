@@ -86,7 +86,12 @@ def _job_ref(atom: WipAtom) -> JobRef | None:
     )
 
 
-def item_read(atom: WipAtom, as_at: date, names: dict[uuid.UUID, str]) -> WipItemRead:
+def item_read(
+    atom: WipAtom,
+    as_at: date,
+    names: dict[uuid.UUID, str],
+    service_vat: dict[uuid.UUID, uuid.UUID | None] | None = None,
+) -> WipItemRead:
     is_time = atom.kind == "time"
     person = (
         PersonRef(user_id=atom.person_user_id, full_name=names.get(atom.person_user_id))
@@ -108,6 +113,8 @@ def item_read(atom: WipAtom, as_at: date, names: dict[uuid.UUID, str]) -> WipIte
         activity_code_id=atom.activity_code_id,
         supplier=atom.supplier,
         client=ClientRef(id=atom.client_id, code=atom.client_code, name=atom.client_name),
+        service_id=atom.service_id,
+        service_vat_rate_id=(service_vat or {}).get(atom.service_id) if atom.service_id else None,
         age_days=age_days(atom.item_date, as_at),
         component=atom.component,
         charge_value=atom.charge_value,
@@ -218,11 +225,15 @@ class WipViewService:
             ctx.organization, WipFilters(client_id=client.id, job_id=job_id)
         )
         names = await self.refs.member_names(ctx.organization_id, [a.person_user_id for a in atoms])
+        # The prepare screen estimates VAT from these: a job's service code comes first.
+        service_vat = await self.atoms.service_vat_rates(
+            ctx.organization_id, {a.service_id for a in atoms if a.service_id}
+        )
         atoms.sort(key=lambda a: (a.item_date, a.kind != "time"))
         total = sum_groups(list(aggregate(atoms, "client", today).values()))
         return ClientWipRead(
             client=ClientRef.from_model(client),
-            items=[item_read(a, today, names) for a in atoms],
+            items=[item_read(a, today, names, service_vat) for a in atoms],
             totals=WipTotals(
                 minutes=total.minutes,
                 hours=hours_of(total.minutes),

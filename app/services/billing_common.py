@@ -54,8 +54,9 @@ async def get_client_or_404(
 
 
 class VatResolver:
-    """The VAT rate of a line: its chosen rate, else the service's, else the client's
-    default, else the practice default. Always 0 when the practice is not VAT-registered.
+    """The VAT rate of a line: its chosen rate, else the client's default, else the
+    service's, else the practice default (a client's own code beats the service's, APT63).
+    Always 0 when the practice is not VAT-registered.
 
     Returns ``(vat_rate_id, rate_bp)``; the pair is snapshotted onto the line.
     """
@@ -108,14 +109,14 @@ class VatResolver:
             found = await self._rate(line_rate_id)
             if found:
                 return found
-        if service_id is not None:
-            service_rate = await self._service_rate(service_id)
-            if service_rate is not None and (found := await self._rate(service_rate)):
-                return found
         if client.default_vat_rate_id is not None and (
             found := await self._rate(client.default_vat_rate_id)
         ):
             return found
+        if service_id is not None:
+            service_rate = await self._service_rate(service_id)
+            if service_rate is not None and (found := await self._rate(service_rate)):
+                return found
         return await self.default()
 
 

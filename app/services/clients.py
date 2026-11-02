@@ -441,7 +441,7 @@ class ClientsService:
                 continue
             line_net = fee * ANNUAL_MULTIPLIER[engagement.frequency]
             if ctx.organization.vat_registered:
-                rate_id = service.vat_rate_id or client.default_vat_rate_id
+                rate_id = client.default_vat_rate_id or service.vat_rate_id
                 rate_bp = rates.get(rate_id, default_bp) if rate_id else default_bp
             else:
                 rate_bp = 0

@@ -87,7 +87,7 @@ async def estimates_summary(
     summary="Write an estimate",
     description=(
         "Creates a draft. Each line is priced as an invoice line is (net = round(quantity x "
-        "unit price); VAT from the chosen rate, else the service's, the client's, the "
+        "unit price); VAT from the chosen rate, else the client's, the service's, the "
         "practice's). It has no number until it is sent. Requires `estimate.manage`."
     ),
     responses=error_responses(403, 404),
