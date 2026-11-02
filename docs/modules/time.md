@@ -30,6 +30,7 @@ queue** (used by the worker), so the client-work job code lives in `time_jobs.py
 | POST | `/jobs/{id}/status` | `job.update` | Status transition `{status}` |
 | PUT | `/jobs/{id}/assignees` | `job.update` | Replace assignees `{user_ids}` (active members) |
 | DELETE | `/jobs/{id}` | `job.delete` | Soft delete when unused |
+| GET | `/clients/{client_id}/job-rates` | `job.read` | The rate of each of the client's jobs and where it comes from (see "Client rates of jobs"); rule rates need `rate.read` |
 | GET | `/time-entries` | any member (own) / `time.read_all` | List; `user_id` = `me` (default), id or `all`; `date_from`, `date_to`, `client_id`, `job_id`, `billable`, `billing_status` (multi), `timesheet_status` (multi) |
 | GET | `/time-entries/week` | own / `time.read_all` / manager | Weekly grid with the person's targets, working days, missing days and day variance; `week_start` (any day of the week, default this week), `user_id` |
 | POST | `/time-entries` | `time.log` (own) / `time.manage_all` | Log time |
@@ -63,6 +64,31 @@ queue** (used by the worker), so the client-work job code lives in `time_jobs.py
 | POST | `/approvals/bulk-approve` | `timesheet.approve` | `{timesheet_ids}` (1–100), atomically |
 | GET | `/timesheets/missing` | `time.read_all`, else the people the caller manages | Staff whose timesheet for a week is not submitted; `week_start`, `user_id`, `manager_user_id` |
 | POST | `/timesheets/reminders/run` | `organization.update` or `timesheet.approve` | Send the timesheet and approval reminders of a week; optional `{week_start}` |
+
+## Client rates of jobs (APT54)
+
+The client's **Jobs** tab shows each job's rate. A job follows the **task rate** (the rates set against its service: service +
+grade, staff + service; else each person's charge-out rate) until the accountant agrees a custom **client rate** for it, which
+is the job's own `hourly_rate` (level 4 of the charge-out ladder, `docs/domain.md` "Rates"): set it, or clear it to go back to
+the task rate, with `PATCH /jobs/{id}` (`job.update`). No new concept or table: it is the rate the job already had, so billing,
+WIP and re-rating use it as they always did. As with any rate change, time already recorded keeps its rate; unbilled time moves
+to the new rate by re-rating the job (`POST /rates/rerate/preview` + `/rates/rerate` with `scope.job_ids`, `rate.manage`).
+
+`GET /clients/{client_id}/job-rates` (`job.read`; Code `app/services/job_rates.py`, `app/repositories/job_rates.py`; tests
+`tests/test_job_rates.py`) answers for every live job of the client, newest first, with the rules in force today
+(`as_of`, practice time zone):
+
+| Field | Meaning |
+|---|---|
+| `job_id`, `billing_basis`, `fixed_fee` | The job's terms |
+| `job_rate` | `jobs.hourly_rate`: the client rate agreed for the job, null when it follows the task rate |
+| `task_rate` | `{low, high, rules}`: the rates set against the job's service in force (several when they differ by grade or person); null without a service or such a rate |
+| `client_rule` | `{id, level, rate, effective_from, effective_to}`: a rate agreed with the client for everyone that the ladder uses **before** the job's own rate (`client_service`: for the job's service; `client`: for any service), else null |
+| `person_rules` | How many rates agreed with the client for named people (client + service + staff, client + staff) are in force: those people's time is priced by them first |
+| `source` | What the job's time is billed at: `fixed_fee`, `non_billable`, `client_rule`, `job`, `task` or `staff` |
+
+Without `rate.read` `task_rate`, `client_rule` and `person_rules` are null (`show_rates: false`); the job's own rate and fee
+are part of the job and stay visible. Unknown client: 404.
 
 ## Bulk action on jobs
 
