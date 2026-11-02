@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Any
 
-from sqlalchemy import ColumnElement, and_, case, func, not_, or_, select
+from sqlalchemy import ColumnElement, Text, and_, case, func, literal_column, not_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -24,6 +24,7 @@ STATUS_ALIASES: dict[str, tuple[str, ...]] = {
     "active": ("active",),
     "inactive": ("inactive", "suspended"),
     "left": ("left", "removed"),
+    "deleted": ("deleted",),
 }
 _NO_GRADE = 2_147_483_647
 _EARLIEST = date(1900, 1, 1)
@@ -36,6 +37,16 @@ def normalised_status(stored: str) -> str:
         if stored in stored_values:
             return name
     return stored
+
+
+def person_name() -> ColumnElement[str]:
+    """A staff member's name as their records show it: "John Smith (deleted user)" once they
+    were deleted (ticket APT62), else their name. The query must have ``User`` and
+    ``OrganizationMember`` (of the practice) joined. The constants are inlined so the expression
+    renders the same in SELECT and GROUP BY."""
+    deleted = OrganizationMember.status == literal_column("'deleted'", Text)
+    labelled = User.full_name.concat(literal_column("' (deleted user)'", Text))
+    return case((deleted, labelled), else_=User.full_name)
 
 
 def _status_rank(stored: str) -> int:

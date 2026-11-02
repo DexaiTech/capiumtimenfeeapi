@@ -29,6 +29,7 @@ from app.db.models import (
     WipAllocation,
 )
 from app.repositories.reports import DateRange, ItemFilter, item_conditions, total
+from app.repositories.staff import person_name
 
 
 @dataclass(frozen=True, slots=True)
@@ -210,7 +211,7 @@ class RecoveryRepository:
         if not user_ids:
             return {}
         stmt = (
-            select(OrganizationMember.user_id, User.full_name, OrganizationMember.initials)
+            select(OrganizationMember.user_id, person_name(), OrganizationMember.initials)
             .join(User, User.id == OrganizationMember.user_id)
             .where(
                 OrganizationMember.organization_id == organization_id,

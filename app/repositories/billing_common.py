@@ -24,6 +24,7 @@ from app.db.models import (
     User,
     VatRate,
 )
+from app.repositories.staff import person_name
 from app.utils.pagination import Page, PageParams, decode_cursor, encode_cursor
 
 
@@ -100,7 +101,7 @@ class BillingReferenceRepository:
         if not wanted:
             return {}
         stmt = (
-            select(OrganizationMember.user_id, User.full_name)
+            select(OrganizationMember.user_id, person_name())
             .join(User, User.id == OrganizationMember.user_id)
             .where(
                 OrganizationMember.organization_id == organization_id,

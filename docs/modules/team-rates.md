@@ -17,7 +17,7 @@ schema is `/openapi.json`; every route there has a summary, a description and it
 | Thing | Representation |
 |---|---|
 | Envelope | Success `{"success": true, "data": …, "message": "…", "meta": …}`. Error `{"success": false, "error": {"code", "message", "details", "request_id"}}`. |
-| `error.details` | A list of `{field, code, message}` (validation, duplicates), an object for some conflicts (`RATE_OVERLAP`, `STAFF_IN_USE`, …) or `null`. Field names are request field names; items of a batch are `entries.2.field`. |
+| `error.details` | A list of `{field, code, message}` (validation, duplicates), an object for some conflicts (`RATE_OVERLAP`, …) or `null`. Field names are request field names; items of a batch are `entries.2.field`. |
 | Lists | Cursor-paginated: query `limit` (1–100, default 25) and `cursor`; response `meta {next_cursor, has_more}`. Use a cursor only with the filters, `sort` and `order` it came from; an invalid cursor is 422 on `cursor`. Services, activity codes and the V1 rate lists are bounded and not paginated. |
 | Ids | UUIDs. A staff member's id **is** their user id: it is the `user_id` of rates, jobs, time entries and timesheets. |
 | Money | Integer pence. Rates are pence per hour (`rate`, `charge_rate`, `cost_rate`, `default_*_rate`). |
@@ -100,11 +100,13 @@ Staff are people the practice records time for; a *login* is optional.
 * **Status**: `active`; `inactive` (paused, can come back); `left` (no longer works for the practice, leaving
   date set). The V1 members endpoints call them `suspended` and `removed`; both vocabularies are stored and
   accepted: `suspended` reads as `inactive`, `removed` as `left` on every `/staff` response and filter.
+  `deleted` (ticket APT62): a person deleted while records refer to them (see `DELETE /staff/{id}`).
 * `is_selectable` = `active` **and** not past `leaving_date`: the people the Time module accepts time for.
   `GET /staff?selectable=true` is the picker for "log time for", assignees and approvers (add
   `has_login=true` for approvers).
 * Everything recorded for a person (time, expenses, invoices, rates, history) is kept after they are
-  deactivated or leave. A record nothing refers to can be deleted.
+  deactivated, leave or are deleted. A record nothing refers to is deleted completely; anyone else becomes a
+  **deleted user**, named "John Smith (deleted user)" on their records.
 * The practice always keeps one **active owner who can sign in**; only an owner changes another owner; nobody
   deactivates, deletes or un-logs themselves.
 * The practice's founder and people created through the V1 `/people` endpoints are staff too: they have a
@@ -118,7 +120,7 @@ Permission `member.read`. Query:
 | Param | Type | Meaning |
 |---|---|---|
 | `q` | string ≤ 200 | Case-insensitive substring of name, staff code, work email and (when they have a login) sign-in email. |
-| `status` | `active` / `inactive` / `left`, repeatable | Default `active` and `inactive` (people who left are hidden). |
+| `status` | `active` / `inactive` / `left` / `deleted`, repeatable | Default `active` and `inactive` (people who left and deleted users are hidden). |
 | `grade_id` | uuid | Only this grade. |
 | `approver_id` | uuid | Only staff whose approver is this person. |
 | `role_id` | uuid | Only this role. |
@@ -180,7 +182,8 @@ reports). Example response (shortened, see `StaffDetail`):
 
 Permission `member.read`. Any status. Response `StaffDetail`: `StaffRead` plus `usage` (what refers to the
 person, for example `[{"kind": "time_entries", "label": "Time entries", "count": 12}]`, empty when nothing)
-and `can_delete` (`usage` is empty). 404 for an unknown id.
+and `can_delete` (`usage` is empty: `DELETE` removes them completely; otherwise it keeps them as a deleted user).
+404 for an unknown id.
 
 ## PATCH /staff/{staff_id}
 
@@ -215,7 +218,7 @@ Permission `member.update`; `deactivate` and `delete` also need `member.remove` 
 | `delete` | none | as `DELETE /staff/{id}` |
 
 Each person goes through the **same service call** as the single endpoint, so every rule holds (the practice keeps an administrator, only an owner changes an
-owner, nobody deactivates or deletes themselves, a person that records refer to cannot be deleted). Response `{action, affected, changed}`: `affected` is the number
+owner, nobody deactivates or deletes themselves, a person that records refer to is kept as a deleted user). Response `{action, affected, changed}`: `affected` is the number
 of distinct people, `changed` those that actually changed (a person already in the wanted state is skipped). If any person is refused the whole batch answers
 **409 `BULK_REFUSED`** with `details = [{staff_id, number (the staff code), name, error_code, reason}]` for every one and **nothing changes**; an unknown or foreign id answers
 404 with `details.staff_ids`. Besides the usual per-person entries one `staff.bulk_changed` audit entry records `action`, `count`, `codes` (at most 100) and `bulk: true`.
@@ -233,29 +236,39 @@ Response `StaffDetail`.
 * Idempotent: asking for the state they are already in succeeds without changes.
 * 403 for yourself; 403 when the person is an owner and you are not; 409 (`CONFLICT`, `details.code` =
   `last_owner`) for the last active owner who can sign in; 409 `STAFF_LEFT` when asking `inactive` for someone
-  who has left (reactivate first).
+  who has left (reactivate first); 409 `STAFF_DELETED` for a deleted user (reactivate first).
 
 ## POST /staff/{staff_id}/reactivate
 
-Permission `member.update`. No body. Sets the status to `active` and clears the leaving date; idempotent. 409
+Permission `member.update`. No body. Sets the status to `active` (also for a deleted user: this is how one is
+restored) and clears the leaving date; idempotent. 409
 `STAFF_EMAIL_TAKEN` when another active staff member now uses their work email; 403 for an owner when you are
 not one. Response `StaffDetail`. A person who could sign in before can sign in again.
 
 ## DELETE /staff/{staff_id}
 
-Permission `member.remove`. Deletes a record nothing refers to (`can_delete`). Otherwise 409 `STAFF_IN_USE`:
+Permission `member.remove`. Deletes a record nothing refers to (`can_delete`) completely. Someone that records
+refer to (the `usage` of the detail) is kept as a **deleted user** instead (ticket APT62: "John Smith (deleted
+user)" under the timesheets), with `status = deleted`:
 
-```json
-{"code": "STAFF_IN_USE", "message": "…Deactivate them instead.",
- "details": {"usage": [{"kind": "time_entries", "label": "Time entries", "count": 1},
-                       {"kind": "timesheets", "label": "Timesheets", "count": 1}]}}
-```
+* every record stays exactly as it was: time, timesheets, expenses, invoices, rates, WIP, audit;
+* they can no longer use the practice: a person with a login is signed out everywhere (unless their account
+  also belongs to another practice) and the practice no longer lets them in;
+* they leave the staff list (only `GET /staff?status=deleted` lists them), `is_selectable` is false so no
+  picker offers them, no new time is accepted for them, and the people they approved lose their approver;
+* where the API names people on records (timesheets and approvals, WIP, the time, utilisation, recovery and
+  expense reports, a job's time by person, task assignees) they read "John Smith (deleted user)"; the staff
+  record itself keeps the plain `full_name` and `status = deleted`, so a screen that names people from the
+  staff list adds the label itself;
+* `POST /staff/{id}/reactivate` restores them; deleting a deleted user again changes nothing.
 
 `usage` kinds: `time_entries, timesheets, timers, disbursements, invoices, credit_notes, payments, jobs,
 job_assignees, clients, rate_rules, rate_changes, rate_reruns, rate_rerun_items, wip_allocations,
-wip_write_offs, organizations`. 403 for yourself or (as a non-owner) an owner; 409 `CONFLICT`
+wip_write_offs, organizations`. The `staff.deleted` audit entry of a kept person has `old`/`new` status and
+`kept_for` (those counts). 403 for yourself or (as a non-owner) an owner; 409 `CONFLICT`
 (`details.code` = `last_owner`) for the last owner who can sign in. Response 200, `data: null`. People who
-could sign in are signed out and their account is closed unless it also belongs to another practice.
+could sign in are signed out; when they are removed completely their account is closed unless it also belongs
+to another practice.
 
 ## POST /staff/{staff_id}/invite
 
@@ -699,7 +712,7 @@ would produce an invalid code.
 id, code, full_name,
 email (work email), has_login, login_email (null without a login),
 login_status: "none" | "invited" | "active", invited_at,
-status: "active" | "inactive" | "left", is_selectable,
+status: "active" | "inactive" | "left" | "deleted", is_selectable,
 grade: RefRead | null, approver: {id, full_name} | null, role: RoleSummary,
 job_title, initials, working_minutes_per_day, working_days (ISO, 1 = Monday), weekly_capacity_minutes,
 chargeable_target_bp, start_date, leaving_date,
@@ -745,7 +758,7 @@ All errors use the envelope above. 401 `AUTH_REQUIRED`, 403 `PERMISSION_DENIED`,
 | `EMAIL_TAKEN` | 409 | The sign-in address already belongs to an account (invite, link-login). |
 | `ACCOUNT_SHARED` | 409 | The person's account also belongs to another practice (rename, unlink). |
 | `STAFF_LEFT` | 409 | Marking someone who has left as `inactive`. |
-| `STAFF_IN_USE` | 409 | Deleting staff with records. `details.usage`. |
+| `STAFF_DELETED` | 409 | Deactivating a deleted user (reactivate them first). |
 | `STAFF_NOT_ACTIVE` | 409 | Giving a login to someone who is not active. |
 | `LOGIN_ALREADY_LINKED` | 409 | `link-login` for someone who has a login. |
 | `LOGIN_ALREADY_ACTIVE` | 409 | `invite` for someone who already chose a password. |
@@ -789,7 +802,7 @@ cost rates as `null`.
 * **Jobs**: a service with `default_billable=false` gives new jobs `billing_basis = non_billable`. A job's
   `hourly_rate` is level 4 of the ladder. Jobs and clients may name staff without a login.
 * **V1 `/members`, `/people`**: unchanged, still list everyone (staff without a login too, `email` = work
-  email) with the V1 statuses `active`, `suspended`, `removed`, and now `inactive`, `left`.
+  email) with the V1 statuses `active`, `suspended`, `removed`, and now `inactive`, `left`, `deleted`.
 
 # Audit actions
 

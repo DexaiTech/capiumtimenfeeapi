@@ -55,6 +55,7 @@ from app.db.models import (
     WipWriteOff,
 )
 from app.db.models.organization import GONE_STATUSES
+from app.repositories.staff import person_name
 
 type AnySelect = Select[*tuple[Any, ...]]
 
@@ -526,7 +527,7 @@ class ReportRepository:
         if not user_ids:
             return {}
         stmt = (
-            select(OrganizationMember.user_id, User.full_name)
+            select(OrganizationMember.user_id, person_name().label("full_name"))
             .join(User, User.id == OrganizationMember.user_id)
             .where(
                 OrganizationMember.organization_id == organization_id,
@@ -624,7 +625,7 @@ class ReportRepository:
         client_id: Any = null()
         match group_by:
             case "person":
-                key, code, name = TimeEntry.user_id, OrganizationMember.initials, User.full_name
+                key, code, name = TimeEntry.user_id, OrganizationMember.initials, person_name()
             case "client":
                 key, code, name = TimeEntry.client_id, Client.code, Client.name
             case "job":
@@ -717,7 +718,7 @@ class ReportRepository:
         stmt = (
             select(
                 OrganizationMember.user_id,
-                User.full_name,
+                person_name().label("full_name"),
                 OrganizationMember.initials,
                 OrganizationMember.status,
                 OrganizationMember.weekly_capacity_minutes,
@@ -761,7 +762,7 @@ class ReportRepository:
                 key, code, name = job_id, Job.number, Job.name
                 client_name, group_client_id = Client.name, Client.id
             case "person":
-                key, code, name = TimeEntry.user_id, OrganizationMember.initials, User.full_name
+                key, code, name = TimeEntry.user_id, OrganizationMember.initials, person_name()
             case _:  # pragma: no cover - validated by the schema
                 raise ValueError(group_by)
         on_invoice = Invoice.id.is_not(None)

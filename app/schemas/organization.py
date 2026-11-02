@@ -565,7 +565,7 @@ class OrganizationDelete(RequestModel):
     confirm_name: str = Field(min_length=1, max_length=120)
 
 
-MemberStatus = Literal["active", "suspended", "removed", "inactive", "left"]
+MemberStatus = Literal["active", "suspended", "removed", "inactive", "left", "deleted"]
 Initials = Annotated[str, Field(min_length=1, max_length=6, pattern=r"^[A-Za-z0-9]+$")]
 
 

@@ -32,6 +32,7 @@ from app.repositories.reports import (
     total,
     when,
 )
+from app.repositories.staff import person_name
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,7 +84,7 @@ class ReportExtRepository:
             case "type":
                 key, code, name = Expense.expense_type_id, ExpenseType.code, ExpenseType.name
             case "person":
-                key, code, name = ExpenseClaim.user_id, OrganizationMember.initials, User.full_name
+                key, code, name = ExpenseClaim.user_id, OrganizationMember.initials, person_name()
             case "client":
                 key, code, name = Expense.client_id, Client.code, Client.name
             case "job":

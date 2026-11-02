@@ -19,6 +19,7 @@ from app.db.models import (
     ServiceActivityCode,
     User,
 )
+from app.repositories.staff import person_name
 
 
 class TimeReferenceRepository:
@@ -129,11 +130,11 @@ class TimeReferenceRepository:
     async def user_names(
         self, organization_id: uuid.UUID, user_ids: Collection[uuid.UUID]
     ) -> dict[uuid.UUID, str]:
-        """Full names of members (any status) of the organization."""
+        """Names of members (any status) of the organization, "(deleted user)" marked."""
         if not user_ids:
             return {}
         stmt = (
-            select(User.id, User.full_name)
+            select(User.id, person_name())
             .join(OrganizationMember, OrganizationMember.user_id == User.id)
             .where(
                 OrganizationMember.organization_id == organization_id,
