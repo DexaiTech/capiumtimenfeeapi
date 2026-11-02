@@ -3,8 +3,10 @@
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Path, Query, status
+from fastapi import APIRouter, Depends, Path, Query, Request, status
+from fastapi.responses import Response, StreamingResponse
 
+from app.api.v1.users import read_avatar_upload
 from app.dependencies.common import ContextDep, SessionDep
 from app.dependencies.organization import OrgContextDep, require
 from app.schemas.common import ApiResponse, error_responses, ok
@@ -138,3 +140,95 @@ async def make_default_invoice_template(
     template_id: TemplateIdPath, org: SettingsManager, service: TemplateServiceDep, ctx: ContextDep
 ) -> ApiResponse[InvoiceTemplateRead]:
     return ok(await service.make_default(org, template_id, ctx), "Default template changed")
+
+
+@router.post(
+    "/invoice-templates/{template_id}/watermark-image",
+    summary="Set the watermark picture of an invoice template",
+    description=(
+        "`multipart/form-data` with the picture in the field `file`, checked like a profile "
+        "picture: PNG, JPEG, WebP or GIF, at most 2 MB (413 `FILE_TOO_LARGE`; 422 "
+        "`FILE_TYPE_NOT_ALLOWED`, `FILE_EMPTY`). Printed large and pale across every page of "
+        "the documents drawn with the template, as the watermark text is. A watermark is a text "
+        "or a picture: 422 while the template has a `watermark_text`. Replaces the previous "
+        "picture. 503 `STORAGE_UNAVAILABLE` when the file store cannot take it. Requires "
+        "`settings.manage`."
+    ),
+    responses=error_responses(400, 403, 404, 413, 422, 503),
+    openapi_extra={
+        "requestBody": {
+            "required": True,
+            "content": {
+                "multipart/form-data": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {"file": {"type": "string", "format": "binary"}},
+                        "required": ["file"],
+                    }
+                }
+            },
+        }
+    },
+)
+async def set_invoice_template_watermark_image(
+    template_id: TemplateIdPath,
+    request: Request,
+    org: SettingsManager,
+    service: TemplateServiceDep,
+    ctx: ContextDep,
+) -> ApiResponse[InvoiceTemplateRead]:
+    part = await read_avatar_upload(request)
+    assert part.filename is not None
+    template = await service.set_watermark_image(
+        org,
+        template_id,
+        file_name=part.filename,
+        declared_type=part.content_type,
+        data=part.data,
+        rctx=ctx,
+    )
+    return ok(template, "Watermark picture updated")
+
+
+@router.delete(
+    "/invoice-templates/{template_id}/watermark-image",
+    summary="Remove the watermark picture of an invoice template",
+    description="Not an error when there is none. Requires `settings.manage`.",
+    responses=error_responses(403, 404),
+)
+async def clear_invoice_template_watermark_image(
+    template_id: TemplateIdPath, org: SettingsManager, service: TemplateServiceDep, ctx: ContextDep
+) -> ApiResponse[InvoiceTemplateRead]:
+    return ok(
+        await service.clear_watermark_image(org, template_id, ctx), "Watermark picture removed"
+    )
+
+
+@router.get(
+    "/invoice-templates/{template_id}/watermark-image",
+    summary="Download the watermark picture of an invoice template",
+    description=(
+        "Streams the picture with `X-Content-Type-Options: nosniff` and the content type "
+        "detected on upload; fetch it with the `Authorization` header and show it from a blob "
+        "URL. 404 when the template has none. Any member (an inactive template: "
+        "`settings.manage`)."
+    ),
+    responses={
+        **error_responses(404),
+        200: {"content": {"application/octet-stream": {}}, "description": "The picture"},
+    },
+    response_class=Response,
+)
+async def download_invoice_template_watermark_image(
+    template_id: TemplateIdPath, org: OrgContextDep, service: TemplateServiceDep
+) -> StreamingResponse:
+    content_type, content = await service.open_watermark_image(org, template_id)
+    return StreamingResponse(
+        content,
+        media_type=content_type,
+        headers={
+            "Content-Disposition": "inline",
+            "Cache-Control": "private, max-age=300",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )

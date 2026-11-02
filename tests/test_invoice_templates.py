@@ -52,6 +52,7 @@ async def test_a_new_practice_has_one_default_standard_template(client):
         "footer_text": None,
         "accent_color": None,
         "watermark_text": None,
+        "watermark_image": False,
         "is_default": True,
         "status": "active",
         "client_count": 0,

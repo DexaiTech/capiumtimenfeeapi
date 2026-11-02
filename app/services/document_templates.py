@@ -13,11 +13,15 @@ from collections.abc import Sequence
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.logging import get_logger
 from app.db.models import Client, Disbursement, Expense, InvoiceLine, TimeEntry
 from app.repositories.billing_common import BillingReferenceRepository
 from app.repositories.invoice_templates import InvoiceTemplateRepository
 from app.repositories.wip import WipRepository
 from app.services.invoice_pdf import ItemDetail, PdfTemplate
+from app.services.storage import StorageError, get_storage
+
+log = get_logger(__name__)
 
 
 async def pdf_template(
@@ -43,7 +47,23 @@ async def pdf_template(
         footer_text=row.footer_text,
         accent_color=row.accent_color,
         watermark_text=row.watermark_text,
+        watermark_image=(
+            await _watermark_image(organization_id, row.watermark_image_key)
+            if row.watermark_image_key
+            else None
+        ),
     )
+
+
+async def _watermark_image(organization_id: uuid.UUID, key: str) -> bytes | None:
+    """The template's watermark picture; a picture the file store cannot give is left out
+    rather than failing the document."""
+    try:
+        chunks = await get_storage().open(organization_id, key)
+        return b"".join([chunk async for chunk in chunks])
+    except StorageError:
+        log.warning("watermark_image_unavailable", storage_key_prefix=key[:6])
+        return None
 
 
 async def job_names(

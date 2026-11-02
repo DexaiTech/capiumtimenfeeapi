@@ -91,7 +91,7 @@ async def revoke_session(
     return ok(message="Session revoked")
 
 
-async def _read_avatar_upload(request: Request) -> FormPart:
+async def read_avatar_upload(request: Request) -> FormPart:
     """The ``file`` part of the upload. The body is read under the cap of one picture plus its
     envelope (the global body limit exempts this endpoint); reading stops at the cap."""
     declared = request.headers.get("content-length", "")
@@ -140,7 +140,7 @@ async def _read_avatar_upload(request: Request) -> FormPart:
 async def set_avatar(
     request: Request, principal: VerifiedPrincipalDep, service: UserServiceDep, ctx: ContextDep
 ) -> ApiResponse[UserRead]:
-    part = await _read_avatar_upload(request)
+    part = await read_avatar_upload(request)
     assert part.filename is not None
     user = await service.set_avatar(
         principal.user,

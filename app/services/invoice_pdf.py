@@ -10,6 +10,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal
+from io import BytesIO
 from typing import Any
 from uuid import UUID
 
@@ -88,6 +89,8 @@ class PdfTemplate:
     accent_color: str | None = None
     # Printed large and pale across the page of an issued document.
     watermark_text: str | None = None
+    # Or a picture (PNG, JPEG, WebP or GIF), printed the same way.
+    watermark_image: bytes | None = None
 
 
 def rgb(color: str | None) -> tuple[int, int, int] | None:
@@ -180,10 +183,15 @@ class StatementData:
 
 class _Document(FPDF):  # type: ignore[misc]
     def __init__(
-        self, title: str, watermark: str | None, accent: tuple[int, int, int] | None = None
+        self,
+        title: str,
+        watermark: str | None,
+        accent: tuple[int, int, int] | None = None,
+        watermark_image: bytes | None = None,
     ) -> None:
         super().__init__(orientation="P", unit="mm", format="A4")
         self.watermark = watermark
+        self.watermark_image = watermark_image
         # The template's colour: None keeps the plain black and grey look.
         self.accent = accent
         self.set_title(latin1(title))
@@ -194,6 +202,19 @@ class _Document(FPDF):  # type: ignore[misc]
         self.alias_nb_pages()
 
     def header(self) -> None:
+        if self.watermark_image:
+            # As large as fits a 150 mm square at the centre of the page, and pale.
+            with self.local_context(fill_opacity=0.12):
+                self.image(
+                    BytesIO(self.watermark_image),
+                    x=self.w / 2 - 75,
+                    y=self.h / 2 - 75,
+                    w=150,
+                    h=150,
+                    keep_aspect_ratio=True,
+                )
+            self.set_xy(_MARGIN, _MARGIN)
+            return
         if not self.watermark:
             return
         # A long text is set smaller so that it still fits across the page.
@@ -434,7 +455,12 @@ def render_invoice(
         "DRAFT" if unissued else ("VOID" if invoice.status == "void" else template.watermark_text)
     )
     number = invoice.number or "DRAFT"
-    pdf = _Document(f"Invoice {number}", watermark, rgb(template.accent_color))
+    pdf = _Document(
+        f"Invoice {number}",
+        watermark,
+        rgb(template.accent_color),
+        None if unissued or invoice.status == "void" else template.watermark_image,
+    )
     letterhead = Letterhead.of(organization, template)
     facts = [("Invoice number", number)]
     if invoice.issue_date:
@@ -490,6 +516,7 @@ def render_credit_note(
         f"Credit note {note.number}",
         (template or PdfTemplate()).watermark_text,
         rgb((template or PdfTemplate()).accent_color),
+        (template or PdfTemplate()).watermark_image,
     )
     facts = [
         ("Credit note", note.number),
@@ -542,6 +569,7 @@ def render_statement(
         f"Statement {data.client.name}",
         (template or PdfTemplate()).watermark_text,
         rgb((template or PdfTemplate()).accent_color),
+        (template or PdfTemplate()).watermark_image,
     )
     period = (
         f"{short_date(data.date_from)} to {short_date(data.date_to)}"

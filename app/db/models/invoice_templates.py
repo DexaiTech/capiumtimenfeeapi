@@ -32,6 +32,13 @@ class InvoiceTemplate(Base, IdMixin, OrgScopedMixin, TimestampMixin, SoftDeleteM
             "watermark_text IS NULL OR watermark_text ~ '^[A-Za-z0-9 -]{1,24}$'",
             name="watermark_text_format",
         ),
+        CheckConstraint(
+            "(watermark_image_key IS NULL) = (watermark_image_type IS NULL)",
+            name="watermark_image_all_or_none",
+        ),
+        CheckConstraint(
+            "watermark_text IS NULL OR watermark_image_key IS NULL", name="watermark_text_or_image"
+        ),
         CheckConstraint("NOT is_default OR status = 'active'", name="default_is_active"),
         Index(
             "uq_invoice_templates_organization_id_name_lower",
@@ -60,6 +67,9 @@ class InvoiceTemplate(Base, IdMixin, OrgScopedMixin, TimestampMixin, SoftDeleteM
     accent_color: Mapped[str | None] = mapped_column(Text)
     # Printed large and pale across every page of an issued document. Null: none.
     watermark_text: Mapped[str | None] = mapped_column(Text)
+    # Or a picture, printed the same way: its key in the file store and its content type.
+    watermark_image_key: Mapped[str | None] = mapped_column(Text)
+    watermark_image_type: Mapped[str | None] = mapped_column(Text)
     is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default="active")
 

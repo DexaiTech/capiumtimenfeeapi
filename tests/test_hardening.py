@@ -125,6 +125,7 @@ async def test_reads_and_upload_endpoints_are_not_capped(
         "/api/v1/organizations/0198c1f2-6c7e-7d3a-9b1e-2f6f0a4d5e11/imports/clients"
     )
     assert _UPLOADS.match("/api/v1/users/me/avatar")
+    assert _UPLOADS.match("/api/v1/organizations/x/invoice-templates/y/watermark-image")
     for path in (
         "/api/v1/users/me/avatar/extra",
         "/api/v1/users/someone-else/avatar",

@@ -33,6 +33,9 @@ email worker): the client's `invoice_template_id`, else the practice default
 | PATCH | `/invoice-templates/{template_id}` | `settings.manage` | Change any field except `is_default`. |
 | DELETE | `/invoice-templates/{template_id}` | `settings.manage` | Delete (soft) a template no client uses. |
 | POST | `/invoice-templates/{template_id}/make-default` | `settings.manage` | Make it the practice default. |
+| POST | `/invoice-templates/{template_id}/watermark-image` | `settings.manage` | Set or replace the watermark picture (multipart field `file`). |
+| DELETE | `/invoice-templates/{template_id}/watermark-image` | `settings.manage` | Remove the watermark picture (not an error when there is none). |
+| GET | `/invoice-templates/{template_id}/watermark-image` | any member (an inactive template: `settings.manage`) | The picture, streamed with its detected content type; 404 when there is none. |
 
 No new permission codes were added.
 
@@ -46,6 +49,8 @@ No new permission codes were added.
   "layout": "standard",            // "standard" | "detailed" (every time entry) | "summary" (one line per job)
   "show_logo": true, "show_bank_details": true,
   "footer_text": null,             // up to 1000 characters
+  "watermark_text": null,          // up to 24 letters, digits, spaces and hyphens
+  "watermark_image": false,        // true: a picture is the watermark (`/watermark-image`)
   "is_default": true,              // the template of clients that have not chosen one
   "status": "active",              // "active" | "inactive" (hidden from pickers)
   "client_count": 0,               // live clients of the practice that use it
@@ -85,6 +90,15 @@ cannot be changed here (use `make-default`).
   `docs/modules/clients.md`): an active template of the practice (another practice's id answers
   404, an inactive or deleted one 422/404). A client without one uses the default.
 * Deleting is a soft delete: the row stays, the name becomes free.
+* **Watermark: a text or a picture** (migration `069`). Either is printed large and pale across
+  every page of the invoices, credit notes and statements drawn with the template; drafts and
+  void invoices keep their DRAFT / VOID watermark instead. The picture is checked and stored like
+  a profile picture: PNG, JPEG, WebP or GIF, at most 2 MB (413 `FILE_TOO_LARGE`, 422
+  `FILE_TYPE_NOT_ALLOWED` / `FILE_EMPTY`), in the practice's file store
+  (`invoice_templates.watermark_image_key`, `watermark_image_type`). Never both: uploading a
+  picture while the template has a `watermark_text`, or setting a text while it has a picture,
+  answers 422 `VALIDATION_ERROR` (remove the other one first); a check constraint holds it too.
+  Setting or removing the picture is audited as `.updated` with `changes: {watermark_image: [old, new]}`.
 
 ## Audit actions
 
