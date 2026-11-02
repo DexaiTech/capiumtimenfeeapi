@@ -41,7 +41,7 @@ permission code, with its group and description and the system roles that hold i
 | Timesheets | own; others' with `time.read_all` or as their manager | submit own; approve with `timesheet.approve` |
 | Disbursements | `wip.read` or own | `disbursement.log` (own), `disbursement.manage` (any) |
 | WIP | `wip.read` | write-off: `wip.write_off` |
-| Invoices, credit notes | `invoice.read` | draft: `invoice.create`; issue/void/send: `invoice.issue`; credit note: `credit_note.create` |
+| Invoices, credit notes | `invoice.read` | draft: `invoice.create`; issue/void: `invoice.issue`; send: `invoice.send`; credit note: `credit_note.create` |
 | Payments | `payment.read` | `payment.record` |
 | Reports | `report.read` (time, jobs, utilisation) | `report.financial` (WIP, debtors, billing, recoverability, profitability) |
 | Period lock | `period_lock.read` (Owner, Admin, Partner, Manager, Billing) | lock: `period_lock.manage` (Owner, Admin, Partner); reopen: `period_lock.reopen` (Owner, Admin) |
@@ -493,9 +493,9 @@ invoices stay in the sequence for the audit trail).
 number, dates, lines, VAT summary by rate, totals, bank details and footer (fpdf2).
 Drafts render with a "DRAFT" watermark.
 
-**Send**: `POST …/invoices/{id}/send` queues a `send_invoice_email` job to the given
-addresses, else the client's `invoice_email`, else its billing contacts, else its primary
-contact, else the client email, with the PDF attached; sets `sent_at`.
+**Send** (`invoice.send`): `POST …/invoices/{id}/send` queues a `send_invoice_email` job to
+the given addresses, else the client's `invoice_email`, else its billing contacts, else its
+primary contact, else the client email, with the PDF attached; sets `sent_at`.
 
 **Status for display** (derived, not stored): `draft`, `void`, `paid` (balance 0),
 `part_paid`, `overdue` (balance > 0 and `due_date` < today), `issued`.
