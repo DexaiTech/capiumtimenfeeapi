@@ -216,7 +216,7 @@ class RecurringLine(Base, IdMixin, OrgScopedMixin, TimestampMixin):
         Numeric(12, 2), nullable=False, server_default=text("1")
     )
     unit_amount: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    # The chosen rate; null means the usual resolution (service, client, practice default).
+    # The chosen rate; null means the usual resolution (client, service, practice default).
     vat_rate_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
 
 

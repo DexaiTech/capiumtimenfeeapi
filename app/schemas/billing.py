@@ -193,6 +193,12 @@ class WipItemRead(BaseModel):
     activity_code_id: uuid.UUID | None = None
     supplier: str | None = None
     client: ClientRef | None = None
+    service_id: uuid.UUID | None = Field(default=None, description="The job's service")
+    service_vat_rate_id: uuid.UUID | None = Field(
+        default=None,
+        description="Client WIP: the VAT code of the job's service, which a drafted time or "
+        "fixed-fee line takes when no code is chosen and the client has no default",
+    )
     age_days: int | None = Field(default=None, description="Days since the item date")
     component: Literal["time", "fixed_fee", "expense"] | None = Field(
         default=None, description="Which part of Total WIP the item counts in"

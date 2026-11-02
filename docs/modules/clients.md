@@ -250,7 +250,7 @@ active engagements, deadline counts) regardless of page size (tested).
   `payment.read`; otherwise null.
 * **Recurring fees** (detail): active engagements not ended before today, annualised
   (monthly ×12, quarterly ×4, annually ×1); VAT per engagement with `money.vat_on` at the
-  service's rate, else the client's default, else the practice default; 0 when the practice
+  client's default, else the service's rate, else the practice default; 0 when the practice
   is not VAT registered. One-off fees are reported separately, without VAT.
 * **Client rates** of a soft-deleted client are unreachable (404); a removed member cannot
   get a new client rate (422).

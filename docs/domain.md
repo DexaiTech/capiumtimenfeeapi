@@ -478,7 +478,7 @@ disbursements, all from that client and currently `unbilled`) and how to present
 **Line maths:** `net = round(quantity × unit_amount)` unless the net was overridden;
 `vat = round(net × vat_rate_bp / 10000)` per line; invoice totals are sums of lines;
 `gross = net + vat`. When the practice is not VAT-registered every line's rate is 0.
-VAT rate per line: the line's chosen rate, else the service's, else the client's default,
+VAT rate per line: the line's chosen rate, else the client's default, else the service's,
 else the practice default.
 
 **Issue** (`invoice.issue`): needs at least one line and `gross_total ≥ 0`; takes the next

@@ -272,6 +272,17 @@ class WipAtomRepository:
         )
         return {row[0]: row[1] for row in (await self.session.execute(stmt)).all()}
 
+    async def service_vat_rates(
+        self, organization_id: uuid.UUID, ids: Collection[uuid.UUID]
+    ) -> dict[uuid.UUID, uuid.UUID | None]:
+        """Service id -> its VAT code (null when it has none)."""
+        if not ids:
+            return {}
+        stmt = select(Service.id, Service.vat_rate_id).where(
+            Service.organization_id == organization_id, Service.id.in_(list(ids))
+        )
+        return {row[0]: row[1] for row in (await self.session.execute(stmt)).all()}
+
     # --- The atoms ---------------------------------------------------------------------
 
     async def load_atoms(

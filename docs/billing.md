@@ -86,7 +86,7 @@ Two lines are built:
 * `quantity` = 255 minutes = 4.25 hours; the unit amount is the net over the hours.
 * VAT is computed **per line** (`round(net × rate_bp / 10000)`, half up) and the invoice
   totals are the sums of the lines; `gross = net + vat` is also a database check.
-* The VAT rate of a line is its own rate, else its service's, else the client's default,
+* The VAT rate of a line is its own rate, else the client's default, else its service's,
   else the practice default; 0 for a practice that is not VAT-registered. The pair
   `(vat_rate_id, vat_rate_bp)` is snapshotted on the line.
 

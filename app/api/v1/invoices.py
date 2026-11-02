@@ -231,7 +231,7 @@ async def delete_invoice(
     description=(
         "A line that bills no WIP (`kind=manual`): net = round(quantity x unit amount) "
         "unless `net_amount` is given; negative for a discount. VAT: the line's rate, else "
-        "the service's, else the client's default, else the practice default. The invoice "
+        "the client's default, else the service's, else the practice default. The invoice "
         "total may not go below zero (422 `INVOICE_TOTAL_NEGATIVE`). Drafts only. "
         "Requires `invoice.create`."
     ),
