@@ -136,6 +136,21 @@ def sees_debtors(ctx: OrgContext) -> bool:
     )
 
 
+def approval_on(ctx: OrgContext, kind: ApprovalKind) -> bool:
+    """Whether the practice approves this kind at all (its switch, ticket APT53)."""
+    org = ctx.organization
+    return {
+        "timesheet": org.require_timesheet_approval,
+        "expense": org.expense_approval_required,
+        "invoice": org.invoice_approval_required,
+        "wip_adjustment": org.wip_adjustment_approval_required,
+    }[kind]
+
+
 def approval_kinds(ctx: OrgContext) -> list[ApprovalKind]:
-    """The kinds of approval the caller may decide."""
-    return [kind for kind in LIVE_APPROVAL_KINDS if has_permission(ctx, APPROVAL_PERMISSIONS[kind])]
+    """The kinds of approval the caller may decide, of those the practice has switched on."""
+    return [
+        kind
+        for kind in LIVE_APPROVAL_KINDS
+        if approval_on(ctx, kind) and has_permission(ctx, APPROVAL_PERMISSIONS[kind])
+    ]

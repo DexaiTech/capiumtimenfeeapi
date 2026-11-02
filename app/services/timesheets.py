@@ -209,6 +209,19 @@ class TimesheetService:
             result = await self._reads(ctx, [by_id[i] for i in wanted])
         return result
 
+    async def approve_waiting(
+        self, ctx: OrgContext, sheet_ids: Sequence[uuid.UUID], note: str, rctx: RequestContext
+    ) -> int:
+        """Approve the sheets among ``sheet_ids`` that are still submitted, as decided by the
+        caller (who holds ``organization.update``): the practice stopped approving timesheets.
+        Runs in the caller's unit of work. Returns how many were approved."""
+        approved = 0
+        for sheet in await self.sheets.lock_many(ctx.organization_id, sheet_ids):
+            if sheet.status == "submitted":
+                await self._approve(ctx, sheet, note, rctx)
+                approved += 1
+        return approved
+
     async def reject(
         self, ctx: OrgContext, timesheet_id: uuid.UUID, note: str, rctx: RequestContext
     ) -> TimesheetDetail:

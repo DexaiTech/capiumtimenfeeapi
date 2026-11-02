@@ -2,13 +2,15 @@
 practice's threshold, and a reversal.
 
 An adjustment is a request (``wip_adjustments``) that becomes a movement of the immutable ledger
-when it takes effect: at once when the amount is within ``wip_adjustment_approval_threshold``,
-otherwise when somebody with ``wip.approve`` approves it. Nobody approves their own request
-without ``organization.update``. A reversal is a new ledger row; the original stays. The amount
+when it takes effect: at once when the amount is within ``wip_adjustment_approval_threshold`` (or
+the practice does not approve adjustments, ``wip_adjustment_approval_required`` off), otherwise
+when somebody with ``wip.approve`` approves it. Nobody approves their own request without
+``organization.update``. A reversal is a new ledger row; the original stays. The amount
 counts in the job's WIP until the job is next billed (docs/modules/wip.md).
 """
 
 import uuid
+from collections.abc import Sequence
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -118,14 +120,18 @@ class WipAdjustmentService:
 
     # --- Writes ------------------------------------------------------------------------
 
-    async def _ensure_available(self, ctx: OrgContext, row: WipAdjustment) -> None:
-        """A write-off cannot take more than the WIP the job has."""
+    async def _available(self, ctx: OrgContext, row: WipAdjustment) -> int | None:
+        """The WIP a write-off would come out of (``None`` for a write-on, which needs none)."""
         if row.kind != "write_off":
-            return
-        available = await self.ledger.scope_value(
+            return None
+        return await self.ledger.scope_value(
             ctx.organization, row.client_id, row.job_id, row.component
         )
-        if row.amount > available:
+
+    async def _ensure_available(self, ctx: OrgContext, row: WipAdjustment) -> None:
+        """A write-off cannot take more than the WIP the job has."""
+        available = await self._available(ctx, row)
+        if available is not None and row.amount > available:
             raise conflict(
                 "INSUFFICIENT_WIP",
                 "The write-off is more than the work in progress there is to write off.",
@@ -168,9 +174,11 @@ class WipAdjustmentService:
             await period_locks.assert_open(self.session, ctx.organization_id, effective, "wip")
             component = data.component or default_component(job)
             threshold = organization.wip_adjustment_approval_threshold
-            required = data.amount > threshold
+            # With approval off (``wip_adjustment_approval_required``) nothing needs it.
+            approving = organization.wip_adjustment_approval_required
+            required = approving and data.amount > threshold
             percent_threshold = organization.wip_write_off_approval_threshold_percent
-            if data.kind == "write_off" and percent_threshold is not None:
+            if approving and data.kind == "write_off" and percent_threshold is not None:
                 available = await self.ledger.scope_value(
                     organization, client.id, job.id if job else None, component
                 )
@@ -227,22 +235,58 @@ class WipAdjustmentService:
                 self.session, ctx.organization_id, row.effective_date, "wip"
             )
             await self._ensure_available(ctx, row)
-            row.movement_id = await self._post(ctx, row, approved=True)
-            row.status = "approved"
-            row.decided_by = ctx.user.id
-            row.decided_at = now_utc()
-            row.decision_note = data.note
-            await self.session.flush()
-            await record(
-                self.session,
-                ctx,
-                rctx,
-                "wip.adjustment_approved",
-                target_type="wip_adjustment",
-                target_id=row.id,
-                meta={**self._meta(row, None), "note": data.note},
-            )
+            await self._mark_approved(ctx, row, data.note, rctx)
         return (await self._reads(ctx, [row]))[0]
+
+    async def approve_waiting(
+        self,
+        ctx: OrgContext,
+        adjustment_ids: Sequence[uuid.UUID],
+        note: str,
+        rctx: RequestContext,
+    ) -> tuple[int, int]:
+        """Approve the adjustments among ``adjustment_ids`` that are still pending, in order, as
+        decided by the caller: the practice stopped approving adjustments. One dated in a locked
+        period, or a write-off of more WIP than is left, stays pending for a person to decide.
+        Runs in the caller's unit of work. Returns ``(approved, left pending)``."""
+        approved = left = 0
+        for adjustment_id in adjustment_ids:
+            row = await self.repo.get_adjustment(
+                ctx.organization_id, adjustment_id, for_update=True
+            )
+            if row is None or row.status != "pending":
+                continue
+            locked = await period_locks.locked_dates(
+                self.session, ctx.organization_id, [row.effective_date]
+            )
+            available = await self._available(ctx, row)
+            if locked or (available is not None and row.amount > available):
+                left += 1
+                continue
+            await self._mark_approved(ctx, row, note, rctx)
+            approved += 1
+        return approved, left
+
+    async def _mark_approved(
+        self, ctx: OrgContext, row: WipAdjustment, note: str | None, rctx: RequestContext
+    ) -> None:
+        """Approve a pending adjustment as decided by the caller (the checks are the caller's):
+        it is posted to the ledger and takes effect."""
+        row.movement_id = await self._post(ctx, row, approved=True)
+        row.status = "approved"
+        row.decided_by = ctx.user.id
+        row.decided_at = now_utc()
+        row.decision_note = note
+        await self.session.flush()
+        await record(
+            self.session,
+            ctx,
+            rctx,
+            "wip.adjustment_approved",
+            target_type="wip_adjustment",
+            target_id=row.id,
+            meta={**self._meta(row, None), "note": note},
+        )
 
     async def reject(
         self,

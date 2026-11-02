@@ -20,7 +20,7 @@ from app.repositories.organizations import OrganizationRepository
 from app.repositories.roles import RoleRepository
 from app.repositories.timesheets import TimesheetRepository
 from app.schemas.organization import OrganizationCreate, OrganizationDelete, OrganizationUpdate
-from app.services import audit, policy
+from app.services import approval_switches, audit, policy
 from app.services.policy import OrgContext
 from app.services.practice_defaults import seed_practice_defaults
 from app.services.staff_codes import next_staff_code
@@ -208,8 +208,15 @@ class OrganizationService:
                     setattr(organization, field, value)
             if changes:
                 await self.session.flush()
-                if "auto_approve_privileged_time" in changes:
+                if changes.keys() & {"require_timesheet_approval", "auto_approve_privileged_time"}:
                     await TimesheetRepository(self.session).sync_exemptions(organization.id)
+                # An approval flow switched off: what was waiting in it is approved now.
+                settled = await approval_switches.settle_switched_off(
+                    self.session, ctx, rctx, changes
+                )
+                meta: dict[str, Any] = {"changes": changes}
+                if settled:
+                    meta["approvals_settled"] = settled
                 await audit.record(
                     self.session,
                     "organization.updated",
@@ -218,7 +225,7 @@ class OrganizationService:
                     organization_id=organization.id,
                     target_type="organization",
                     target_id=organization.id,
-                    meta={"changes": changes},
+                    meta=meta,
                 )
         return organization
 

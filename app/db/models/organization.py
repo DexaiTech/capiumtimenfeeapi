@@ -136,7 +136,8 @@ class Organization(Base, IdMixin, TimestampMixin, SoftDeleteMixin):
     time_increment_minutes: Mapped[int] = mapped_column(
         SmallInteger, nullable=False, server_default=text("6")
     )
-    # Timesheets must be approved before their time can be billed.
+    # Timesheets must be approved before their time can be billed. Off, nobody approves time:
+    # every sheet is ``approval_exempt`` (it counts as approved, and submitting approves it).
     require_timesheet_approval: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("true")
     )
@@ -159,6 +160,16 @@ class Organization(Base, IdMixin, TimestampMixin, SoftDeleteMixin):
     # the percentage rule off, leaving only the flat-pence threshold.
     wip_write_off_approval_threshold_percent: Mapped[int | None] = mapped_column(
         Integer, nullable=True, server_default=text("1000")
+    )
+    # WIP write-ons and write-offs above the two thresholds above need approval. Off, every
+    # adjustment takes effect at once, whatever its amount.
+    wip_adjustment_approval_required: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("true")
+    )
+    # Expense claims must be approved before they count. Off, a submitted claim is approved at
+    # once and nobody is asked.
+    expense_approval_required: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("true")
     )
     # An expense above this many pence (gross) must carry a receipt.
     receipt_required_threshold: Mapped[int] = mapped_column(

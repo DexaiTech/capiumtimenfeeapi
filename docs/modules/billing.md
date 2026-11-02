@@ -260,7 +260,9 @@ Practice settings (`PATCH /organizations/{id}`, `organization.update`): `invoice
 (0 = every invoice), judged on the current gross and the current settings.
 
 Flow: `draft -> awaiting_approval -> approved -> issued`; `awaiting_approval` or `approved` go back to `draft` on
-reject. A draft that needs no approval is issued directly as before.
+reject. A draft that needs no approval is issued directly as before. Switching `invoice_approval_required` off
+approves the invoices awaiting approval (step `approved`, note "Approval switched off", audited, the preparers
+notified); they are then issued as usual (ticket APT53, `docs/modules/foundation.md`, "Approval switches").
 
 | Method | Path | Permission | Body | Result |
 |---|---|---|---|---|

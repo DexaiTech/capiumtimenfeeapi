@@ -68,9 +68,12 @@ async def run_reminders(
     reminded, already, unreachable = await _remind_staff(
         session, org.id, week, rows, settings, reminders, disabled
     )
-    waiting, approvers_reminded, approvers_already = await _remind_approvers(
-        session, org.id, week, scope, settings, reminders, disabled
-    )
+    waiting, approvers_reminded, approvers_already = 0, 0, 0
+    # A practice that does not approve timesheets has no approvers to remind.
+    if org.require_timesheet_approval:
+        waiting, approvers_reminded, approvers_already = await _remind_approvers(
+            session, org.id, week, scope, settings, reminders, disabled
+        )
     result = RemindersResult(
         week_start=week,
         missing=len(rows),

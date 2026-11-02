@@ -74,6 +74,7 @@ target is looked up, so a caller without the permission gets 403 for any id.
   "payment_terms_days": 30, "default_charge_rate": 0, "time_increment_minutes": 6,
   "require_timesheet_approval": true,
   "fixed_fee_wip_mode": "on_completion", "wip_adjustment_approval_threshold": 50000,
+  "wip_adjustment_approval_required": true, "expense_approval_required": true,
   "receipt_required_threshold": 2500, "invoice_approval_required": false,
   "invoice_approval_threshold": 0, "mileage_rate": 45, "expense_markup_bp": 0,
   "rate_mode": "staff_first",
@@ -104,7 +105,7 @@ target is looked up, so a caller without the permission gets 403 for any id.
 | `time_increment_minutes` | one of 1, 5, 6, 10, 15, 30, 60 (a new practice starts with 6, tenths of an hour) |
 | `fixed_fee_wip_mode` | `on_completion` or `by_budget_progress` |
 | `wip_adjustment_approval_threshold`, `receipt_required_threshold`, `invoice_approval_threshold` | integer pence, 0–100 000 000 (a fraction, a negative number or more is 422 on that field) |
-| `invoice_approval_required` | boolean |
+| `invoice_approval_required`, `expense_approval_required`, `wip_adjustment_approval_required` | booleans |
 | `mileage_rate` | integer pence per mile, 0–1000 |
 | `expense_markup_bp` | integer basis points, 0–100 000 (1000 = 10%) |
 | `cost_plus_markup_bp` | integer basis points, 0–100 000 (5000 = 50%) |
@@ -128,6 +129,8 @@ their own `time_increment_minutes`):
 | `wip_adjustment_approval_threshold` | 50 000 (£500.00) | A WIP write-on or write-off above it needs approval; 0 = every adjustment does |
 | `receipt_required_threshold` | 2 500 (£25.00) | An expense above it (gross) must carry a receipt |
 | `invoice_approval_required` | false | Whether an invoice must be approved before it is issued |
+| `expense_approval_required` | true | Whether expense claims are approved (see [Approval switches](#approval-switches)) |
+| `wip_adjustment_approval_required` | true | Whether WIP adjustments above the thresholds are approved |
 | `invoice_approval_threshold` | 0 | With approval on, invoices above it (gross) need it; 0 = every invoice |
 | `mileage_rate` | 45 (45p a mile) | The rate a mileage expense is priced at |
 | `expense_markup_bp` | 0 | Basis points added when an expense is recharged to the client |
@@ -140,6 +143,44 @@ threshold of -1 or 100 000 001, a `mileage_rate` of 1001, an `expense_markup_bp`
 fraction, a value outside the two modes); the database keeps the same bounds in named check
 constraints (`ck_organizations_*`). Every change is audited as `organization.updated` with
 `changes: {setting: [old, new]}`, and everyone in the practice can read them.
+
+### Approval switches
+
+Ticket APT53: a practice that does not want an approval process switches it off, area by area, in
+General Settings (`PATCH /organizations/{id}`, `organization.update`, like every practice setting).
+One switch per area rather than one master switch, because two of them already existed and
+practices differ by area (a practice may approve invoices and not timesheets):
+
+| Setting | Default | Off |
+|---|---|---|
+| `require_timesheet_approval` (Time recording) | true | Nobody approves time. Every timesheet is `approval_exempt`: its billable time is WIP as it is recorded, and **submitting** the week approves it at once (`decision_note` "Approval not required"), with no notification; nobody is reminded about approvals; open weeks with time are not "missing" or "unsubmitted"; the timesheet kind leaves the dashboard's pending approvals and My Actions, and `approvals_waiting` is `null` |
+| `expense_approval_required` (Expenses) | true | A submitted claim is approved at once (history `submitted` then `approved`, note "Approval not required"; no notification); the expense kind leaves the dashboard's pending approvals |
+| `wip_adjustment_approval_required` (WIP & billing) | true | Every write-on and write-off takes effect at once (`approval_required` false), whatever the two thresholds say; the thresholds are kept for when it is switched on again |
+| `invoice_approval_required` (WIP & billing) | false | An invoice is issued without approval (`POST /invoices/{id}/submit` is 409 `APPROVAL_NOT_REQUIRED`) |
+
+**Switching an area off settles what is waiting there**, in the same transaction as the change
+(`app/services/approval_switches.py`): every submitted timesheet, submitted expense claim, pending
+WIP adjustment and invoice awaiting approval is approved as decided by the person who switched it
+off, with the note "Approval switched off", the usual audit entry of an approval
+(`timesheet.approved`, `expense_claim.approved`, `wip.adjustment_approved`, `invoice.approved`)
+and its usual notifications (the claimant of a claim, the preparers of an invoice). Invoices are
+approved, not issued. Approval rules that still apply keep an item waiting for a person instead: an
+expense claim with a line dated in a locked period, a WIP adjustment dated in a locked period or
+writing off more WIP than is now left. Those are decided on their screens as before (the approve
+and return endpoints keep working whatever the switch). The `organization.updated` entry carries
+`approvals_settled: {area: {approved, left}}` (areas `timesheets`, `expense_claims`,
+`wip_adjustments`, `invoices`).
+
+Approving what waits rather than leaving it: with the switch off the approval screens are no
+longer offered, so a waiting item would be stuck, and the practice has just said that this work
+needs no approval. Switching an area **on** again changes nothing already decided: new work
+needs approval from then on (open timesheet weeks need submitting and approving again before
+their time is WIP, as when the setting was on before).
+
+Migration `067` adds `expense_approval_required` and `wip_adjustment_approval_required` (both
+on), and marks every sheet of a practice that already had timesheet approval off as
+`approval_exempt`; sheets such a practice had waiting are left for its approvers. Tests:
+`tests/test_approval_switches.py`.
 
 `MemberRead`:
 
