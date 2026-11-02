@@ -146,6 +146,47 @@ async def test_summary_by_job_narrowed_by_kind_and_age(client):
     assert response.status_code == 422
 
 
+async def test_summary_by_client_holds_the_wip_without_a_job(client):
+    """APT64: a disbursement without a job is part of its client's row on the Client tab (also
+    for an archived client), never a "No job" row; the Job tab keeps one "No job" line per
+    client."""
+    p = await new_practice(client)
+    job = await hourly_job(p)
+    archived = await make_client(p.org, "Harcourt Ltd", status="archived")
+    other = await make_client(p.org, "Northgate Ltd")
+    await make_time_entry(
+        p.org, p.owner, client=p.client, job=job, minutes=60, entry_date=TODAY - timedelta(days=5)
+    )
+    for each in (p.client, archived, other):
+        await make_disbursement(p.org, each, 1_300, incurred_on=TODAY - timedelta(days=35))
+
+    async def summary(group_by: str) -> dict:
+        response = await client.get(
+            p.url("/wip/summary"), headers=p.owner.headers, params={"group_by": group_by}
+        )
+        assert response.status_code == 200, response.text
+        return response.json()["data"]
+
+    by_client = await summary("client")
+    rows = {r["key"]: (r["name"], r["code"], r["expense"], r["total"]) for r in by_client["rows"]}
+    assert rows == {
+        str(p.client.id): ("Widgets Ltd", p.client.code, 1_300, 13_300),
+        str(archived.id): ("Harcourt Ltd", archived.code, 1_300, 1_300),
+        str(other.id): ("Northgate Ltd", other.code, 1_300, 1_300),
+    }
+    assert by_client["totals"]["total"] == 15_900
+
+    by_job = await summary("job")
+    lines = {(r["client"]["id"], r["key"]): (r["name"], r["total"]) for r in by_job["rows"]}
+    assert lines == {
+        (str(p.client.id), str(job.id)): ("Bookkeeping", 12_000),
+        (str(p.client.id), None): ("No job", 1_300),
+        (str(archived.id), None): ("No job", 1_300),
+        (str(other.id), None): ("No job", 1_300),
+    }
+    assert by_job["totals"]["total"] == 15_900
+
+
 async def test_client_items(client):
     p = await new_practice(client)
     worker = await staff(p.org, "staff", full_name="Grace Hopper")
