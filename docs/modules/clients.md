@@ -89,6 +89,7 @@ practice's ids answer 404.
 **ClientRead** (every client response): all `clients` columns (`id, code, name, client_type,
 status, email, phone, address_line1/2, city, postcode, country, company_number, utr,
 vat_number, year_end_month/day, partner_user_id, manager_user_id, payment_terms_days,
+cost_plus_markup_bp (the client's recovery mark-up, null = the practice's; APT52),
 default_vat_rate_id, billing_notes, notes, segment, aml_status, aml_checked_on, health_score,
 accounting_software, created_at, updated_at`) plus `initials` (avatar: first letters of the
 first two words, or the first two letters of a one-word name) and, from the Clients 360

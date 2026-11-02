@@ -64,6 +64,10 @@ class Job(Base, IdMixin, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
         ),
         CheckConstraint("fixed_fee IS NULL OR fixed_fee >= 0", name="fixed_fee"),
         CheckConstraint("hourly_rate IS NULL OR hourly_rate >= 0", name="hourly_rate"),
+        CheckConstraint(
+            "cost_plus_markup_bp IS NULL OR cost_plus_markup_bp BETWEEN 0 AND 100000",
+            name="cost_plus_markup_bp",
+        ),
         CheckConstraint("budget_minutes IS NULL OR budget_minutes >= 0", name="budget_minutes"),
         CheckConstraint("budget_fee IS NULL OR budget_fee >= 0", name="budget_fee"),
         CheckConstraint("budget_cost IS NULL OR budget_cost >= 0", name="budget_cost"),
@@ -111,6 +115,9 @@ class Job(Base, IdMixin, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
     fixed_fee: Mapped[int | None] = mapped_column(BigInteger)
     # Overrides every other charge-out rate for time on this job.
     hourly_rate: Mapped[int | None] = mapped_column(BigInteger)
+    # Recovery analysis: the job's cost-plus mark-up (basis points); null = the client's, else the
+    # practice's.
+    cost_plus_markup_bp: Mapped[int | None] = mapped_column(Integer)
     budget_minutes: Mapped[int | None] = mapped_column(Integer)
     budget_fee: Mapped[int | None] = mapped_column(BigInteger)
     # What the work is expected to cost at its service level, to compare with the actual cost.

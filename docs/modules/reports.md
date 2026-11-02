@@ -30,7 +30,8 @@ Tests: `tests/test_reports_*.py` (the first eight reports) and `tests/test_repor
 | GET | `/reports/expenses` | `report.read` or `report.financial` | Expense lines by type, person, client, job, month or claim status: net, VAT, gross, billable, recharged, to reimburse. Everyone's with `expense.read_all`, else one's own |
 | GET | `/reports/payments` | `report.financial` | Payments received by month, client or method: received, allocated, on account, voided or reversed |
 | GET | `/reports/missing-timesheets` | `report.read` | Staff with no submitted timesheet, per person and week over a range of weeks: logged against expected, state, reminders |
-| GET | `/reports/recovery-analysis` | `report.financial` | Per job, client or person: billable hours and invoice value against the task rate, the staff charge-out rates and cost plus a markup: revenue left on the table and recovery on each basis (cost figures need `rate.read`) |
+| GET | `/reports/recovery-analysis` | `report.financial` | Per job, client or person: the invoiced billable hours and their invoice value (less allocated credit notes) against the recovery rate (the practice's order of the client job, task and staff rates), the staff charge-out rates and cost plus the job's, client's or practice's mark-up: revenue left on the table and recovery on each basis; WIP apart (cost figures need `rate.read`) |
+| GET | `/reports/cost-to-business` | `report.financial` and `rate.read` | Per job, client or person: what all the time cost the practice (cost rates), billable or not, against the invoice value |
 | GET | `/dashboard` | any member | The caller's week, timer, unsubmitted weeks, jobs due; approvals waiting; practice figures with `report.financial` |
 
 The ten reports of the spec (Featurte.md 2.17) are: Time Analysis = `time-summary`, Utilisation =
@@ -213,37 +214,96 @@ Code: `app/services/recovery.py` (the pieces, the rows, the client view),
 Scope: the **billable** time entries worked in `date_from`..`date_to` (both optional; default: all
 of it, as job profitability) matching `client_id`, `job_id`, `user_id`, `partner_user_id`,
 `manager_user_id`, `service_id`. `group_by`: `job` (default; a row per job and its client, "No
-job" for time on the client without one), `client` or `person`. `markup_bp` (0–100000) overrides
-the practice's markup for a what-if.
+job" for time on the client without one), `client` or `person`. `markup_bp` (0–100000) sets one
+mark-up for all the work as a what-if.
+
+**The recovery rate.** Each piece of work (a person's time on a job on a day) is valued at the first
+rate that exists, in the practice's `recovery_rate_order` (default `client_job`, `task`, `staff`;
+Settings → General → Rates), of three tiers of the charge-out ladder (`docs/modules/team-rates.md`)
+on the day it was worked, resolved by `RateBook.tiers`:
+
+| Tier | Rate | Ladder levels |
+|---|---|---|
+| `client_job` | The **client job-specific rate**: the rate agreed with the client (client + service + staff, client + service, client + staff, client), else the job's own hourly rate set on the client's Jobs tab (APT54) | 1–4 |
+| `task` | The **task rate**: the rate set against the job's service (staff + service, else service + grade) | 5 |
+| `staff` | The **staff charge-out rate**: the person's own rate (the grade's in `grade_only` mode), else the grade's, else the practice default. Always exists | 6, 7, default |
+
+Overtime is priced at the multiplier as everywhere. The rate is resolved from the rules as they
+are now (a rule counts on the days of its period; the job's own rate is undated), not taken from
+the recorded `charge_value`. `staff_value` values the same work at the `staff` tier alone, whatever
+the order.
+
+**The invoice value** (the client's rule: a fixed fee is not an invoice value until the invoice
+exists). Only billable time that is **on an invoice or written off** is compared; time not on an
+invoice yet is WIP: it is reported apart (`wip_minutes`, `wip_value` at its recorded rates) with no
+invoice value, so before invoicing a fixed fee shows only in the WIP report. A **draft** invoice
+counts: it is the invoice being created (Create invoice makes a draft); its value is shown apart as
+`draft_value`. **Credit notes**: every credit note is raised against one issued invoice (it is
+allocated to it): its net reduces that invoice's value, spread over the invoice's lines by value
+(`credited_value`); a credit note whose work was returned to WIP (`POST /credit-notes/{id}/wip`,
+mode `return`) is left out, since that work left the invoice instead. Money the client paid that is
+not allocated to an invoice stays on the account as a credit for a future invoice: the client view
+shows it (`credit_on_account`) and it reduces no invoice value.
 
 Each row (and `totals`) holds:
 
 | Field | Meaning |
 |---|---|
-| `minutes` | Billable minutes |
+| `minutes` | Billable minutes compared: on an invoice (issued or draft) or written off |
 | `invoiced_value` | What issued invoices billed for the time: the live allocations' `billed_value` (a fixed-fee line is spread over the time it clears by value, so the job's invoices add up to the fee) |
-| `to_bill_value` | What the time not on an issued invoice will bill: its draft's `billed_value`; else, unbilled, the **fixed fee still to bill** (fee less the fixed-fee lines on live invoices) spread over **all** the job's unbilled time by value (so a date or person filter takes its share, not the whole fee), or on an hourly job (or no job) the time's own value; nothing for written-off time or a non-billable job |
-| `invoice_value` | `invoiced_value + to_bill_value` |
-| `task_value` | The time at the **task rate**: the rates it was priced at (`time_entries.charge_value`: the job's own rate, a service rate, a client rate, else the person's or grade's – the ladder of `docs/modules/team-rates.md`) |
-| `staff_value` | The time at each **person's own charge-out rate** on the day it was worked: the ladder resolved with no client, service or job (`charge_rates.resolve_many`), so the staff rate (the grade's in `grade_only` mode), else the grade's, else the practice default; overtime at the multiplier as everywhere |
+| `credited_value` | The time's share of the credit notes allocated to those invoices (net, by value, rounded per piece) |
+| `draft_value` | What draft invoices bill for the time |
+| `invoice_value` | `invoiced_value − credited_value + draft_value`; written-off time adds 0 |
+| `recovery_value` | The time at the recovery rate (above) |
+| `client_job_minutes`, `task_minutes`, `staff_rate_minutes` | Which tier gave the recovery rate, in minutes |
+| `staff_value` | The time at each **person's own charge-out rate** on the day it was worked |
 | `cost_value` | What the time cost (`time_entries.cost_value`) |
-| `cost_plus_value` | `cost_value × (1 + markup_bp / 10000)`, rounded half up once per row (so a total can differ by a penny from the sum of its rows) |
-| `task_shortfall`, `staff_shortfall`, `cost_plus_shortfall` | That potential `− invoice_value`: **revenue left on the table** when positive, over-recovery when negative |
-| `task_recovery_bp`, `staff_recovery_bp`, `cost_plus_recovery_bp` | `invoice_value /` that potential (basis points; `null` when it is 0) |
+| `cost_plus_value` | `cost × (1 + mark-up / 10000)`, the mark-up being the **job's** `cost_plus_markup_bp`, else its **client's**, else the **practice's** (default 5000 = 50%), or the `markup_bp` what-if; rounded half up once per mark-up |
+| `markup_bp` | The mark-up of the row when it has one only (else null) |
+| `recovery_shortfall`, `staff_shortfall`, `cost_plus_shortfall` | That potential `− invoice_value`: **revenue left on the table** when positive, over-recovery when negative |
+| `recovery_bp`, `staff_recovery_bp`, `cost_plus_recovery_bp` | `invoice_value /` that potential (basis points; `null` when it is 0) |
 | `margin_value`, `margin_bp` | `invoice_value − cost_value`, and over `invoice_value` |
+| `wip_minutes`, `wip_value` | Billable time not on an invoice yet, and its value at the rates it was recorded at |
 
 Rows also carry `key`, `code` (job number, client code or initials), `name`, `client_name` (job
 rows), the id of the group (`job_id` + `client_id`, `client_id` or `user_id`) and, for jobs,
-`billing_basis` and `fixed_fee`. `filters` echo `markup_bp` as used. Without `rate.read` the cost,
-cost-plus and margin fields are `null` in the JSON and empty in every download.
+`billing_basis` and `fixed_fee`. `filters` echo `markup_bp` (the what-if, else null),
+`practice_markup_bp` and `rate_order`. Without `rate.read` the cost, cost-plus and margin fields are
+`null` in the JSON and empty in every download.
 
 The ticket's examples, as the tests check them (`tests/test_recovery.py`): a £1,500 fixed fee for
-20 hours of time priced at £100 an hour by someone whose own rate is £80: invoice £1,500, task
-£2,000 (£500 left on the table), staff £1,600 (£100 left). Ten hours at £50 and ten at £150: staff
-value £2,000. Cost £50 an hour with the default 50% markup: cost plus £75 an hour.
+20 hours by someone whose own rate is £80, on a task whose rate is £100: before it is invoiced
+nothing is compared (20 hours of WIP); on the invoice, invoice £1,500, recovery (task rate) £2,000
+(£500 left on the table), staff £1,600 (£100 left). Ten hours at £50 and ten at £150: staff value
+£2,000. Cost £50 an hour with the default 50% mark-up: cost plus £75 an hour.
 
-`organizations.cost_plus_markup_bp` (migration 065; default 5000 = 50%, 0–100000) is a practice
-setting (`PATCH /organizations/{id}`, `organization.update`).
+### GET /reports/cost-to-business
+
+"Cost to Business": what the work cost the practice, at what it pays each person (their **cost
+rate**, `time_entries.cost_value`), not their charge-out rate. `report.financial` **and**
+`rate.read` (403 otherwise: cost is the point of it). Same scope, filters, `group_by` and downloads
+as the recovery analysis, but **all** the time, billable or not. Each row and `totals`:
+
+| Field | Meaning |
+|---|---|
+| `minutes`, `billable_minutes`, `non_billable_minutes` | All the time, and split |
+| `cost_value` | What all the time cost |
+| `invoiced_cost` | Cost of the billable time on an invoice (issued or draft) or written off |
+| `wip_cost` | Cost of the billable time not invoiced yet |
+| `non_billable_cost` | Cost of the non-billable time |
+| `cost_per_hour` | `cost_value` per hour of all the time (null for no time) |
+| `invoice_value` | As in the recovery analysis (issued less allocated credit notes, plus drafts) |
+| `margin_value`, `margin_bp` | `invoice_value − invoiced_cost`, and over `invoice_value` |
+
+### Settings
+
+`organizations.cost_plus_markup_bp` (migration 065; default 5000 = 50%, 0–100000) and
+`organizations.recovery_rate_order` (migration 066; `client_job`, `task`, `staff`, each once; 422
+otherwise) are practice settings (`PATCH /organizations/{id}`, `organization.update`).
+`clients.cost_plus_markup_bp` (`PATCH /clients/{id}`, `client.update`) and
+`jobs.cost_plus_markup_bp` (`POST`/`PATCH /jobs`, `job.create`/`job.update`; copied with the job)
+are null (not set) or 0–100000 (migration 066). Changing any of them rewrites nothing: the analysis
+is worked out when it is asked for.
 
 ## Errors
 

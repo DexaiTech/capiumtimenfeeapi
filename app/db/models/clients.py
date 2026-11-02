@@ -91,6 +91,10 @@ class Client(Base, IdMixin, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
             name="not_merged_into_itself",
         ),
         CheckConstraint(
+            "cost_plus_markup_bp IS NULL OR cost_plus_markup_bp BETWEEN 0 AND 100000",
+            name="cost_plus_markup_bp",
+        ),
+        CheckConstraint(
             "invoice_email IS NULL OR length(invoice_email) BETWEEN 3 AND 254",
             name="invoice_email_length",
         ),
@@ -170,6 +174,9 @@ class Client(Base, IdMixin, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
     # Overrides the practice's payment terms on this client's invoices.
     payment_terms_days: Mapped[int | None] = mapped_column(SmallInteger)
     default_vat_rate_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    # Recovery analysis: the client's cost-plus mark-up (basis points); null = the practice's. A
+    # job's own mark-up wins over it.
+    cost_plus_markup_bp: Mapped[int | None] = mapped_column(Integer)
     billing_notes: Mapped[str | None] = mapped_column(Text)
     notes: Mapped[str | None] = mapped_column(Text)
     # Practice-defined tier shown on the client list (Bronze, Silver, Gold, Platinum, ...).

@@ -21,6 +21,7 @@ PAGED = [
     ("job-profitability", SEPTEMBER),
     ("vat-summary", SEPTEMBER),
     ("recovery-analysis", {"group_by": "job", **SEPTEMBER}),
+    ("cost-to-business", {"group_by": "job", **SEPTEMBER}),
 ]
 
 
@@ -284,6 +285,7 @@ async def test_every_report_parameter_is_described(client: AsyncClient) -> None:
         "payments",
         "missing-timesheets",
         "recovery-analysis",
+        "cost-to-business",
     )
     for name in names:
         operation = schema["paths"][f"{base}/{name}"]["get"]

@@ -22,6 +22,11 @@ JobSort = Literal["due_date", "-due_date", "number", "-number", "created_at", "-
 Money = Annotated[int, Field(ge=0, le=10**12, description="Minor units (pence)")]
 Minutes = Annotated[int, Field(ge=0, le=10_000_000, description="Whole minutes")]
 UserIds = Annotated[list[uuid.UUID], Field(max_length=100)]
+Markup = Annotated[int, Field(ge=0, le=100_000, description="Basis points (5000 = 50%)")]
+_MARKUP = (
+    "The job's cost-plus mark-up in basis points (5000 = 50%) for the recovery analysis; null "
+    "uses the client's, else the practice's `cost_plus_markup_bp`"
+)
 
 
 class TaskCounts(BaseModel):
@@ -43,6 +48,7 @@ class JobRead(BaseModel):
     billing_basis: JobBillingBasis
     fixed_fee: int | None
     hourly_rate: int | None
+    cost_plus_markup_bp: int | None = Field(description=_MARKUP)
     budget_minutes: int | None
     budget_fee: int | None
     budget_cost: int | None
@@ -108,6 +114,7 @@ class JobRead(BaseModel):
             billing_basis=job.billing_basis,
             fixed_fee=job.fixed_fee,
             hourly_rate=job.hourly_rate,
+            cost_plus_markup_bp=job.cost_plus_markup_bp,
             budget_minutes=job.budget_minutes,
             budget_fee=job.budget_fee,
             budget_cost=job.budget_cost,
@@ -166,6 +173,7 @@ class JobCreate(RequestModel):
     hourly_rate: Money | None = Field(
         default=None, description="Overrides every other charge-out rate for time on this job"
     )
+    cost_plus_markup_bp: Markup | None = Field(default=None, description=_MARKUP)
     budget_minutes: Minutes | None = None
     budget_fee: Money | None = None
     budget_cost: Money | None = Field(
@@ -207,6 +215,7 @@ class JobUpdate(RequestModel):
     billing_basis: JobBillingBasis | None = None
     fixed_fee: Money | None = None
     hourly_rate: Money | None = None
+    cost_plus_markup_bp: Markup | None = Field(default=None, description=_MARKUP)
     budget_minutes: Minutes | None = None
     budget_fee: Money | None = None
     budget_cost: Money | None = None

@@ -162,20 +162,39 @@ _RECOVERY_MEASURES = (
     Column("recovery_bp", "Recovery %", "bp"),
 )
 _RECOVERY_ANALYSIS_MEASURES = (
-    Column("minutes", "Hours", "hours"),
+    Column("minutes", "Hours invoiced", "hours"),
     Column("invoiced_value", "Invoiced"),
-    Column("to_bill_value", "Still to bill"),
+    Column("credited_value", "Credit notes"),
+    Column("draft_value", "On drafts"),
     Column("invoice_value", "Invoice value"),
-    Column("task_value", "At task rate"),
-    Column("task_shortfall", "Left on table (task rate)"),
-    Column("task_recovery_bp", "Recovery % (task rate)", "bp"),
+    Column("recovery_value", "Potential recovery"),
+    Column("recovery_shortfall", "Left on table (recovery rate)"),
+    Column("recovery_bp", "Recovery %", "bp"),
+    Column("client_job_minutes", "Hours at client job rates", "hours"),
+    Column("task_minutes", "Hours at task rates", "hours"),
+    Column("staff_rate_minutes", "Hours at staff rates", "hours"),
     Column("staff_value", "At staff rates"),
     Column("staff_shortfall", "Left on table (staff rates)"),
     Column("staff_recovery_bp", "Recovery % (staff rates)", "bp"),
     Column("cost_value", "Cost"),
-    Column("cost_plus_value", "Cost plus markup"),
+    Column("cost_plus_value", "Cost plus mark-up"),
     Column("cost_plus_shortfall", "Left on table (cost plus)"),
     Column("cost_plus_recovery_bp", "Recovery % (cost plus)", "bp"),
+    Column("margin_value", "Margin"),
+    Column("margin_bp", "Margin %", "bp"),
+    Column("wip_minutes", "Hours not invoiced (WIP)", "hours"),
+    Column("wip_value", "WIP value"),
+)
+_COST_TO_BUSINESS_MEASURES = (
+    Column("minutes", "Hours", "hours"),
+    Column("billable_minutes", "Billable hours", "hours"),
+    Column("non_billable_minutes", "Non-billable hours", "hours"),
+    Column("cost_value", "Cost"),
+    Column("cost_per_hour", "Cost per hour"),
+    Column("invoiced_cost", "Cost of invoiced work"),
+    Column("wip_cost", "Cost of WIP"),
+    Column("non_billable_cost", "Cost of non-billable time"),
+    Column("invoice_value", "Invoice value"),
     Column("margin_value", "Margin"),
     Column("margin_bp", "Margin %", "bp"),
 )
@@ -274,6 +293,10 @@ def _recovery_analysis_columns(group_by: str | None) -> list[Column]:
     return _grouped(group_by, _RECOVERY_ANALYSIS_MEASURES, client=group_by == "job")
 
 
+def _cost_to_business_columns(group_by: str | None) -> list[Column]:
+    return _grouped(group_by, _COST_TO_BUSINESS_MEASURES, client=group_by == "job")
+
+
 def _billing_columns(group_by: str | None) -> list[Column]:
     first = "Partner" if group_by == "partner" else "Month"
     return [Column("name", first, "text"), *_BILLING_MEASURES]
@@ -300,6 +323,7 @@ _COLUMNS: dict[str, Callable[[str | None], Sequence[Column]]] = {
     "payments": _payment_columns,
     "missing-timesheets": lambda _: _MISSING,
     "recovery-analysis": _recovery_analysis_columns,
+    "cost-to-business": _cost_to_business_columns,
 }
 
 

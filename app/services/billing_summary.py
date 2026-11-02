@@ -14,7 +14,7 @@ from collections import defaultdict
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Job
+from app.db.models import Client, Job, Organization
 from app.repositories.billing_common import BillingReferenceRepository
 from app.repositories.billing_summary import BillingSummaryRepository, TimeRollup
 from app.repositories.wip import WipRepository
@@ -28,7 +28,7 @@ from app.schemas.billing_summary import (
 from app.schemas.recovery import RecoveryPotentials
 from app.services.billing_common import get_client_or_404
 from app.services.policy import OrgContext, has_permission
-from app.services.recovery_values import Tally, potentials, staff_values
+from app.services.recovery_values import Tally, Work, potentials, value_work
 
 
 def _money(pence: int, currency: str) -> str:
@@ -149,11 +149,16 @@ class BillingSummaryService:
         jobs = await self.repo.jobs(org.id, client.id)
         fixed_ids = [j.id for j in jobs if j.billing_basis == "fixed"]
         billed = await self.wip.fixed_fee_billed(org.id, fixed_ids)
-        ready = await self._ready_by_job(ctx, client.id)
-        markup = org.cost_plus_markup_bp
+        markups = {
+            job.id: job.cost_plus_markup_bp
+            if job.cost_plus_markup_bp is not None
+            else client_markup(client, org)
+            for job in jobs
+        }
+        ready = await self._ready_by_job(ctx, client, markups)
 
         def recovery_of(tally: Tally) -> RecoveryPotentials:
-            return RecoveryPotentials(**potentials(tally, markup, show_cost))
+            return RecoveryPotentials(**potentials(tally, show_cost))
 
         rows: list[JobBilling] = []
         parts: list[Breakdown] = []
@@ -232,31 +237,46 @@ class BillingSummaryService:
                 parts, show_cost=show_cost, recovery=recovery_of(Tally.of(ready.values()))
             ),
             show_cost=show_cost,
-            markup_bp=markup,
+            markup_bp=client_markup(client, org),
+            rate_order=list(org.recovery_rate_order),
             time_costs=time_costs,
         )
 
     async def _ready_by_job(
-        self, ctx: OrgContext, client_id: uuid.UUID
+        self, ctx: OrgContext, client: Client, markups: dict[uuid.UUID, int]
     ) -> dict[uuid.UUID | None, Tally]:
-        """The time ready to bill per job on every basis of the recovery comparison."""
+        """The time ready to bill per job on every basis of the recovery comparison: at the
+        recovery rate (the practice's order of the client job, task and staff rates), the staff
+        charge-out rate, cost and cost plus the job's (else the client's, else the practice's)
+        mark-up."""
         org = ctx.organization
         pieces = await self.repo.ready_time_pieces(
-            org.id, client_id, require_approval=org.require_timesheet_approval
+            org.id, client.id, require_approval=org.require_timesheet_approval
         )
-        staff = await staff_values(
+        values = await value_work(
             self.session,
             org,
-            [(p.user_id, p.entry_date, p.is_overtime, p.minutes) for p in pieces],
+            [
+                Work(p.user_id, client.id, p.job_id, p.entry_date, p.is_overtime, p.minutes)
+                for p in pieces
+            ],
         )
+        fallback = client_markup(client, org)
         found: dict[uuid.UUID | None, Tally] = defaultdict(Tally)
-        for piece, staff_value in zip(pieces, staff, strict=True):
-            found[piece.job_id].add(
-                Tally(
-                    minutes=piece.minutes,
-                    task_value=piece.charge_value,
-                    staff_value=staff_value,
-                    cost_value=piece.cost_value,
-                )
+        for piece, valued in zip(pieces, values, strict=True):
+            found[piece.job_id].add_valued(
+                minutes=piece.minutes,
+                recovery_value=valued.recovery_value,
+                tier=valued.tier,
+                staff_value=valued.staff_value,
+                cost_value=piece.cost_value,
+                markup_bp=markups.get(piece.job_id, fallback) if piece.job_id else fallback,
             )
         return dict(found)
+
+
+def client_markup(client: Client, organization: Organization) -> int:
+    """The client's cost-plus mark-up, else the practice's."""
+    if client.cost_plus_markup_bp is not None:
+        return client.cost_plus_markup_bp
+    return organization.cost_plus_markup_bp

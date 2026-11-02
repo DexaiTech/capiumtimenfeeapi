@@ -378,6 +378,33 @@ class RateBook:
             cost.rule.id if cost.rule else None,
         )
 
+    def tiers(self, query: RateQuery) -> dict[str, int | None]:
+        """The first rate of each of the three tiers of the charge-out ladder, for the recovery
+        analysis: ``client_job`` (levels 1-4: agreed with the client, else the job's own rate),
+        ``task`` (level 5: set against the job's service) and ``staff`` (levels 6, 7 and the
+        practice default: the person's charge-out rate; always found). Null when the tier has
+        none. Overtime is priced as ``resolve`` prices it."""
+        found: dict[str, int | None] = {"client_job": None, "task": None, "staff": None}
+        for step in self.charge_steps(self.context(query)):
+            if step.rate is None:
+                continue
+            level = step.level
+            tier = (
+                "client_job"
+                if level is not None and level <= 4
+                else "task"
+                if level == 5
+                else "staff"
+            )
+            if found[tier] is None:
+                found[tier] = step.rate
+        if query.overtime and self.overtime_enabled:
+            bp = self.overtime.get(query.user_id) or self.overtime_default_bp
+            found = {
+                tier: None if rate is None else _times_bp(rate, bp) for tier, rate in found.items()
+            }
+        return found
+
     def explain(self, query: RateQuery) -> Explanation:
         c = self.context(query)
         charge = list(self.charge_steps(c))
