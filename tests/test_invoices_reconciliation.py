@@ -8,6 +8,7 @@ from datetime import date
 from sqlalchemy import text
 
 from app.db.session import get_sessionmaker
+from app.services import invoices
 from tests.billing_helpers import (
     billing_status,
     draft,
@@ -34,7 +35,10 @@ async def allocation_rows(invoice_id: str) -> list[tuple[int, int]]:
         return [(r[0], r[1]) for r in rows]
 
 
-async def test_full_reconciliation(client):
+async def test_full_reconciliation(client, monkeypatch):
+    # The invoice is due on 31 October 2026: its status is read on a day before that, so the
+    # part payment shows as part paid, not overdue, whichever day the tests run.
+    monkeypatch.setattr(invoices, "today_for", lambda organization: date(2026, 10, 15))
     p = await new_practice(client)
     partner = await staff(p.org, "partner", full_name="Pat Partner")
     junior = await staff(p.org, "staff", full_name="Jo Junior")
