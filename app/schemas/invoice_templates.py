@@ -83,7 +83,9 @@ class InvoiceTemplateUpdate(RequestModel):
         default=None, pattern=ACCENT_PATTERN, description="`#RRGGBB`; null or blank clears it"
     )
     watermark_text: str | None = Field(
-        default=None, pattern=WATERMARK_PATTERN, description="Null or blank clears it"
+        default=None,
+        pattern=WATERMARK_PATTERN,
+        description="Null or blank clears it; 422 while the template has a watermark picture",
     )
     status: TemplateStatus | None = Field(
         default=None,
@@ -109,6 +111,9 @@ class InvoiceTemplateRead(BaseModel):
     footer_text: str | None = Field(description="Printed at the foot of the invoice")
     accent_color: str | None = Field(description="`#RRGGBB`, or null for the plain black look")
     watermark_text: str | None = Field(description="Printed pale across the page, or null")
+    watermark_image: bool = Field(
+        description="A picture is printed pale across the page instead (`.../watermark-image`)"
+    )
     is_default: bool = Field(description="The template of clients that have not chosen one")
     status: TemplateStatus = Field(description="`active` or `inactive` (hidden from pickers)")
     client_count: int = Field(description="Clients of the practice that use the template")
@@ -127,6 +132,7 @@ class InvoiceTemplateRead(BaseModel):
                 "footer_text": template.footer_text,
                 "accent_color": template.accent_color,
                 "watermark_text": template.watermark_text,
+                "watermark_image": template.watermark_image_key is not None,
                 "is_default": template.is_default,
                 "status": template.status,
                 "client_count": client_count,

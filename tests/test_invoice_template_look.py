@@ -4,8 +4,10 @@ import pytest
 
 from app.services.invoice_pdf import PdfTemplate, rgb
 from tests.billing_helpers import draft, issued, new_practice, org_url
+from tests.conftest import STORAGE_DIR
 from tests.domain_factories import make_disbursement
 from tests.factories import error
+from tests.test_avatar import JPEG, PNG
 
 
 def test_a_hex_colour_becomes_its_rgb_and_anything_else_is_none():
@@ -99,3 +101,118 @@ async def test_a_draft_still_says_draft_whatever_the_template_says(client):
     template = await make_template(client, p, watermark_text="SPECIMEN")
     pdf = await pdf_of(client, p, invoice["id"], template["id"])
     assert b"DRAFT" in pdf and b"SPECIMEN" not in pdf
+
+
+# --- A picture as the watermark ----------------------------------------------------------------
+
+
+def stored_files() -> list:
+    return sorted(p for p in STORAGE_DIR.rglob("*") if p.is_file() and ".tmp" not in p.parts)
+
+
+async def set_picture(
+    client, p, template_id: str, data: bytes = PNG, name: str = "mark.png", kind: str = "image/png"
+):
+    return await client.post(
+        org_url(p.org, f"/invoice-templates/{template_id}/watermark-image"),
+        headers=p.owner.headers,
+        files={"file": (name, data, kind)},
+    )
+
+
+async def test_a_template_takes_a_watermark_picture_and_replaces_it(client):
+    p = await new_practice(client)
+    template = await make_template(client, p)
+    assert template["watermark_image"] is False
+
+    response = await set_picture(client, p, template["id"])
+    assert response.status_code == 200, response.text
+    assert response.json()["data"]["watermark_image"] is True
+    assert len(stored_files()) == 1
+    url = org_url(p.org, f"/invoice-templates/{template['id']}/watermark-image")
+    shown = await client.get(url, headers=p.owner.headers)
+    assert shown.status_code == 200 and shown.content == PNG
+    assert shown.headers["content-type"] == "image/png"
+    assert shown.headers["x-content-type-options"] == "nosniff"
+
+    first = stored_files()
+    replaced = await set_picture(client, p, template["id"], JPEG, "mark.jpg", "image/jpeg")
+    assert replaced.status_code == 200, replaced.text
+    after = stored_files()
+    assert len(after) == 1 and after != first
+    assert (await client.get(url, headers=p.owner.headers)).headers["content-type"] == "image/jpeg"
+
+
+async def test_only_a_picture_is_a_watermark_picture(client):
+    p = await new_practice(client)
+    template = await make_template(client, p)
+    response = await set_picture(
+        client, p, template["id"], b"%PDF-1.4 hi", "a.pdf", "application/pdf"
+    )
+    assert response.status_code == 422
+    assert error(response)["code"] == "FILE_TYPE_NOT_ALLOWED"
+    assert stored_files() == []
+
+
+async def test_a_watermark_is_a_text_or_a_picture_not_both(client):
+    p = await new_practice(client)
+    with_text = await make_template(client, p, name="Text", watermark_text="COPY")
+    refused = await set_picture(client, p, with_text["id"])
+    assert refused.status_code == 422
+    assert error(refused)["code"] == "VALIDATION_ERROR"
+    assert stored_files() == []
+
+    with_picture = await make_template(client, p, name="Picture")
+    await set_picture(client, p, with_picture["id"])
+    patched = await client.patch(
+        org_url(p.org, f"/invoice-templates/{with_picture['id']}"),
+        headers=p.owner.headers,
+        json={"watermark_text": "COPY"},
+    )
+    assert patched.status_code == 422
+    assert error(patched)["code"] == "VALIDATION_ERROR"
+    # Clearing the text first lets the picture in.
+    await client.patch(
+        org_url(p.org, f"/invoice-templates/{with_text['id']}"),
+        headers=p.owner.headers,
+        json={"watermark_text": None},
+    )
+    assert (await set_picture(client, p, with_text["id"])).status_code == 200
+
+
+async def test_removing_the_watermark_picture_removes_its_file(client):
+    p = await new_practice(client)
+    template = await make_template(client, p)
+    await set_picture(client, p, template["id"])
+    url = org_url(p.org, f"/invoice-templates/{template['id']}/watermark-image")
+    removed = await client.delete(url, headers=p.owner.headers)
+    assert removed.status_code == 200 and removed.json()["data"]["watermark_image"] is False
+    assert stored_files() == []
+    assert (await client.get(url, headers=p.owner.headers)).status_code == 404
+    # Removing again is not an error, and a text can now be set.
+    assert (await client.delete(url, headers=p.owner.headers)).status_code == 200
+    patched = await client.patch(
+        org_url(p.org, f"/invoice-templates/{template['id']}"),
+        headers=p.owner.headers,
+        json={"watermark_text": "COPY"},
+    )
+    assert patched.status_code == 200 and patched.json()["data"]["watermark_text"] == "COPY"
+
+
+async def test_the_pdf_carries_the_watermark_picture_but_a_draft_says_draft(client):
+    p = await new_practice(client)
+    invoice = await issued_invoice(client, p)
+    plain = await pdf_of(client, p, invoice["id"])
+    assert b"/Subtype /Image" not in plain
+
+    template = await make_template(client, p, name="Pictured")
+    await set_picture(client, p, template["id"])
+    pictured = await pdf_of(client, p, invoice["id"], template["id"])
+    # The picture, painted pale (fill opacity 0.12).
+    assert pictured.startswith(b"%PDF") and b"/Subtype /Image" in pictured
+    assert b"/ca 0.12" in pictured
+
+    fee = await make_disbursement(p.org, p.client)
+    unissued = await draft(client, p.owner, p.org, p.client.id, disbursements=[fee])
+    pdf = await pdf_of(client, p, unissued["id"], template["id"])
+    assert b"DRAFT" in pdf and b"/Subtype /Image" not in pdf
