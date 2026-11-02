@@ -15,8 +15,10 @@ Rules (docs/domain.md, "Invoice templates"):
 
 import uuid
 from collections.abc import AsyncIterator
+from io import BytesIO
 from typing import Any
 
+from PIL import Image
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -272,6 +274,13 @@ class InvoiceTemplateService:
         """Replace the watermark picture. As for a profile picture, the file is stored first and
         the old one removed only after the row points at the new one."""
         inspected = inspect_avatar(file_name, declared_type, data)
+        try:
+            # Decoded as the PDF will (fpdf2 reads pictures with Pillow): a picture that does not
+            # decode would break every document drawn with the template.
+            with Image.open(BytesIO(data)) as image:
+                image.load()
+        except Exception as exc:
+            raise ValidationError.for_field("file", "The image cannot be read.") from exc
         org_id = ctx.organization_id
         key = new_key()
         try:
