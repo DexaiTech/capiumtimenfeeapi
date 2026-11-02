@@ -110,9 +110,9 @@ async def wip_summary(
         "`fixed_fee` breakdown) and the adjustments and transfers in force (`kind: adjustment`, "
         "not selectable for billing). Each item says its `component`, `value`, `age_days` and "
         "whether billing may take it (`selectable`). Filters: client, job, kind (repeat the "
-        "parameter), partner, manager, service, `min_age_days` and `q` (description, client or "
-        "job). Sorted by `date` (default, oldest first), `value` or `client`. Requires "
-        "`wip.read`."
+        "parameter), partner, manager, service, `min_age_days` and `q` (description, client "
+        "name or code, job number or name). Sorted by `date` (default, oldest first), `value` "
+        "or `client`. Requires `wip.read`."
     ),
     response_model=ApiResponse[list[WipItemRead]],
     responses=error_responses(403, 404),

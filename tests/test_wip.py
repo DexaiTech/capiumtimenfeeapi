@@ -140,6 +140,21 @@ async def test_client_items(client):
     }
 
 
+async def test_items_search_matches_job_number_and_client_code(client):
+    # APT58: searching WIP Details for a job number such as "J00009" found nothing.
+    p = await new_practice(client)
+    other = await make_client(p.org, "Alpha Ltd", code="C0005")
+    vat = await hourly_job(p, other, name="VAT returns Q3", number="J00009")
+    wanted = await make_time_entry(p.org, p.owner, client=other, job=vat, description="Prep")
+    elsewhere = await hourly_job(p, number="J00010")
+    await make_time_entry(p.org, p.owner, client=p.client, job=elsewhere, description="Other")
+
+    for q in ("J00009", "j00009", "00009", "C0005", "c0005", "VAT returns"):
+        response = await client.get(p.url("/wip/items"), headers=p.owner.headers, params={"q": q})
+        assert response.status_code == 200, response.text
+        assert [i["id"] for i in response.json()["data"]] == [str(wanted.id)], q
+
+
 async def test_permissions(client):
     p = await new_practice(client)
     entry = await make_time_entry(p.org, p.owner, client=p.client)

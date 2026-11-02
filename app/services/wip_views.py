@@ -328,6 +328,8 @@ class WipViewService:
                 for a in atoms
                 if needle in (a.description or "").lower()
                 or needle in a.client_name.lower()
+                or needle in a.client_code.lower()
+                or needle in (a.job_number or "").lower()
                 or needle in (a.job_name or "").lower()
             ]
         if sort == "value":
