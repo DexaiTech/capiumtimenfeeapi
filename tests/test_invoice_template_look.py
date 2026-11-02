@@ -1,13 +1,16 @@
 """The look of an invoice template: its accent colour and its watermark, in the PDF."""
 
+from io import BytesIO
+
 import pytest
+from PIL import Image
 
 from app.services.invoice_pdf import PdfTemplate, rgb
 from tests.billing_helpers import draft, issued, new_practice, org_url
 from tests.conftest import STORAGE_DIR
 from tests.domain_factories import make_disbursement
 from tests.factories import error
-from tests.test_avatar import JPEG, PNG
+from tests.test_avatar import PNG
 
 
 def test_a_hex_colour_becomes_its_rgb_and_anything_else_is_none():
@@ -110,6 +113,12 @@ def stored_files() -> list:
     return sorted(p for p in STORAGE_DIR.rglob("*") if p.is_file() and ".tmp" not in p.parts)
 
 
+def jpeg() -> bytes:
+    out = BytesIO()
+    Image.new("RGB", (4, 2), (200, 0, 0)).save(out, "JPEG")
+    return out.getvalue()
+
+
 async def set_picture(
     client, p, template_id: str, data: bytes = PNG, name: str = "mark.png", kind: str = "image/png"
 ):
@@ -136,7 +145,7 @@ async def test_a_template_takes_a_watermark_picture_and_replaces_it(client):
     assert shown.headers["x-content-type-options"] == "nosniff"
 
     first = stored_files()
-    replaced = await set_picture(client, p, template["id"], JPEG, "mark.jpg", "image/jpeg")
+    replaced = await set_picture(client, p, template["id"], jpeg(), "mark.jpg", "image/jpeg")
     assert replaced.status_code == 200, replaced.text
     after = stored_files()
     assert len(after) == 1 and after != first
@@ -151,6 +160,11 @@ async def test_only_a_picture_is_a_watermark_picture(client):
     )
     assert response.status_code == 422
     assert error(response)["code"] == "FILE_TYPE_NOT_ALLOWED"
+    assert stored_files() == []
+    # A PNG header over content that does not decode would break every PDF of the template.
+    broken = await set_picture(client, p, template["id"], PNG[:16] + b"not a picture" * 8)
+    assert broken.status_code == 422
+    assert error(broken)["code"] == "VALIDATION_ERROR"
     assert stored_files() == []
 
 
