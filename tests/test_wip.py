@@ -106,6 +106,46 @@ async def test_summary_filters_and_pagination(client):
     assert second.json()["meta"]["has_more"] is False
 
 
+async def test_summary_by_job_narrowed_by_kind_and_age(client):
+    """One row per job (WIP Details "By job"); the kind and age filters narrow the items first."""
+    p = await new_practice(client)
+    job = await hourly_job(p)
+    # On the job: £180 of time, 20 days old. Without a job: £75 of time 45 days old and a £13
+    # disbursement 75 days old.
+    await make_time_entry(
+        p.org, p.owner, client=p.client, job=job, minutes=90, entry_date=TODAY - timedelta(days=20)
+    )
+    await make_time_entry(
+        p.org,
+        p.owner,
+        client=p.client,
+        minutes=45,
+        charge_rate=10_000,
+        entry_date=TODAY - timedelta(days=45),
+    )
+    await make_disbursement(p.org, p.client, 1_300, incurred_on=TODAY - timedelta(days=75))
+
+    async def rows(**params):
+        response = await client.get(
+            p.url("/wip/summary"), headers=p.owner.headers, params={"group_by": "job", **params}
+        )
+        assert response.status_code == 200, response.text
+        data = response.json()["data"]
+        by_job = {r["key"]: (r["total"], r["item_count"]) for r in data["rows"]}
+        return by_job, data["totals"]["total"]
+
+    job_id = str(job.id)
+    assert await rows() == ({job_id: (18_000, 1), None: (8_800, 2)}, 26_800)
+    assert await rows(kind="time") == ({job_id: (18_000, 1), None: (7_500, 1)}, 25_500)
+    assert await rows(kind=["disbursement", "expense"]) == ({None: (1_300, 1)}, 1_300)
+    assert await rows(min_age_days=31) == ({None: (8_800, 2)}, 8_800)
+    assert await rows(min_age_days=61, kind="time") == ({}, 0)
+    response = await client.get(
+        p.url("/wip/summary"), headers=p.owner.headers, params={"min_age_days": -1}
+    )
+    assert response.status_code == 422
+
+
 async def test_client_items(client):
     p = await new_practice(client)
     worker = await staff(p.org, "staff", full_name="Grace Hopper")

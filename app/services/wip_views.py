@@ -131,6 +131,7 @@ def item_read(atom: WipAtom, as_at: date, names: dict[uuid.UUID, str]) -> WipIte
 class SummaryQuery:
     group_by: WipGroupBy = "client"
     filters: WipFilters = field(default_factory=WipFilters)
+    min_age_days: int | None = None
     q: str | None = None
     sort: str = "name"
     descending: bool = False
@@ -248,7 +249,10 @@ class WipViewService:
         read from its frozen snapshot), with the totals of every row that matches."""
         await self._check_scope(ctx, q.filters)
         day = await self.history.day(ctx, q.as_at, q.filters)
-        groups = list(aggregate(day.atoms, q.group_by, day.as_at).values())
+        atoms = day.atoms
+        if q.min_age_days is not None:
+            atoms = [a for a in atoms if age_days(a.item_date, day.as_at) >= q.min_age_days]
+        groups = list(aggregate(atoms, q.group_by, day.as_at).values())
         await self._name_groups(ctx, groups, q.group_by)
         if q.q:
             needle = q.q.lower()

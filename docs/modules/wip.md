@@ -32,7 +32,8 @@ A **WIP item** is something the practice has done or paid for that has not been 
 | Method | Path | Permission | Use |
 |---|---|---|---|
 | GET | `/clients/{client_id}/wip` | `wip.read` | **The list for Prepare Invoice**: every item of one client, bounded (not paginated), oldest first; `?job_id=` narrows it. The existing path, extended: `items` now also holds `expense` and `fixed_fee` items; `totals` (unchanged keys) and the new `composition` give the figures |
-| GET | `/wip/items` | `wip.read` | Items across clients, cursor-paginated, filters `client_id`, `job_id`, `kind`, `partner_user_id`, `manager_user_id`, `service_id`, `min_age_days` (the WIP Details page) |
+| GET | `/wip/items` | `wip.read` | Items across clients, cursor-paginated, filters `client_id`, `job_id`, `kind`, `partner_user_id`, `manager_user_id`, `service_id`, `min_age_days` (the WIP Details page, "By item") |
+| GET | `/wip/summary` | `wip.read` | WIP grouped by `group_by` (`client`, `job`, `partner`, `manager`, `service`), cursor-paginated, with the totals of every matching row. Filters `client_id`, `job_id`, `partner_user_id`, `manager_user_id`, `service_id`, `q`, and `kind` (repeat) and `min_age_days`, which narrow the items before they are grouped. `group_by=job` is the default "By job" view of WIP Details: one line per job (one per client for the WIP without a job), whose `total` is the sum of the `value` of the job's items |
 
 An item of `GET /clients/{client_id}/wip` (the legacy keys are kept, the new ones are additive):
 
