@@ -85,6 +85,20 @@ async def test_delete_removes_people_nothing_refers_to(client: AsyncClient) -> N
     assert len(await audit_entries(org["id"], "staff.deleted")) == 2
 
 
+async def test_delete_keeps_people_with_records_as_deleted_users(client: AsyncClient) -> None:
+    owner, org = await practice(client)
+    spare = await new_staff(client, owner, org, "Spare")
+    used = await new_staff(client, owner, org, "Used")
+    acme = await make_client(org)
+    await log_time(client, owner, org, user_id=used["id"], client_id=acme.id)
+
+    result = ok_data(await bulk(client, owner, org, [spare["id"], used["id"]], "delete"))
+    assert result == {"action": "delete", "affected": 2, "changed": 2}
+    assert (await client.get(url(org, f"/{spare['id']}"), headers=owner.headers)).status_code == 404
+    assert (await detail(client, owner, org, used["id"]))["status"] == "deleted"
+    assert await scalar("SELECT count(*) FROM time_entries WHERE user_id = :u", u=used["id"]) == 1
+
+
 async def test_one_refusal_refuses_the_whole_batch_and_names_everyone(client: AsyncClient) -> None:
     owner, org = await practice(client)
     spare = await new_staff(client, owner, org, "Spare")
@@ -97,11 +111,10 @@ async def test_one_refusal_refuses_the_whole_batch_and_names_everyone(client: As
     failure = error(response)
     assert failure["code"] == "BULK_REFUSED"
     refused = {r["staff_id"]: r["error_code"] for r in failure["details"]}
-    assert refused[used["id"]] == "STAFF_IN_USE"
-    assert str(owner.id) in refused  # nobody deletes themselves
-    assert spare["id"] not in refused
-    # Nothing was changed: the spare person is still there.
+    assert list(refused) == [str(owner.id)]  # nobody deletes themselves
+    # Nothing was changed: the spare person is still there, the used one still active.
     assert (await client.get(url(org, f"/{spare['id']}"), headers=owner.headers)).status_code == 200
+    assert (await detail(client, owner, org, used["id"]))["status"] == "active"
     assert await audit_entries(org["id"], "staff.bulk_changed") == []
     assert await audit_entries(org["id"], "staff.deleted") == []
 

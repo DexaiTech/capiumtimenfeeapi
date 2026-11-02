@@ -167,9 +167,11 @@ grade's default cost rate.
 * Codes are unique per practice (409 `STAFF_CODE_TAKEN`); no two **active** staff share an
   email address, whether work or sign-in (409 `STAFF_EMAIL_TAKEN`); initials are unique among
   non-removed members.
-* Staff with time, expenses, invoices, jobs, rates or other records cannot be deleted
-  (409 `STAFF_IN_USE`): deactivate them. The practice always keeps one active owner who can
-  sign in; only an owner changes another owner; nobody deactivates or deletes themselves.
+* Deleting staff with time, expenses, invoices, jobs, rates or other records keeps them as a
+  **deleted user** (`deleted`): signed out, off the staff list and pickers, every record kept and
+  naming them "John Smith (deleted user)"; reactivating restores them. Staff nothing refers to
+  are deleted completely. The practice always keeps one active owner who can sign in; only an
+  owner changes another owner; nobody deactivates or deletes themselves.
 * A **grade** (Partner, Manager, Senior, Junior seeded) names a level with a default cost rate,
   default charge-out rate and default chargeable target. A used grade (staff of any status,
   or a rate naming it) is deactivated, never deleted. Names and codes are unique.

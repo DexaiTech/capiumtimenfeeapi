@@ -31,10 +31,12 @@ if TYPE_CHECKING:
     from app.db.models.practice import Grade
 
 # ``suspended`` and ``removed`` are the original (V1) values; ``inactive`` and ``left`` are what
-# the staff API writes. A V1 value behaves like its successor and is reported as it.
-MEMBER_STATUSES = ("active", "suspended", "removed", "inactive", "left")
+# the staff API writes. A V1 value behaves like its successor and is reported as it. ``deleted``
+# is a staff member deleted while records refer to them: kept for that history, shown on it as
+# "John Smith (deleted user)" and left out of the staff list (ticket APT62).
+MEMBER_STATUSES = ("active", "suspended", "removed", "inactive", "left", "deleted")
 # Staff who no longer work for the practice: they cannot sign in and are not offered for new work.
-GONE_STATUSES = ("removed", "left")
+GONE_STATUSES = ("removed", "left", "deleted")
 # How a fixed fee counts as WIP, and which rates price time (see the columns below).
 FixedFeeWipMode = Literal["on_completion", "by_budget_progress"]
 RateMode = Literal["staff_first", "grade_only"]
@@ -378,7 +380,8 @@ class OrganizationMember(Base, IdMixin, TimestampMixin):
             name="fk_organization_members_organization_id_grade_id_grades",
         ),
         CheckConstraint(
-            "status IN ('active', 'suspended', 'removed', 'inactive', 'left')", name="status"
+            "status IN ('active', 'suspended', 'removed', 'inactive', 'left', 'deleted')",
+            name="status",
         ),
         CheckConstraint("manager_user_id <> user_id", name="not_own_manager"),
         CheckConstraint(

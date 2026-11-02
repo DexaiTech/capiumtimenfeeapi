@@ -13,7 +13,7 @@ from app.schemas.rate_rules import RefRead
 from app.schemas.settings import Money, reject_nulls
 from app.services.charge_rates import ResolvedRate
 
-StaffStatus = Literal["active", "inactive", "left"]
+StaffStatus = Literal["active", "inactive", "left", "deleted"]
 LoginStatus = Literal["none", "invited", "active"]
 StaffSort = Literal["name", "code", "email", "grade", "status", "start_date", "leaving_date"]
 
@@ -160,7 +160,12 @@ class StaffDetail(StaffRead):
     usage: list[UsageRead] = Field(
         description="What refers to the person (time, expenses, invoices, ...); empty when none"
     )
-    can_delete: bool = Field(description="True when nothing refers to them: DELETE works")
+    can_delete: bool = Field(
+        description=(
+            "True when nothing refers to them: DELETE removes them completely. Otherwise DELETE "
+            "keeps them as a deleted user for their records"
+        )
+    )
 
 
 # --- Requests ---------------------------------------------------------------------------

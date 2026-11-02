@@ -68,8 +68,8 @@ StaffLoginServiceDep = Annotated[StaffLoginService, Depends(get_staff_login_serv
     summary="List staff",
     description=(
         "Staff of the practice, cursor-paginated. `q` searches name, code, work email and "
-        "sign-in email; `status` (repeatable) = `active`, `inactive` or `left` - by default "
-        "active and inactive staff; `grade_id`, `approver_id`, `role_id`; `has_login` "
+        "sign-in email; `status` (repeatable) = `active`, `inactive`, `left` or `deleted` - by "
+        "default active and inactive staff; `grade_id`, `approver_id`, `role_id`; `has_login` "
         "true/false; `selectable=true` keeps only people time can be recorded for (active and "
         "not past their leaving date). `sort` = `name` (default) | `code` | `email` | `grade` "
         "(grade order) | `status` | `start_date` | `leaving_date`, `order` = `asc` | `desc`. "
@@ -87,7 +87,7 @@ async def list_staff(
     ] = None,
     staff_status: Annotated[
         list[StaffStatus] | None,
-        Query(alias="status", description="active, inactive or left; repeat for several"),
+        Query(alias="status", description="active, inactive, left or deleted; repeat for several"),
     ] = None,
     grade_id: Annotated[uuid.UUID | None, Query(description="Only this grade")] = None,
     approver_id: Annotated[
@@ -157,11 +157,11 @@ async def create_staff(
         "`reactivate`, `delete`) to 1-200 staff members in one transaction: all or nothing. "
         "`value` is the grade id, the approver's staff id, or for `deactivate` `inactive` "
         "(default) or `left` (with an optional `leaving_date`). Each person goes through the "
-        "rules of the single endpoint (the last administrator, an owner, yourself, a person "
-        "records refer to): if any is refused the answer is 409 `BULK_REFUSED` with every "
-        "person in `details` (`staff_id`, `number` = staff code, `name`, `error_code`, "
-        "`reason`), and nothing changes. An unknown id answers 404 listing it. Audited as one "
-        "`staff.bulk_changed` entry besides the usual ones. "
+        "rules of the single endpoint (the last administrator, an owner, yourself; `delete` "
+        "keeps a person records refer to as a deleted user): if any is refused the answer is "
+        "409 `BULK_REFUSED` with every person in `details` (`staff_id`, `number` = staff "
+        "code, `name`, `error_code`, `reason`), and nothing changes. An unknown id answers "
+        "404 listing it. Audited as one `staff.bulk_changed` entry besides the usual ones. "
         "`affected` counts the distinct people, `changed` those that actually changed. "
         "Requires `member.update`; `deactivate` and `delete` need `member.remove`."
     ),
@@ -229,7 +229,8 @@ async def update_staff(
         "longer sign in and are not offered for new time. A person with a login is signed "
         "out everywhere unless their account also belongs to another practice. 403 for "
         "oneself; only an owner changes an owner and the last owner who can sign in cannot "
-        "be deactivated (409). 409 `STAFF_LEFT` to mark someone who has left as inactive. "
+        "be deactivated (409). 409 `STAFF_LEFT` to mark someone who has left as inactive, "
+        "`STAFF_DELETED` for a deleted person (reactivate them first). "
         "Idempotent. Requires `member.remove`."
     ),
     responses=error_responses(403, 404, 409),
@@ -248,8 +249,8 @@ async def deactivate_staff(
     "/staff/{staff_id}/reactivate",
     summary="Reactivate a staff member",
     description=(
-        "Makes an inactive or departed staff member active again and clears the leaving "
-        "date. 409 `STAFF_EMAIL_TAKEN` when another active staff member now has their work "
+        "Makes an inactive, departed or deleted staff member active again and clears the "
+        "leaving date. 409 `STAFF_EMAIL_TAKEN` when another active staff member now has their work "
         "email. Idempotent. Requires `member.update`."
     ),
     responses=error_responses(403, 404, 409),
@@ -264,9 +265,12 @@ async def reactivate_staff(
     "/staff/{staff_id}",
     summary="Delete a staff member",
     description=(
-        "Deletes a staff record that nothing refers to (`can_delete` on the detail). Anyone "
-        "with time, expenses, invoices, jobs, rates or other records answers 409 "
-        "`STAFF_IN_USE` (`details.usage` lists what; deactivate them instead). 403 for "
+        "Deletes a staff record that nothing refers to (`can_delete` on the detail) completely. "
+        "Someone with time, expenses, invoices, jobs, rates or other records is kept as a "
+        "deleted user (`status` = `deleted`): they can no longer sign in to the practice, "
+        "leave the staff list (unless `status=deleted` is asked for) and the pickers, people "
+        "they approved lose their approver, and every record stays, naming them "
+        '"John Smith (deleted user)". Reactivating brings them back. Idempotent. 403 for '
         "oneself; only an owner deletes an owner. Requires `member.remove`."
     ),
     responses=error_responses(403, 404, 409),

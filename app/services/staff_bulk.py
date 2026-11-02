@@ -2,10 +2,10 @@
 
 Every person goes through the very same service call as the single endpoint (``update``,
 ``deactivate``, ``reactivate``, ``delete``), so each rule of the single action holds here too:
-the last administrator, an owner changed by a non-owner, nobody deactivating themselves, a
-person that records refer to who cannot be deleted. The whole batch is one transaction: each
-person is tried inside a savepoint, the refusals are collected, and when there is any the batch
-answers 409 ``BULK_REFUSED`` listing every person and reason, with nothing changed.
+the last administrator, an owner changed by a non-owner, nobody deactivating or deleting
+themselves; a person that records refer to is kept as a deleted user. The whole batch is one
+transaction: each person is tried inside a savepoint, the refusals are collected, and when there
+is any the batch answers 409 ``BULK_REFUSED`` listing every person and reason, with nothing changed.
 """
 
 import uuid

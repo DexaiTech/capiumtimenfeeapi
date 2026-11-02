@@ -11,8 +11,10 @@ Rules:
   number sequence when not given. No two active staff share an email address, whether it is a
   work email or a login address (409 ``STAFF_EMAIL_TAKEN``).
 * Staff are deactivated (``inactive``, can return) or marked ``left`` (leaving date set, their
-  approver links cleared); everything recorded for them stays. A record that nothing refers to
-  can be deleted, any other answers 409 ``STAFF_IN_USE``.
+  approver links cleared); everything recorded for them stays. Deleting a record that nothing
+  refers to removes it; one that records refer to becomes ``deleted`` (ticket APT62): signed out,
+  off the staff list and the pickers, approver links cleared, every record kept and naming them
+  "(deleted user)". Reactivating brings them back.
 * The practice always keeps one active owner who can sign in; only an owner changes another
   owner; nobody deactivates or deletes themselves.
 * Every change takes the practice row lock, so these checks cannot be raced.
@@ -378,6 +380,11 @@ class StaffService:
             if member.user_id == ctx.user.id:
                 raise AuthorizationError("You cannot deactivate yourself.")
             current = normalised_status(member.status)
+            if current == "deleted":
+                raise ConflictError(
+                    "This person has been deleted. Reactivate them first.",
+                    code="STAFF_DELETED",
+                )
             if current == "left" and data.status == "inactive":
                 raise ConflictError(
                     "This person has left the practice. Reactivate them first.",
@@ -477,7 +484,8 @@ class StaffService:
         return result
 
     async def delete(self, ctx: OrgContext, user_id: uuid.UUID, rctx: RequestContext) -> None:
-        """Delete a staff record that nothing refers to (409 ``STAFF_IN_USE`` otherwise)."""
+        """Delete a staff record that nothing refers to; keep one that records refer to as a
+        deleted user (``deleted``), with every record untouched."""
         async with unit_of_work(self.session):
             ctx = await lock_and_refresh(self.session, ctx, "member.remove")
             org_id = ctx.organization_id
@@ -487,19 +495,36 @@ class StaffService:
                 raise AuthorizationError("You cannot delete yourself.")
             await self.guard_owner(ctx, row)
             counts = await staff_references.usage(self.session, org_id, user.id)
-            if counts:
-                raise ConflictError(
-                    "This person has time, expenses, invoices or other records, so they cannot "
-                    "be deleted. Deactivate them instead.",
-                    code="STAFF_IN_USE",
-                    details={"usage": [u.model_dump() for u in usage_rows(counts)]},
-                )
             meta = {
                 "staff_name": user.full_name,
                 "staff_code": member.staff_code,
                 "email": member.work_email,
             }
             login = member.login_enabled
+            if counts:
+                if member.status == "deleted":
+                    return
+                old_status = member.status
+                member.status = "deleted"
+                await self.members.clear_manager(org_id, user.id)
+                await self.session.flush()
+                if login and not await self.members.other_organizations(org_id, user.id):
+                    await self.sessions.revoke_all(user.id, "admin")
+                await record_audit(
+                    self.session,
+                    ctx,
+                    rctx,
+                    "staff.deleted",
+                    "member",
+                    user.id,
+                    {
+                        **meta,
+                        "old": {"status": old_status},
+                        "new": {"status": "deleted"},
+                        "kept_for": counts,
+                    },
+                )
+                return
             await self.members.clear_manager(org_id, user.id)
             await self.session.execute(
                 delete(OrganizationMember).where(

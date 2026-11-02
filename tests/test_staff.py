@@ -9,8 +9,9 @@ from tests.clients_helpers import count_queries, scalar, sql
 from tests.domain_factories import make_client, practice, staff
 from tests.factories import add_member, audit_entries, error, role_id
 from tests.foundation_helpers import create_person
+from tests.reports_helpers import report
 from tests.team_helpers import grade_id, new_rate, new_staff, set_grade
-from tests.time_helpers import log_time, ok_data, org_url, set_practice
+from tests.time_helpers import MONDAY, log_time, ok_data, org_url, set_practice
 
 
 def staff_url(org: dict, path: str = "") -> str:
@@ -827,41 +828,33 @@ async def test_time_cannot_be_logged_after_the_leaving_date(client: AsyncClient)
     )["entry_date"] == "2026-09-07"
 
 
-async def test_delete_only_staff_that_nothing_refers_to(client: AsyncClient) -> None:
+async def test_delete_removes_unused_staff_and_keeps_used_staff_as_deleted_users(
+    client: AsyncClient,
+) -> None:
     owner, org = await practice(client)
     spare = await new_staff(client, owner, org, "Spare")
     used = await new_staff(client, owner, org, "Used")
     acme = await make_client(org)
-    await log_time(client, owner, org, user_id=used["id"], client_id=acme.id)
+    entry = await log_time(client, owner, org, user_id=used["id"], client_id=acme.id)
 
     detail_used = await detail(client, owner, org, used["id"])
     assert detail_used["can_delete"] is False
     assert {u["kind"] for u in detail_used["usage"]} >= {"time_entries", "timesheets"}
     assert all(u["count"] >= 1 and u["label"] for u in detail_used["usage"])
+    # Records refer to them: they are kept as a deleted user, their time untouched.
     response = await client.delete(staff_url(org, f"/{used['id']}"), headers=owner.headers)
-    assert response.status_code == 409 and error(response)["code"] == "STAFF_IN_USE"
-    assert {u["kind"] for u in error(response)["details"]["usage"]} >= {"time_entries"}
-    # ... but they can be deactivated and their history stays.
-    assert (
-        ok_data(
-            await client.post(
-                staff_url(org, f"/{used['id']}/deactivate"), headers=owner.headers, json={}
-            )
-        )["status"]
-        == "inactive"
-    )
-    assert (
-        len(
-            ok_data(
-                await client.get(
-                    org_url(org, "/time-entries"),
-                    headers=owner.headers,
-                    params={"user_id": used["id"]},
-                )
-            )
+    assert response.status_code == 200, response.text
+    kept = await detail(client, owner, org, used["id"])
+    assert (kept["status"], kept["is_selectable"], kept["full_name"]) == ("deleted", False, "Used")
+    [still] = ok_data(
+        await client.get(
+            org_url(org, "/time-entries"), headers=owner.headers, params={"user_id": used["id"]}
         )
-        == 1
     )
+    assert (still["id"], still["minutes"]) == (entry["id"], entry["minutes"])
+    [log] = await audit_entries(org["id"], "staff.deleted")
+    assert log["metadata"]["new"] == {"status": "deleted"}
+    assert log["metadata"]["kept_for"]["time_entries"] == 1
 
     assert (
         await client.delete(staff_url(org, f"/{spare['id']}"), headers=owner.headers)
@@ -872,7 +865,7 @@ async def test_delete_only_staff_that_nothing_refers_to(client: AsyncClient) -> 
     assert (
         await scalar("SELECT count(*) FROM users WHERE id = :i", i=spare["id"]) == 0
     )  # the placeholder account too
-    assert len(await audit_entries(org["id"], "staff.deleted")) == 1
+    assert len(await audit_entries(org["id"], "staff.deleted")) == 2
     # A staff member with a rate is in use as well.
     ruled = await new_staff(client, owner, org, "Ruled")
     await new_rate(
@@ -886,7 +879,8 @@ async def test_delete_only_staff_that_nothing_refers_to(client: AsyncClient) -> 
     )
     assert (
         await client.delete(staff_url(org, f"/{ruled['id']}"), headers=owner.headers)
-    ).status_code == 409
+    ).status_code == 200
+    assert (await detail(client, owner, org, ruled["id"]))["status"] == "deleted"
     # Deleting someone who approves others clears their approver links.
     approver = await add_member(org["id"], "manager")
     reports = await new_staff(client, owner, org, "Reports", approver_id=str(approver.id))
@@ -897,6 +891,66 @@ async def test_delete_only_staff_that_nothing_refers_to(client: AsyncClient) -> 
     assert (
         await client.get(staff_url(org, f"/{approver.id}"), headers=owner.headers)
     ).status_code == 404
+
+
+async def test_a_deleted_user_loses_access_and_their_records_name_them_as_deleted(
+    client: AsyncClient,
+) -> None:
+    owner, org = await practice(client)
+    person = await staff(org, "staff", full_name="John Smith")
+    reports = await new_staff(client, owner, org, "Reports", approver_id=str(person.id))
+    acme = await make_client(org)
+    entry = await log_time(client, owner, org, user_id=person.id, client_id=acme.id)
+    assert (
+        await client.get(org_url(org, "/time-entries"), headers=person.headers)
+    ).status_code == 200
+
+    deleted = await client.delete(staff_url(org, f"/{person.id}"), headers=owner.headers)
+    assert deleted.status_code == 200, deleted.text
+    # They are signed out and cannot reach the practice any more.
+    assert (
+        await client.get(org_url(org, "/time-entries"), headers=person.headers)
+    ).status_code == 401
+    # Off the staff list and the pickers; only the deleted filter shows them.
+    pid = str(person.id)
+    assert pid not in [s["id"] for s in await listing(client, owner, org)]
+    assert pid not in [s["id"] for s in await listing(client, owner, org, selectable="true")]
+    everyone = await listing(client, owner, org, status=["active", "inactive", "left"])
+    assert pid not in [s["id"] for s in everyone]
+    assert [s["id"] for s in await listing(client, owner, org, status="deleted")] == [pid]
+    assert (await detail(client, owner, org, reports["id"]))["approver"] is None
+    # Nobody records new time for them.
+    refused = await log_time(client, owner, org, status=422, user_id=pid, client_id=acme.id)
+    assert refused["details"][0]["field"] == "user_id"
+
+    # Their time stays as it was and names them as a deleted user.
+    [kept] = ok_data(
+        await client.get(
+            org_url(org, "/time-entries"), headers=owner.headers, params={"user_id": pid}
+        )
+    )
+    assert (kept["id"], kept["minutes"], kept["user_id"]) == (entry["id"], entry["minutes"], pid)
+    sheets_url = org_url(org, "/timesheets")
+    [sheet] = ok_data(await client.get(sheets_url, headers=owner.headers, params={"user_id": pid}))
+    assert sheet["user_name"] == "John Smith (deleted user)"
+    summary = await report(client, owner, org, "time-summary", date_from=MONDAY, date_to=MONDAY)
+    assert {r["key"]: r["name"] for r in summary["rows"]}[pid] == "John Smith (deleted user)"
+    # The record keeps the plain name; nothing else changed.
+    assert (await detail(client, owner, org, pid))["full_name"] == "John Smith"
+
+    # Deleting again changes nothing; reactivating brings them back under their name.
+    assert (
+        await client.delete(staff_url(org, f"/{pid}"), headers=owner.headers)
+    ).status_code == 200
+    assert len(await audit_entries(org["id"], "staff.deleted")) == 1
+    response = await client.post(
+        staff_url(org, f"/{pid}/deactivate"), headers=owner.headers, json={}
+    )
+    assert response.status_code == 409 and error(response)["code"] == "STAFF_DELETED"
+    back = ok_data(await client.post(staff_url(org, f"/{pid}/reactivate"), headers=owner.headers))
+    assert back["status"] == "active"
+    [sheet] = ok_data(await client.get(sheets_url, headers=owner.headers, params={"user_id": pid}))
+    assert sheet["user_name"] == "John Smith"
 
 
 async def test_nobody_deactivates_or_deletes_themselves(client: AsyncClient) -> None:

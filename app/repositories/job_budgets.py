@@ -25,7 +25,17 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
-from app.db.models import Client, Job, JobAssignee, JobBudgetAlert, Service, TimeEntry, User
+from app.db.models import (
+    Client,
+    Job,
+    JobAssignee,
+    JobBudgetAlert,
+    OrganizationMember,
+    Service,
+    TimeEntry,
+    User,
+)
+from app.repositories.staff import person_name
 from app.repositories.time_jobs import FAR_FUTURE
 from app.repositories.time_paging import keyset_finish, keyset_query, parse_date
 from app.utils.ids import new_id
@@ -159,19 +169,27 @@ class JobBudgetRepository:
         """Who logged time on the job: most minutes first."""
         billable = TimeEntry.is_billable
         minutes = func.sum(TimeEntry.minutes)
+        name = person_name()
         stmt = (
             select(
                 TimeEntry.user_id,
-                User.full_name,
+                name,
                 minutes,
                 func.sum(case((billable, TimeEntry.minutes), else_=0)),
                 func.sum(case((billable, TimeEntry.charge_value), else_=0)),
                 func.sum(TimeEntry.cost_value),
             )
             .join(User, User.id == TimeEntry.user_id)
+            .outerjoin(
+                OrganizationMember,
+                and_(
+                    OrganizationMember.organization_id == TimeEntry.organization_id,
+                    OrganizationMember.user_id == TimeEntry.user_id,
+                ),
+            )
             .where(TimeEntry.organization_id == organization_id, TimeEntry.job_id == job_id)
-            .group_by(TimeEntry.user_id, User.full_name)
-            .order_by(minutes.desc(), func.lower(User.full_name), TimeEntry.user_id)
+            .group_by(TimeEntry.user_id, name)
+            .order_by(minutes.desc(), func.lower(name), TimeEntry.user_id)
         )
         return [
             PersonUsage(row[0], row[1], int(row[2]), int(row[3]), int(row[4]), int(row[5]))
