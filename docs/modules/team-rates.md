@@ -824,6 +824,9 @@ for updates, `changes: {field: [old, new]}`.
 * `app.services.charge_rates.resolve_many(session, organization, [RateQuery(user_id, client_id, job_id,
   entry_date)])` → `ResolvedRate(charge_rate, cost_rate, source, cost_source, charge_rule_id,
   cost_rule_id)` for many entries with four queries; `resolve(...)` for one; `explain(...)` for both ladders.
+* `RateBook.tiers(query)` → `{client_job, task, staff}`: the first rate of each tier of the charge-out ladder
+  (levels 1–4, level 5, levels 6–7 and the default; null when the tier has none), for the recovery analysis's rate
+  priority (`docs/modules/reports.md`, "Recovery analysis").
 * `app.services.rates.rate_in_force(session, organization_id, user_id, on_date)` and `current_rates(...)`
   keep the V1 contract (the person's own staff rates).
 * `app.services.period_locks.locked_dates(session, organization_id, days)` → `{day: reason}`: implement it

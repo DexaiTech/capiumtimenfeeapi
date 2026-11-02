@@ -190,14 +190,14 @@ it. The daily worker `create_engagement_jobs` (`app/services/engagement_jobs.py`
 ## Shapes (abridged)
 
 **JobRead**: `id, number, name, description, client_id, client_code, client_name, service_id,
-service_name, status, billing_basis, fixed_fee, hourly_rate, budget_minutes, budget_fee,
+service_name, status, billing_basis, fixed_fee, hourly_rate, cost_plus_markup_bp, budget_minutes, budget_fee,
 period_start, period_end, start_date, due_date, partner_user_id, manager_user_id,
 assignee_user_ids[], completed_at, created_at, updated_at` + actuals `logged_minutes,
 billable_minutes, time_value, wip_value, billed_value, written_off_value,
 budget_minutes_used_bp, budget_fee_used_bp`.
 
 **JobCreate**: `client_id` (required), `name` (required), `description, service_id,
-billing_basis, fixed_fee, hourly_rate, budget_minutes, budget_fee, period_start, period_end,
+billing_basis, fixed_fee, hourly_rate, cost_plus_markup_bp (the job's recovery mark-up, 0-100000 bp, null = the client's), budget_minutes, budget_fee, period_start, period_end,
 start_date, due_date, partner_user_id, manager_user_id, status` (`planned` | `in_progress`,
 default `planned`), `assignee_user_ids[]`. **JobUpdate**: the same minus `client_id`,
 `status`, `assignee_user_ids`, all optional.

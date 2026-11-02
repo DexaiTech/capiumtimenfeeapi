@@ -18,11 +18,17 @@ from app.core.exceptions import AuthorizationError, NotFoundError, ValidationErr
 from app.repositories.reports import DateRange, ItemFilter
 from app.repositories.reports_ext import ExpenseFilter, ReportExtRepository
 from app.schemas.recovery import (
+    CostToBusinessQuery,
+    CostToBusinessReport,
+    CostToBusinessRow,
+    CostToBusinessTotals,
     RecoveryAnalysisFilters,
     RecoveryAnalysisQuery,
     RecoveryAnalysisReport,
+    RecoveryAnalysisRow,
     RecoveryAnalysisTotals,
 )
+from app.schemas.reports import ReportFilters
 from app.schemas.reports_ext import (
     MAX_MISSING_WEEKS,
     ExpenseRow,
@@ -45,7 +51,7 @@ from app.schemas.time_views import MissingTimesheet
 from app.services.expense_access import ExpenseAccess, sees_all
 from app.services.policy import OrgContext, ensure_any, has_permission
 from app.services.recovery import RecoveryService
-from app.services.recovery_values import COST_PERMISSION, Tally, figures
+from app.services.recovery_values import COST_PERMISSION, Tally, cost_figures, figures
 from app.services.report_paging import window
 from app.services.reports import ReportService, bucket_days, months_between
 from app.services.time_rules import practice_today, week_start_for
@@ -278,15 +284,12 @@ class ExtendedReportService(ReportService):
             rows.append(PaymentRow(key=str(key), code=r["code"], name=name, **ids, **measures(r)))
         return rows
 
-    # --- Recovery analysis -------------------------------------------------------------
+    # --- Recovery analysis and Cost to Business ----------------------------------------
 
-    async def recovery_analysis(
-        self, ctx: OrgContext, q: RecoveryAnalysisQuery
-    ) -> RecoveryAnalysisReport:
-        """``report.financial`` (checked by the route). The billable time worked in the range
-        (default: all of it) against what it was invoiced at, per job, client or person."""
+    def _scope(
+        self, q: RecoveryAnalysisQuery | CostToBusinessQuery
+    ) -> tuple[DateRange, ItemFilter]:
         self._check_order(q.date_from, q.date_to)
-        period = DateRange(q.date_from, q.date_to)
         f = ItemFilter(
             client_id=q.client_id,
             job_id=q.job_id,
@@ -295,21 +298,57 @@ class ExtendedReportService(ReportService):
             manager_user_id=q.manager_user_id,
             service_id=q.service_id,
         )
+        return DateRange(q.date_from, q.date_to), f
+
+    async def recovery_analysis(
+        self, ctx: OrgContext, q: RecoveryAnalysisQuery
+    ) -> RecoveryAnalysisReport:
+        """``report.financial`` (checked by the route). The billable time worked in the range
+        (default: all of it) against what it was invoiced at, per job, client or person."""
+        period, f = self._scope(q)
         await self._check_refs(ctx, f)
-        markup = ctx.organization.cost_plus_markup_bp if q.markup_bp is None else q.markup_bp
         show_cost = has_permission(ctx, COST_PERMISSION)
         recovery = RecoveryService(self.session)
-        pieces = await recovery.pieces(ctx.organization, period, f)
+        pieces = await recovery.pieces(ctx.organization, period, f, markup_bp=q.markup_bp)
         rows = await recovery.report_rows(
-            ctx.organization_id, pieces, q.group_by, markup, show_cost
+            ctx.organization_id,
+            pieces,
+            q.group_by,
+            RecoveryAnalysisRow,
+            lambda tally: figures(tally, show_cost),
         )
-        totals = RecoveryAnalysisTotals(**figures(Tally.of(pieces), markup, show_cost))
+        totals = RecoveryAnalysisTotals(**figures(Tally.of(pieces), show_cost))
+        org = ctx.organization
         filters = RecoveryAnalysisFilters(
             **q.model_dump(exclude={"format", "limit", "offset", "markup_bp"}),
-            markup_bp=markup,
+            markup_bp=q.markup_bp,
+            practice_markup_bp=org.cost_plus_markup_bp,
+            rate_order=list(org.recovery_rate_order),
         )
         page_rows, page = window(rows, q)
         return RecoveryAnalysisReport(rows=page_rows, totals=totals, filters=filters, page=page)
+
+    async def cost_to_business(
+        self, ctx: OrgContext, q: CostToBusinessQuery
+    ) -> CostToBusinessReport:
+        """``report.financial`` and ``rate.read`` (cost is the point of it): all the time worked
+        in the range, billable or not, at what it cost the practice, against what it was
+        invoiced at, per job, client or person."""
+        if not has_permission(ctx, COST_PERMISSION):
+            raise AuthorizationError()
+        period, f = self._scope(q)
+        await self._check_refs(ctx, f)
+        recovery = RecoveryService(self.session)
+        pieces = await recovery.pieces(
+            ctx.organization, period, f, billable_only=False, valued=False
+        )
+        rows = await recovery.report_rows(
+            ctx.organization_id, pieces, q.group_by, CostToBusinessRow, cost_figures
+        )
+        totals = CostToBusinessTotals(**cost_figures(Tally.of(pieces)))
+        filters = ReportFilters(**q.model_dump(exclude={"format", "limit", "offset"}))
+        page_rows, page = window(rows, q)
+        return CostToBusinessReport(rows=page_rows, totals=totals, filters=filters, page=page)
 
     # --- Missing timesheets -------------------------------------------------------------
 

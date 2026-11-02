@@ -50,6 +50,10 @@ CENTRALLY_MANAGED_FIELDS = (
     "country",
 )
 
+_MARKUP = (
+    "The client's cost-plus mark-up in basis points (5000 = 50%) for the recovery analysis; null "
+    "uses the practice's `cost_plus_markup_bp`. A job's own mark-up wins over it"
+)
 CLIENT_CODE_PATTERN = re.compile(r"^[A-Z0-9_-]{1,20}$")
 _NULLABLE_CLIENT_FIELDS = (
     "email",
@@ -330,6 +334,7 @@ class ClientCreate(_ClientFields):
     partner_user_id: uuid.UUID | None = None
     manager_user_id: uuid.UUID | None = None
     payment_terms_days: int | None = Field(default=None, ge=0, le=365)
+    cost_plus_markup_bp: int | None = Field(default=None, ge=0, le=100000, description=_MARKUP)
     default_vat_rate_id: uuid.UUID | None = None
     billing_notes: str | None = Field(default=None, max_length=2000)
     notes: str | None = Field(default=None, max_length=5000)
@@ -379,6 +384,7 @@ class ClientUpdate(_ClientFields):
     partner_user_id: uuid.UUID | None = None
     manager_user_id: uuid.UUID | None = None
     payment_terms_days: int | None = Field(default=None, ge=0, le=365)
+    cost_plus_markup_bp: int | None = Field(default=None, ge=0, le=100000, description=_MARKUP)
     default_vat_rate_id: uuid.UUID | None = None
     billing_notes: str | None = Field(default=None, max_length=2000)
     notes: str | None = Field(default=None, max_length=5000)
@@ -468,6 +474,7 @@ class ClientRead(BaseModel):
     partner_user_id: uuid.UUID | None
     manager_user_id: uuid.UUID | None
     payment_terms_days: int | None
+    cost_plus_markup_bp: int | None = Field(description=_MARKUP)
     default_vat_rate_id: uuid.UUID | None
     billing_notes: str | None
     notes: str | None
@@ -528,6 +535,7 @@ class ClientRead(BaseModel):
             "partner_user_id": client.partner_user_id,
             "manager_user_id": client.manager_user_id,
             "payment_terms_days": client.payment_terms_days,
+            "cost_plus_markup_bp": client.cost_plus_markup_bp,
             "default_vat_rate_id": client.default_vat_rate_id,
             "billing_notes": client.billing_notes,
             "notes": client.notes,

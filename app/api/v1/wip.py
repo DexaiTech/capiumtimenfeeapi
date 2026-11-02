@@ -115,8 +115,8 @@ async def client_wip(
         "would come to (`basis_values`: contract, job, team). Budget against actual is "
         "`actual_cost` (the people who did the work; needs `rate.read`), `budgeted_cost` (the "
         "job's `budget_cost`) and `agreed_price` (the fixed fee, else the fee budget), tracked "
-        "separately. `recovery` values the time ready to bill at the task rate, at each "
-        "person's own charge-out rate, at cost and at cost plus the practice's `markup_bp`, for "
+        "separately. `recovery` values the time ready to bill at the recovery rate, at each "
+        "person's own charge-out rate, at cost and at cost plus the mark-up (`markup_bp`), for "
         "comparing the invoice being raised with them. Also returned when nothing can be billed "
         "yet, so the hours are always visible. Requires `wip.read`."
     ),
@@ -133,15 +133,18 @@ async def client_billing_summary(
     summary="A client's invoices and recovery",
     description=(
         "For each job of the client with billable time (and the work without a job), all dates: "
-        "the billable minutes and their invoice value (`invoiced_value` on issued invoices plus "
-        "`to_bill_value`: what a draft bills, else what the job's terms will bill: the fixed fee "
-        "still to bill spread over the unbilled time, or the time's value on an hourly job) "
-        "against the task rate (`task_value`), each person's own charge-out rate "
-        "(`staff_value`) and cost plus the practice's `cost_plus_markup_bp` "
-        "(`cost_plus_value`), with the revenue left on the table on each basis (`*_shortfall`, "
-        "negative for over-recovery) and the recovery (`*_recovery_bp`), plus the client's "
-        "totals. Cost, cost plus and margin need `rate.read` (null otherwise). The figures are "
-        "those of `GET /reports/recovery-analysis` for the client. Requires `wip.read`."
+        "the billable minutes on an invoice or written off and their invoice value "
+        "(`invoiced_value` on issued invoices less `credited_value`, the credit notes allocated "
+        "to them, plus `draft_value` on drafts) against the recovery rate (`recovery_value`: the "
+        "practice's `recovery_rate_order` of the client job-specific, task and staff rates), "
+        "each person's own charge-out rate (`staff_value`) and cost plus the job's, else the "
+        "client's, else the practice's mark-up (`cost_plus_value`), with the revenue left on the "
+        "table on each basis (`*_shortfall`, negative for over-recovery) and the recovery; the "
+        "billable time not invoiced yet is WIP (`wip_minutes`, `wip_value`) and has no invoice "
+        "value. Plus the client's totals and `credit_on_account` (payments not allocated to an "
+        "invoice: they reduce no invoice value). Cost, cost plus and margin need `rate.read` "
+        "(null otherwise). The figures are those of `GET /reports/recovery-analysis` for the "
+        "client. Requires `wip.read`."
     ),
     responses=error_responses(403, 404),
 )

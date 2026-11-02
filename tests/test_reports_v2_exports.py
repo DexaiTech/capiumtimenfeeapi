@@ -40,6 +40,7 @@ REPORTS = [
     ("payments", SEPTEMBER, "Payments"),
     ("missing-timesheets", {}, "Missing Timesheets"),
     ("recovery-analysis", SEPTEMBER, "Recovery Analysis"),
+    ("cost-to-business", SEPTEMBER, "Cost to Business"),
 ]
 FILES = {"csv": "text/csv; charset=utf-8", "xlsx": XLSX, "pdf": "application/pdf"}
 

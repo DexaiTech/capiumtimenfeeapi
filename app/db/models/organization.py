@@ -82,6 +82,11 @@ class Organization(Base, IdMixin, TimestampMixin, SoftDeleteMixin):
         CheckConstraint("mileage_rate >= 0", name="mileage_rate"),
         CheckConstraint("expense_markup_bp BETWEEN 0 AND 100000", name="expense_markup_bp"),
         CheckConstraint("cost_plus_markup_bp BETWEEN 0 AND 100000", name="cost_plus_markup_bp"),
+        CheckConstraint(
+            "cardinality(recovery_rate_order) = 3 "
+            "AND recovery_rate_order @> ARRAY['client_job', 'task', 'staff']::text[]",
+            name="recovery_rate_order",
+        ),
         CheckConstraint("rate_mode IN ('staff_first', 'grade_only')", name="rate_mode"),
         CheckConstraint(
             "overtime_multiplier_bp BETWEEN 10000 AND 100000", name="overtime_multiplier_bp"
@@ -215,6 +220,12 @@ class Organization(Base, IdMixin, TimestampMixin, SoftDeleteMixin):
     # did the work to give the "cost plus" value it is compared with.
     cost_plus_markup_bp: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default=text("5000")
+    )
+    # Recovery analysis: the order in which the rate the work could have been billed at is looked
+    # for: ``client_job`` (agreed with the client for the job), ``task`` (the service's rate),
+    # ``staff`` (the person's charge-out rate). Each once.
+    recovery_rate_order: Mapped[list[str]] = mapped_column(
+        ARRAY(Text), nullable=False, server_default=text("'{client_job,task,staff}'::text[]")
     )
     email: Mapped[str | None] = mapped_column(Text)
     phone: Mapped[str | None] = mapped_column(Text)

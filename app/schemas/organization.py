@@ -14,6 +14,14 @@ from app.schemas.common import RequestModel
 from app.schemas.user import UserRead
 from app.utils.reminder_schedule import EARLIEST, LATEST, MAX_STEPS, effective_schedule
 
+RecoveryRate = Literal["client_job", "task", "staff"]
+RECOVERY_RATES: tuple[RecoveryRate, ...] = ("client_job", "task", "staff")
+_RATE_ORDER = (
+    "The order in which the recovery analysis looks for the rate the work could have been billed "
+    "at, first to last: `client_job` (the rate agreed with the client for the job), `task` (the "
+    "rate set against the job's service), `staff` (the person's charge-out rate). Each once"
+)
+
 
 class OrganizationRead(BaseModel):
     id: uuid.UUID = Field(description="Id of the practice")
@@ -108,8 +116,10 @@ class OrganizationRead(BaseModel):
     )
     cost_plus_markup_bp: int = Field(
         description="Basis points added to the cost of the work for the cost-plus value of the "
-        "recovery analysis (5000 = 50%: time that cost 50.00 is worth 75.00)"
+        "recovery analysis (5000 = 50%: time that cost 50.00 is worth 75.00), unless the client "
+        "or the job has its own"
     )
+    recovery_rate_order: list[RecoveryRate] = Field(description=_RATE_ORDER)
     email: str | None = Field(description="Practice contact email")
     phone: str | None = Field(description="Practice phone number")
     address_line1: str | None = Field(description="Address line 1")
@@ -159,6 +169,7 @@ class OrganizationRead(BaseModel):
             overtime_enabled=organization.overtime_enabled,
             overtime_multiplier_bp=organization.overtime_multiplier_bp,
             cost_plus_markup_bp=organization.cost_plus_markup_bp,
+            recovery_rate_order=organization.recovery_rate_order,
             email=organization.email,
             phone=organization.phone,
             address_line1=organization.address_line1,
@@ -442,6 +453,9 @@ class OrganizationUpdate(RequestModel):
             "recovery analysis; 5000 = 50%"
         ),
     )
+    recovery_rate_order: list[RecoveryRate] | None = Field(
+        default=None, min_length=3, max_length=3, description=_RATE_ORDER
+    )
     email: EmailStr | None = Field(
         default=None, max_length=254, description="Contact email; null or blank clears it"
     )
@@ -495,6 +509,13 @@ class OrganizationUpdate(RequestModel):
         if len(set(value)) != len(value):
             raise ValueError("Days must be unique")
         return sorted(value)
+
+    @field_validator("recovery_rate_order")
+    @classmethod
+    def _each_rate_once(cls, value: list[RecoveryRate] | None) -> list[RecoveryRate] | None:
+        if value is not None and sorted(value) != sorted(RECOVERY_RATES):
+            raise ValueError("List client_job, task and staff, each once")
+        return value
 
     @model_validator(mode="after")
     def _no_nulls(self) -> Self:

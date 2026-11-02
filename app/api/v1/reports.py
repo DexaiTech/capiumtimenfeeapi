@@ -1,5 +1,6 @@
 """Reports: debtors, utilisation, recoverability, billing, profitability, expenses, payments,
-missing timesheets and the recovery analysis. HTTP only. (The WIP report is in ``wip_reports``.)
+missing timesheets, the recovery analysis and Cost to Business. HTTP only. (The WIP report is in
+``wip_reports``.)
 
 Every report answers ``{rows, totals, filters}`` in the envelope (the others with a ``page``), or a
 file with ``?format=csv|xlsx|pdf``. The rules live in ``ReportService``.
@@ -14,7 +15,12 @@ from app.core.context import RequestContext
 from app.dependencies.common import ContextDep, SessionDep
 from app.dependencies.organization import OrgContextDep, require
 from app.schemas.common import ApiResponse, error_responses, ok
-from app.schemas.recovery import RecoveryAnalysisQuery, RecoveryAnalysisReport
+from app.schemas.recovery import (
+    CostToBusinessQuery,
+    CostToBusinessReport,
+    RecoveryAnalysisQuery,
+    RecoveryAnalysisReport,
+)
 from app.schemas.reports import (
     AgedDebtorsQuery,
     AgedDebtorsReport,
@@ -366,17 +372,23 @@ async def missing_timesheets_report(
     summary="Recovery analysis",
     description=(
         "Per job, client or person: the billable time worked in the range (default: all of it) "
-        "and its invoice value (`invoiced_value`, what issued invoices billed for it, fixed fees "
-        "spread over the time, plus `to_bill_value`, what a draft bills it at or, not yet on an "
-        "invoice, what the job's terms will: the fixed fee still to bill or the time's value), "
-        "against what it would have billed at the task rate (`task_value`, the rates the time was "
-        "priced at: the job's or service's rate, a client rate, else the person's), at each "
-        "person's own charge-out rate (`staff_value`) and at cost plus the practice's markup "
-        "(`cost_plus_value`; `markup_bp` overrides `cost_plus_markup_bp` for a what-if). Each "
-        "`*_shortfall` is that potential less the invoice value: revenue left on the table when "
-        "positive, over-recovery when negative; each `*_recovery_bp` is the invoice value over "
-        "it. Filters: client, job, person (`user_id`), partner, manager, service. Requires "
-        "`report.financial`." + _COST_NOTE + _PAGING_NOTE + _EXPORT_NOTE
+        "that is on an invoice or written off, and its invoice value (`invoiced_value` on issued "
+        "invoices, fixed fees spread over the time, less `credited_value`, its share of the "
+        "credit notes allocated to them, plus `draft_value` on drafts), against what it would "
+        "have billed at the recovery rate (`recovery_value`: for each piece the first rate that "
+        "exists, in the practice's `recovery_rate_order`, of the client job-specific rate, the "
+        "task rate and the staff charge-out rate), at each person's own charge-out rate "
+        "(`staff_value`) and at cost plus the mark-up (`cost_plus_value`: the job's, else the "
+        "client's, else the practice's; `markup_bp` sets one for all the work as a what-if). "
+        "Each `*_shortfall` is that potential less the invoice value: revenue left on the table "
+        "when positive, over-recovery when negative; `recovery_bp`, `staff_recovery_bp` and "
+        "`cost_plus_recovery_bp` are the invoice value over it. Billable time not invoiced yet "
+        "is WIP (`wip_minutes`, `wip_value`): it is not compared and has no invoice value, so a "
+        "fixed fee counts once it is invoiced. Filters: client, job, person (`user_id`), "
+        "partner, manager, service. Requires `report.financial`."
+        + _COST_NOTE
+        + _PAGING_NOTE
+        + _EXPORT_NOTE
     ),
     response_model=ApiResponse[RecoveryAnalysisReport],
     responses=_FILE_RESPONSES,
@@ -391,3 +403,31 @@ async def recovery_analysis_report(
     exporter.ensure_allowed(org, query.format)
     report = await service.recovery_analysis(org, query)
     return await _deliver("recovery-analysis", report, query.format, org, ctx, exporter)
+
+
+@router.get(
+    "/reports/cost-to-business",
+    summary="Cost to Business",
+    description=(
+        "Per job, client or person: all the time worked in the range (default: all of it), "
+        "billable or not, at what it cost the practice (`cost_value`: each person's cost rate, "
+        "what the business pays them, not their charge-out rate), split into the cost of the "
+        "billable time on an invoice or written off (`invoiced_cost`), of the billable time not "
+        "invoiced yet (`wip_cost`) and of non-billable time, with the cost per hour, against "
+        "the invoice value (issued less allocated credit notes, plus drafts): `margin_value` = "
+        "`invoice_value - invoiced_cost`. Filters as the recovery analysis. Requires "
+        "`report.financial` and `rate.read` (cost figures)." + _PAGING_NOTE + _EXPORT_NOTE
+    ),
+    response_model=ApiResponse[CostToBusinessReport],
+    responses=_FILE_RESPONSES,
+)
+async def cost_to_business_report(
+    org: FinancialDep,
+    service: ExtendedServiceDep,
+    exporter: ExporterDep,
+    ctx: ContextDep,
+    query: Annotated[CostToBusinessQuery, Query()],
+) -> Any:
+    exporter.ensure_allowed(org, query.format)
+    report = await service.cost_to_business(org, query)
+    return await _deliver("cost-to-business", report, query.format, org, ctx, exporter)
