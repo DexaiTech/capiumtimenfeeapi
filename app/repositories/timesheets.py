@@ -5,7 +5,7 @@ from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from datetime import date
 
-from sqlalchemy import ColumnElement, Exists, and_, case, exists, func, or_, select, update
+from sqlalchemy import ColumnElement, Exists, and_, case, exists, func, not_, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -47,9 +47,11 @@ class TimesheetRepository:
     ) -> None:
         """Mark the sheets of people who need no approval (one person's, or the practice's).
 
-        A sheet is exempt when the practice's setting ``auto_approve_privileged_time`` is on and
-        its owner is an active member whose role holds ``timesheet.exempt``. Called when a sheet
-        is written and when the setting, a member's role or a role's permissions change.
+        Every sheet is exempt when the practice does not approve timesheets
+        (``require_timesheet_approval`` off). Otherwise a sheet is exempt when the setting
+        ``auto_approve_privileged_time`` is on and its owner is an active member whose role holds
+        ``timesheet.exempt``. Called when a sheet is written and when a setting, a member's role
+        or a role's permissions change.
         """
         role_gives = exists().where(
             OrganizationMember.organization_id == Timesheet.organization_id,
@@ -75,12 +77,17 @@ class TimesheetRepository:
         )
         # The role's, plus what was granted to the person, less what was denied them.
         holds = and_(or_(role_gives, and_(member_active, own("grant"))), ~own("deny"))
+        required = (
+            select(Organization.require_timesheet_approval)
+            .where(Organization.id == organization_id)
+            .scalar_subquery()
+        )
         enabled = (
             select(Organization.auto_approve_privileged_time)
             .where(Organization.id == organization_id)
             .scalar_subquery()
         )
-        wanted = and_(enabled, holds)
+        wanted = or_(not_(required), and_(enabled, holds))
         stmt = (
             update(Timesheet)
             .where(

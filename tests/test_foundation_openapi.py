@@ -27,6 +27,8 @@ SETTINGS = (
     "receipt_required_threshold",
     "invoice_approval_required",
     "invoice_approval_threshold",
+    "expense_approval_required",
+    "wip_adjustment_approval_required",
     "mileage_rate",
     "expense_markup_bp",
     "rate_mode",

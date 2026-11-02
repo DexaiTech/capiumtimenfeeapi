@@ -188,7 +188,9 @@ the latest 50, newest first (`entry_count` is the whole week). `timer` is the sh
 ```
 
 * `kinds` lists the kinds the caller may decide (a count of 0 is listed); `total` adds them up
-  whatever `kind` asks for. `visible` is false when the caller may decide none.
+  whatever `kind` asks for. `visible` is false when the caller may decide none. A kind whose
+  approval the practice has switched off (`require_timesheet_approval`, `expense_approval_required`;
+  ticket APT53) is never listed, so the card, this page and My Actions leave it out.
 * **Timesheets** (`timesheet.approve`): submitted sheets of everyone with `time.read_all`, otherwise of
   the people the caller manages, as on the approvals screen. **Expense claims** (`expense.approve`):
   submitted claims of everyone with `expense.read_all`, otherwise of the people the caller manages.

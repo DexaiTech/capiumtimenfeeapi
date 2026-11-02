@@ -91,6 +91,11 @@ grade's default cost rate.
   approved before it is issued; 0: every invoice), `mileage_rate` (45 pence a mile, 0–1000)
   and `expense_markup_bp` (0, basis points added when an expense is recharged, 0–100 000).
   The three thresholds run 0–100 000 000.
+* Approval switches (ticket APT53): each approval flow can be switched off,
+  `require_timesheet_approval`, `expense_approval_required`, `wip_adjustment_approval_required`
+  (all on by default) and `invoice_approval_required` (off). Off, the flow is skipped (submitted
+  work is approved at once) and switching it off approves what is waiting, unless a locked period
+  or the WIP left stops it (`docs/modules/foundation.md`, "Approval switches").
 * `rate_mode`: `staff_first` (default) or `grade_only`. See Rates.
 * `fixed_fee_wip_mode` decides **when the unbilled part of a fixed fee counts as WIP** (hourly
   and non-billable jobs are not affected). This is the contract the WIP module implements:
@@ -401,7 +406,8 @@ audit entries about the client (and clients merged into it) whose kind the calle
 * Reopen: an approver may reopen an `approved` sheet (back to `open`) as long as none of its
   entries is billed.
 * When the practice has `require_timesheet_approval`, only time on `approved` timesheets is
-  WIP that can be billed; otherwise all unbilled billable time is.
+  WIP that can be billed; otherwise all unbilled billable time is, and nobody approves time:
+  every sheet is `approval_exempt` and submitting it approves it at once.
 * The approvals queue lists submitted sheets of the people the caller manages
   (`organization_members.manager_user_id`), or all with `time.read_all`.
 * Missing timesheets (`GET /timesheets/missing`): for a week (default: the last completed one),

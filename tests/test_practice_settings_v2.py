@@ -1,4 +1,4 @@
-"""The practice settings of the expense, WIP, invoice-approval and rate modules: what a new practice
+"""The practice settings of the expense, WIP, approval and rate modules: what a new practice
 starts with (including the 6-minute time increment), their bounds, the audit of a change, who may
 change them and the checks the database keeps whatever the API does."""
 
@@ -26,6 +26,8 @@ DEFAULTS = {
     "receipt_required_threshold": 2_500,
     "invoice_approval_required": False,
     "invoice_approval_threshold": 0,
+    "expense_approval_required": True,
+    "wip_adjustment_approval_required": True,
     "mileage_rate": 45,
     "expense_markup_bp": 0,
     "rate_mode": "staff_first",
@@ -37,6 +39,8 @@ CHANGED = {
     "receipt_required_threshold": 0,
     "invoice_approval_required": True,
     "invoice_approval_threshold": 250_000,
+    "expense_approval_required": False,
+    "wip_adjustment_approval_required": False,
     "mileage_rate": 50,
     "expense_markup_bp": 1_500,
     "rate_mode": "grade_only",

@@ -387,6 +387,10 @@ Draft or returned → submitted; message `Expense claim submitted`. Checks, in t
 
 It sets `submitted_at` and clears the previous decision. The approvers are notified (`expense_pending`). The claimant with `expense.log`, or `expense.manage`.
 
+When the practice does not approve expense claims (`expense_approval_required` off, ticket APT53), the claim is **approved at once** instead: `decided_by` is the person who submitted it,
+`decision_note` "Approval not required", the history reads `submitted` then `approved`, and nobody is notified. Switching the setting off approves the claims already submitted, except a
+claim with a line in a locked period (`docs/modules/foundation.md`, "Approval switches").
+
 ## POST /expense-claims/{claim_id}/recall
 
 Submitted → draft, before anyone decides: clears `submitted_at`. Message `Expense claim recalled`. The claimant with `expense.log`, or `expense.manage`.

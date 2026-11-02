@@ -7,6 +7,8 @@ transition locks the claim row ``FOR UPDATE`` and leaves a row in the claim's hi
 * Submit (the claimant, or anyone with ``expense.manage``): at least one line; every line above the
   practice's receipt threshold (gross) that is not mileage needs a receipt (422 ``RECEIPT_REQUIRED``
   naming the lines); every line date passes the period lock.
+* When the practice does not approve expense claims (``expense_approval_required`` off), a
+  submitted claim is approved at once (note "Approval not required") and nobody is asked.
 * Recall: the claimant pulls a ``submitted`` claim back to ``draft``.
 * Approve and return need ``expense.approve`` as the claimant's manager or with
   ``expense.read_all``;
@@ -112,6 +114,13 @@ class ExpenseWorkflowService:
             claim.decided_by = None
             claim.decision_note = None
             await self._save(ctx, rctx, "expense_claim.submitted", claim, old_status, None)
+            if not ctx.organization.expense_approval_required:
+                # The practice does not approve claims: the claim is approved as it is
+                # submitted and nobody is asked.
+                await self._mark_approved(
+                    ctx, claim, lines, "Approval not required", rctx, notify=False
+                )
+                return await self.reader.claim_detail(ctx, claim)
             total = sum(line.gross for line in lines)
             names = await self.claims.names(org_id, [claim.user_id])
             await notification_events.expense_pending(
@@ -171,6 +180,27 @@ class ExpenseWorkflowService:
             reads = await self.reader.claim_reads(ctx, [by_id[i] for i in wanted])
         return reads
 
+    async def approve_waiting(
+        self, ctx: OrgContext, claim_ids: Sequence[uuid.UUID], note: str, rctx: RequestContext
+    ) -> tuple[int, int]:
+        """Approve the claims among ``claim_ids`` that are still submitted, as decided by the
+        caller: the practice stopped approving expense claims. A claim with a line dated in a
+        locked period stays submitted for a person to decide. Runs in the caller's unit of
+        work. Returns ``(approved, left waiting)``."""
+        org_id = ctx.organization_id
+        approved = left = 0
+        for claim in await self.claims.lock_many(org_id, claim_ids):
+            if claim.status != "submitted":
+                continue
+            lines = await self.lines.lines_of(org_id, claim.id)
+            days = {line.incurred_on for line in lines}
+            if await period_locks.locked_dates(self.session, org_id, days):
+                left += 1
+                continue
+            await self._mark_approved(ctx, claim, lines, note, rctx)
+            approved += 1
+        return approved, left
+
     async def return_claim(
         self,
         ctx: OrgContext,
@@ -229,13 +259,27 @@ class ExpenseWorkflowService:
             await period_locks.assert_open_many(
                 self.session, org_id, {line.incurred_on for line in lines}, "expense"
             )
+        await self._mark_approved(ctx, claim, lines, note, rctx)
+
+    async def _mark_approved(
+        self,
+        ctx: OrgContext,
+        claim: ExpenseClaim,
+        lines: Sequence[Expense],
+        note: str | None,
+        rctx: RequestContext,
+        *,
+        notify: bool = True,
+    ) -> None:
+        """Approve a submitted claim as decided by the caller (the checks are the caller's)."""
+        org_id = ctx.organization_id
         decided_at = practice_now()
         claim.status = "approved"
         claim.decided_by = ctx.user.id
         claim.decided_at = decided_at
         claim.decision_note = note
         await self._save(ctx, rctx, "expense_claim.approved", claim, "submitted", note)
-        if claim.user_id != ctx.user.id:
+        if notify and claim.user_id != ctx.user.id:
             await notification_events.expense_approved(
                 self.session,
                 organization_id=org_id,

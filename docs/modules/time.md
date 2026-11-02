@@ -741,3 +741,8 @@ true` on their sheets and:
 The flag is kept in step by `TimesheetRepository.sync_exemptions`: when time is written, and when the
 setting, a member's role or a role's permissions change. Turning the setting off makes the existing weeks
 need approval again. Tests: `tests/test_time_approval_exempt.py`.
+
+When the practice does not approve timesheets at all (`require_timesheet_approval` off, ticket APT53),
+**every** sheet is exempt in the same way, whoever records it; the approver reminders are skipped and
+switching the setting off approves the sheets already submitted ("Approval switched off"). See
+`docs/modules/foundation.md`, "Approval switches".

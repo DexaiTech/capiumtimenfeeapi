@@ -50,7 +50,10 @@ class OrganizationRead(BaseModel):
         )
     )
     require_timesheet_approval: bool = Field(
-        description="Whether time must be on an approved timesheet before it can be billed"
+        description=(
+            "Whether timesheets are approved: on, time must be on an approved timesheet before it "
+            "can be billed; off, nobody approves time (submitting a week approves it at once)"
+        )
     )
     auto_approve_privileged_time: bool = Field(
         description=(
@@ -73,6 +76,15 @@ class OrganizationRead(BaseModel):
             "current WIP also needs approval, in addition to the pence threshold; null turns "
             "the percentage rule off"
         )
+    )
+    wip_adjustment_approval_required: bool = Field(
+        description=(
+            "Whether WIP adjustments above the thresholds need approval; off, every adjustment "
+            "takes effect at once"
+        )
+    )
+    expense_approval_required: bool = Field(
+        description="Whether expense claims are approved; off, a submitted claim is approved"
     )
     receipt_required_threshold: int = Field(
         description="Pence (gross): an expense above this must carry a receipt"
@@ -155,6 +167,8 @@ class OrganizationRead(BaseModel):
             wip_write_off_approval_threshold_percent=(
                 organization.wip_write_off_approval_threshold_percent
             ),
+            wip_adjustment_approval_required=organization.wip_adjustment_approval_required,
+            expense_approval_required=organization.expense_approval_required,
             receipt_required_threshold=organization.receipt_required_threshold,
             invoice_approval_required=organization.invoice_approval_required,
             invoice_approval_threshold=organization.invoice_approval_threshold,
@@ -350,7 +364,12 @@ class OrganizationUpdate(RequestModel):
         description="Logged time is rounded up to a multiple of this many minutes",
     )
     require_timesheet_approval: bool | None = Field(
-        default=None, description="Whether time must be approved before it can be billed"
+        default=None,
+        description=(
+            "Whether timesheets are approved. Off: nobody approves time, it can be billed as it "
+            "is recorded and submitting a week approves it at once; the timesheets waiting for "
+            "approval are approved straight away (each audited)"
+        ),
     )
     auto_approve_privileged_time: bool | None = Field(
         default=None,
@@ -382,13 +401,32 @@ class OrganizationUpdate(RequestModel):
             "null turns the percentage rule off"
         ),
     )
+    wip_adjustment_approval_required: bool | None = Field(
+        default=None,
+        description=(
+            "Whether WIP adjustments above the thresholds need approval. Off: every adjustment "
+            "takes effect at once; the pending ones are approved straight away (each audited) "
+            "unless their date is in a locked period or there is no longer the WIP to write off"
+        ),
+    )
+    expense_approval_required: bool | None = Field(
+        default=None,
+        description=(
+            "Whether expense claims are approved. Off: a submitted claim is approved at once; the "
+            "claims waiting are approved straight away (each audited) unless a line is dated in a "
+            "locked period"
+        ),
+    )
     receipt_required_threshold: Threshold | None = Field(
         default=None,
         description="Pence (gross), 0 to 100000000: an expense above this must carry a receipt",
     )
     invoice_approval_required: bool | None = Field(
         default=None,
-        description="Whether invoices at or above the threshold need approval to issue",
+        description=(
+            "Whether invoices at or above the threshold need approval to issue. Off: the invoices "
+            "awaiting approval are approved straight away (each audited), ready to issue"
+        ),
     )
     invoice_approval_threshold: Threshold | None = Field(
         default=None,

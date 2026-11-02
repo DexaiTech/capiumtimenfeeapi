@@ -927,31 +927,59 @@ class InvoiceService:
                     "SELF_APPROVAL_NOT_ALLOWED",
                     "Someone else must approve an invoice you prepared or submitted.",
                 )
-            client = await get_client_or_404(self.refs, ctx.organization_id, invoice.client_id)
-            invoice.status = "approved"
-            await self.session.flush()
-            step = await self._add_approval(ctx, invoice, "approved", data.note)
-            await record(
-                self.session,
-                ctx,
-                rctx,
-                "invoice.approved",
-                target_type="invoice",
-                target_id=invoice.id,
-                meta=_meta(invoice, client, note=data.note),
-            )
-            await billing_notifications.invoice_approved(
-                self.session,
-                organization_id=ctx.organization_id,
-                invoice_id=invoice.id,
-                recipients=self._preparer_recipients(ctx, invoice, approvals),
-                client_name=client.name,
-                invoice_total=invoice_pdf.money(invoice.gross_total, invoice.currency),
-                decider_name=ctx.user.full_name,
-                decided_at=step.created_at,
-            )
+            await self._mark_approved(ctx, invoice, approvals, data.note, rctx)
             detail = await self._detail(ctx, invoice)
         return detail
+
+    async def approve_waiting(
+        self, ctx: OrgContext, invoice_ids: Sequence[uuid.UUID], note: str, rctx: RequestContext
+    ) -> int:
+        """Approve the invoices among ``invoice_ids`` that are still awaiting approval, as decided
+        by the caller: the practice stopped approving invoices. They are not issued; each can
+        then be issued as usual. Runs in the caller's unit of work. Returns how many."""
+        approved = 0
+        for invoice_id in invoice_ids:
+            invoice = await self.invoices.get(ctx.organization_id, invoice_id, for_update=True)
+            if invoice is None or invoice.status != "awaiting_approval":
+                continue
+            approvals = await self.invoices.approvals(ctx.organization_id, invoice.id)
+            await self._mark_approved(ctx, invoice, approvals, note, rctx)
+            approved += 1
+        return approved
+
+    async def _mark_approved(
+        self,
+        ctx: OrgContext,
+        invoice: Invoice,
+        approvals: Sequence[InvoiceApproval],
+        note: str | None,
+        rctx: RequestContext,
+    ) -> None:
+        """Approve an invoice awaiting approval as decided by the caller (the checks are the
+        caller's), and tell the people who prepared and submitted it."""
+        client = await get_client_or_404(self.refs, ctx.organization_id, invoice.client_id)
+        invoice.status = "approved"
+        await self.session.flush()
+        step = await self._add_approval(ctx, invoice, "approved", note)
+        await record(
+            self.session,
+            ctx,
+            rctx,
+            "invoice.approved",
+            target_type="invoice",
+            target_id=invoice.id,
+            meta=_meta(invoice, client, note=note),
+        )
+        await billing_notifications.invoice_approved(
+            self.session,
+            organization_id=ctx.organization_id,
+            invoice_id=invoice.id,
+            recipients=self._preparer_recipients(ctx, invoice, approvals),
+            client_name=client.name,
+            invoice_total=invoice_pdf.money(invoice.gross_total, invoice.currency),
+            decider_name=ctx.user.full_name,
+            decided_at=step.created_at,
+        )
 
     async def reject(
         self, ctx: OrgContext, invoice_id: uuid.UUID, data: InvoiceReject, rctx: RequestContext

@@ -78,7 +78,9 @@ class DashboardService:
         )
 
         approvals: int | None = None
-        if has_permission(ctx, "timesheet.approve") or has_permission(ctx, "report.financial"):
+        if ctx.organization.require_timesheet_approval and (
+            has_permission(ctx, "timesheet.approve") or has_permission(ctx, "report.financial")
+        ):
             # Like the approvals queue: everyone's with time.read_all, else one's reports'.
             manager = None if has_permission(ctx, "time.read_all") else user_id
             approvals = await self.repo.approvals_waiting(org_id, manager)

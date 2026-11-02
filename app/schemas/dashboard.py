@@ -85,7 +85,8 @@ class Dashboard(BaseModel):
     )
     approvals_waiting: int | None = Field(
         description="Submitted timesheets waiting for the caller; null without "
-        "`timesheet.approve` or `report.financial`"
+        "`timesheet.approve` or `report.financial`, and when the practice does not approve "
+        "timesheets"
     )
     financial: DashboardFinancial | None = Field(
         description="Practice figures; null without `report.financial`"
