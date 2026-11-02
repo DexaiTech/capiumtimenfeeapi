@@ -58,8 +58,9 @@ Order = Literal["asc", "desc"]
         "part of the figures. `as_at` (default today in the practice time zone) looks at a day "
         "in the past: the first look at a closed day freezes it, so it never changes later; a "
         "future day is 422. Rows are cursor-paginated and sorted by `sort` and `order`. "
-        "Filters: client, job, partner, manager (the job's, else the client's), service, and "
-        "`q` (name or code). Requires `wip.read`."
+        "Filters: client, job, partner, manager (the job's, else the client's), service, kind "
+        "of item (repeat the parameter), `min_age_days` (only items at least this old as at "
+        "`as_at`) and `q` (name or code). Requires `wip.read`."
     ),
     response_model=ApiResponse[WipSummaryRead],
     responses=error_responses(403, 404),
@@ -75,6 +76,10 @@ async def wip_summary(
     partner_user_id: Annotated[uuid.UUID | None, Query(description="Responsible partner")] = None,
     manager_user_id: Annotated[uuid.UUID | None, Query(description="Responsible manager")] = None,
     service_id: Annotated[uuid.UUID | None, Query(description="Only jobs of this service")] = None,
+    kind: Annotated[list[WipItemKind] | None, Query(description="Only these kinds of item")] = None,
+    min_age_days: Annotated[
+        int | None, Query(ge=0, le=36_500, description="Only items at least this many days old")
+    ] = None,
     q: Annotated[
         str | None, Query(max_length=100, description="Name or code contains this text")
     ] = None,
@@ -89,7 +94,9 @@ async def wip_summary(
             partner_user_id=partner_user_id,
             manager_user_id=manager_user_id,
             service_id=service_id,
+            kinds=frozenset(kind) if kind else None,
         ),
+        min_age_days=min_age_days,
         q=q,
         sort=sort,
         descending=order == "desc",
