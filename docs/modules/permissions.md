@@ -9,7 +9,7 @@ not editable) and any custom role a practice builds from the catalogue (`PUT
 /organizations/{id}/roles/{role_id}/permissions`; nobody can grant a permission they do not hold
 themselves).
 
-There are **64** permissions in **15** groups. `GET /permissions` returns the same catalogue by
+There are **65** permissions in **15** groups. `GET /permissions` returns the same catalogue by
 group then code; `GET /organizations/{id}` and `GET /users/me/organizations` return the caller's
 own permission codes.
 
@@ -21,12 +21,12 @@ own permission codes.
 
 | Role | Key | Permissions | Purpose |
 |---|---|---|---|
-| Owner | `owner` | 64 | Full control, including deleting the practice. |
-| Admin | `admin` | 63 | Runs the practice: staff, roles, settings and billing. |
-| Partner | `partner` | 59 | Owns client relationships, billing and write-offs. |
+| Owner | `owner` | 65 | Full control, including deleting the practice. |
+| Admin | `admin` | 64 | Runs the practice: staff, roles, settings and billing. |
+| Partner | `partner` | 60 | Owns client relationships, billing and write-offs. |
 | Manager | `manager` | 36 | Runs jobs, approves time and prepares bills. |
 | Staff | `staff` | 11 | Records time and disbursements on their work. |
-| Billing | `billing` | 28 | Credit control: invoices, credit notes and payments. |
+| Billing | `billing` | 29 | Credit control: invoices, credit notes and payments. |
 | Viewer | `viewer` | 12 | Read-only access to clients, jobs, time and billing. |
 
 - **Owner** holds every permission, always (including `organization.delete`), and a practice
@@ -58,8 +58,9 @@ gave them.
 | `estimate.read` | View estimates | ✓ | ✓ | ✓ | ✓ |  | ✓ | ✓ |
 | `invoice.approve` | Approve invoices awaiting approval | ✓ | ✓ | ✓ |  |  |  |  |
 | `invoice.create` | Prepare draft invoices | ✓ | ✓ | ✓ | ✓ |  | ✓ |  |
-| `invoice.issue` | Issue, send and void invoices | ✓ | ✓ | ✓ |  |  | ✓ |  |
+| `invoice.issue` | Issue and void invoices | ✓ | ✓ | ✓ |  |  | ✓ |  |
 | `invoice.read` | View invoices and credit notes | ✓ | ✓ | ✓ | ✓ |  | ✓ | ✓ |
+| `invoice.send` | Send invoices to clients | ✓ | ✓ | ✓ |  |  | ✓ |  |
 | `opening_balance.import` | Import and manage opening balances | ✓ | ✓ | ✓ |  |  | ✓ |  |
 | `payment.read` | View payments received | ✓ | ✓ | ✓ | ✓ |  | ✓ | ✓ |
 | `payment.record` | Record and allocate payments | ✓ | ✓ | ✓ |  |  | ✓ |  |

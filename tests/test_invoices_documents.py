@@ -13,6 +13,7 @@ from tests.billing_helpers import draft, get_invoice, issued, new_practice, org_
 from tests.conftest import run_jobs
 from tests.domain_factories import make_client, make_time_entry, staff
 from tests.factories import audit_entries, error
+from tests.test_member_permissions import put
 
 
 async def add_contact(client_row, **fields) -> None:
@@ -148,6 +149,28 @@ async def test_send_to_given_addresses_and_fallbacks(client, worker, mailbox):
         org_url(p.org, f"/invoices/{invoice['id']}/send"), headers=manager.headers
     )
     assert denied.status_code == 403
+
+
+async def test_sending_needs_invoice_send_which_is_apart_from_issuing(client):
+    p = await new_practice(client)
+    entry = await make_time_entry(p.org, p.owner, client=p.client)
+    invoice = await draft(client, p.owner, p.org, p.client.id, time=[entry])
+    await issued(client, p.owner, p.org, invoice["id"])
+    base = org_url(p.org, f"/invoices/{invoice['id']}")
+    to = {"to": ["a@example.com"]}
+
+    sender = await staff(p.org, "manager")  # the role may neither issue nor send
+    assert (await client.post(f"{base}/send", headers=sender.headers, json=to)).status_code == 403
+    await put(client, p.owner, p.org, sender, grants=["invoice.send"])
+    sent = await client.post(f"{base}/send", headers=sender.headers, json=to)
+    assert sent.status_code == 202, sent.text
+    voided = await client.post(f"{base}/void", headers=sender.headers, json={"reason": "No"})
+    assert voided.status_code == 403
+
+    biller = await staff(p.org, "billing")  # the role issues, voids and sends
+    await put(client, p.owner, p.org, biller, denies=["invoice.send"])
+    refused = await client.post(f"{base}/send", headers=biller.headers, json=to)
+    assert refused.status_code == 403
 
 
 async def test_the_email_job_is_idempotent(client, worker, mailbox):

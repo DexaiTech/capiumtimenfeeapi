@@ -44,6 +44,7 @@ InvoiceServiceDep = Annotated[InvoiceService, Depends(get_invoice_service)]
 Reader = Annotated[OrgContext, Depends(require("invoice.read"))]
 Drafter = Annotated[OrgContext, Depends(require("invoice.create"))]
 Issuer = Annotated[OrgContext, Depends(require("invoice.issue"))]
+Sender = Annotated[OrgContext, Depends(require("invoice.send"))]
 Approver = Annotated[OrgContext, Depends(require("invoice.approve"))]
 
 PDF_RESPONSE: dict[int | str, dict[str, Any]] = {
@@ -458,13 +459,13 @@ async def invoice_pdf(
         "else the client email (422 `NO_RECIPIENT` when there is none); `sent_at` is set "
         "when it has gone. A "
         "second request while one is queued is not queued again (`queued: false`). Issued "
-        "invoices only. Requires `invoice.issue`."
+        "invoices only. Requires `invoice.send`."
     ),
     responses=error_responses(403, 404, 409),
 )
 async def send_invoice(
     invoice_id: uuid.UUID,
-    org: Issuer,
+    org: Sender,
     service: InvoiceServiceDep,
     ctx: ContextDep,
     body: InvoiceSend | None = None,

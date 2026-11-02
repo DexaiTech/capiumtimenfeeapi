@@ -58,7 +58,7 @@ unless marked bounded.
 | POST | `/invoices/{id}/issue` | `invoice.issue` | Optional `{issue_date, due_date}`. Numbers it, WIP → `billed`. |
 | POST | `/invoices/{id}/void` | `invoice.issue` | `{reason}`. Reverses the WIP allocations. |
 | GET | `/invoices/{id}/pdf` | `invoice.read` | `application/pdf` (DRAFT/VOID watermark when not issued). |
-| POST | `/invoices/{id}/send` | `invoice.issue` | Optional `{to:[email]}`. 202 `{invoice_id, to, queued}`. |
+| POST | `/invoices/{id}/send` | `invoice.send` | Optional `{to:[email]}`. 202 `{invoice_id, to, queued}`. |
 
 ### Credit notes
 
