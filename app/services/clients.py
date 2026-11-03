@@ -819,6 +819,12 @@ class ClientsService:
                     rows = self._bulk_set(clients, field, person)
                 case "set_segment":
                     rows = self._bulk_set(clients, "segment", data.segment)
+                case "set_branch":
+                    # The rules of the single edit (APT74): an active branch of the practice,
+                    # 404 for another practice's or an unknown id, 422 for an inactive one.
+                    branch_id = data.branch_id
+                    await self._check_branch(ctx, {"branch_id": branch_id})
+                    rows = self._bulk_set(clients, "branch_id", branch_id)
             await self.session.flush()
             await record_audit_many(self.session, ctx, rctx, rows)
         return BulkChangeResult(action=data.action, affected=len(ids), changed=len(rows))

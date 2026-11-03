@@ -7,7 +7,7 @@ EXPECTED = {
     "/clients/bulk": (
         "Clients",
         "client_ids",
-        ["set_status", "set_manager", "set_partner", "set_segment", "delete"],
+        ["set_status", "set_manager", "set_partner", "set_segment", "set_branch", "delete"],
     ),
     "/invoices/bulk": ("Invoices", "invoice_ids", ["delete"]),
 }
