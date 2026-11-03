@@ -97,20 +97,24 @@ class ApprovalQueue:
         totals = await TimesheetRepository(self.session).totals(
             ctx.organization_id, [row["id"] for row in rows]
         )
-        return [
-            ApprovalItem(
-                kind="timesheet",
-                id=row["id"],
-                title=row["person"],
-                subject=None,
-                date=row["week_start"],
-                submitted_at=row["submitted_at"],
-                minutes=totals.get(row["id"], SheetTotals()).total_minutes,
-                amount=None,
-                link=APPROVAL_LINKS["timesheet"],
+        items: list[ApprovalItem] = []
+        for row in rows:
+            sheet = totals.get(row["id"], SheetTotals())
+            items.append(
+                ApprovalItem(
+                    kind="timesheet",
+                    id=row["id"],
+                    title=row["person"],
+                    subject=None,
+                    date=row["week_start"],
+                    submitted_at=row["submitted_at"],
+                    minutes=sheet.total_minutes,
+                    zero_rate_minutes=sheet.zero_rate_minutes,
+                    amount=None,
+                    link=APPROVAL_LINKS["timesheet"],
+                )
             )
-            for row in rows
-        ]
+        return items
 
     async def _claims(
         self,

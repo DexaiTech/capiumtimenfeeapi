@@ -179,10 +179,10 @@ the latest 50, newest first (`entry_count` is the whole week). `timer` is the sh
   "items": [
     {"kind": "expense", "id": "…", "title": "Olly Other", "subject": "Train to Leeds",
      "date": "2026-09-10", "submitted_at": "2026-09-10T09:00:00Z", "minutes": null,
-     "amount": 1200, "link": "/expenses/approvals"},
+     "zero_rate_minutes": null, "amount": 1200, "link": "/expenses/approvals"},
     {"kind": "timesheet", "id": "…", "title": "Sam Staff", "subject": null,
-     "date": "2026-10-05", "submitted_at": "…", "minutes": 150, "amount": null,
-     "link": "/time/approvals"}
+     "date": "2026-10-05", "submitted_at": "…", "minutes": 150, "zero_rate_minutes": 0,
+     "amount": null, "link": "/time/approvals"}
   ]
 }
 ```
@@ -197,7 +197,9 @@ the latest 50, newest first (`entry_count` is the whole week). `timer` is the sh
   The caller's **own** are left out unless they hold `organization.update` (the screens refuse the
   self-approval otherwise).
 * `items` are the oldest first by `date` (the week of a timesheet, the submission day of a claim);
-  `title` is whose it is, `amount` the gross total of a claim, `minutes` the hours of a timesheet.
+  `title` is whose it is, `amount` the gross total of a claim, `minutes` the hours of a timesheet,
+  `zero_rate_minutes` its billable minutes with no charge-out rate (valued at £0; `null` for a claim):
+  the page asks before approving such a sheet (ticket APT17).
   Items are decided on the module's own endpoints (`POST /timesheets/{id}/approve`,
   `POST /expense-claims/{id}/approve`, returns need a reason there).
 * Invoices awaiting approval and WIP adjustments join the queue when those modules have them: the

@@ -379,6 +379,10 @@ class TimesheetRead(BaseModel):
     billable_minutes: int
     non_billable_minutes: int
     billable_value: int
+    zero_rate_minutes: int = Field(
+        description="Billable minutes with no charge-out rate (charge_rate 0): they go to WIP "
+        "at £0. The approval screens warn about them; approving is still allowed."
+    )
     created_at: datetime
     updated_at: datetime
 
@@ -400,6 +404,7 @@ class TimesheetRead(BaseModel):
             billable_minutes=totals.billable_minutes,
             non_billable_minutes=totals.total_minutes - totals.billable_minutes,
             billable_value=totals.billable_value,
+            zero_rate_minutes=totals.zero_rate_minutes,
             created_at=sheet.created_at,
             updated_at=sheet.updated_at,
         )

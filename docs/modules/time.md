@@ -229,8 +229,10 @@ is_running, started_at, accumulated_seconds, elapsed_seconds, started_on, create
 
 **TimesheetRead**: `id, user_id, user_name, week_start, week_end, status, submitted_at,
 decided_by, decided_at, decision_note, entry_count, total_minutes, billable_minutes,
-non_billable_minutes, billable_value, created_at, updated_at`; **TimesheetDetail** adds
-`entries[]` and `day_totals[{day, minutes}]`.
+non_billable_minutes, billable_value, zero_rate_minutes, created_at, updated_at`;
+**TimesheetDetail** adds `entries[]` and `day_totals[{day, minutes}]`. `zero_rate_minutes` is the
+billable minutes whose entry found no charge-out rate (`charge_rate` 0), which go to WIP at £0
+(non-billable time is not counted).
 
 **RevalueResult**: `entries_examined, entries_changed, charge_value_before,
 charge_value_after, value_delta, cost_value_delta` (`null` without `rate.read`).
@@ -314,7 +316,10 @@ charge_value_after, value_delta, cost_value_delta` (`null` without `rate.read`).
 * **Timesheets**: resubmitting clears the previous decision fields; reopening clears them and
   `submitted_at`. Approve accepts an optional `decision_note`. Bulk approve is all-or-nothing
   and de-duplicates ids. The approvals queue needs no permission (an empty list for people
-  who manage nobody). `GET /timesheets?user_id=all` without `time.read_all` lists the caller
+  who manage nobody). Billable time with no charge-out rate does not stop an approval (ticket
+  APT17): the sheet carries `zero_rate_minutes`, and Timesheet Approvals, the dashboard's Pending
+  Approvals and My Timesheet's submit ask first ("Approve anyway"), naming the person and the
+  hours, with a "No rate" badge on the row. Values are never recalculated on approval. `GET /timesheets?user_id=all` without `time.read_all` lists the caller
   and their reports.
 * **Concurrency**: every time write locks the person's timesheet row(s) `FOR UPDATE` (created
   on demand with `INSERT … ON CONFLICT DO NOTHING`, locked in id order), then the entry row.
