@@ -20,6 +20,7 @@ from tests.time_helpers import err, ok_data, org_url
 
 KEYS = [t.code for t in CATALOGUE] + [
     "invoice",
+    "invoice_void",
     "staff_invitation",
     "account_created",
     "client_payment_reminder",
@@ -94,6 +95,7 @@ async def test_the_list_has_every_template_with_its_merge_fields(client):
 
 EXTERNAL_KEYS = [
     "invoice",
+    "invoice_void",
     "client_payment_reminder",
     "client_payment_upcoming",
     "client_payment_final_notice",

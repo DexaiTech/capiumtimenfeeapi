@@ -155,8 +155,8 @@ class ClientOverviewRepository:
     async def invoice_figures(
         self, organization_id: uuid.UUID, client_id: uuid.UUID, *, today: date, ytd_from: date
     ) -> InvoiceFigures:
-        """Invoices of the client by display status, the net billed this year and the date of
-        the latest issued one."""
+        """Invoices of the client by display status (deleted void ones left out), the net billed
+        this year and the date of the latest issued one."""
         counts = [
             func.count().filter(display_status_condition(status, today))
             for status in DISPLAY_STATUSES
@@ -171,7 +171,11 @@ class ClientOverviewRepository:
                 & (Invoice.issue_date <= today),
             ),
             func.max(Invoice.issue_date).filter(Invoice.status == "issued"),
-        ).where(Invoice.organization_id == organization_id, Invoice.client_id == client_id)
+        ).where(
+            Invoice.organization_id == organization_id,
+            Invoice.client_id == client_id,
+            Invoice.deleted_at.is_(None),
+        )
         row = (await self.session.execute(stmt)).one()
         size = len(DISPLAY_STATUSES)
         return InvoiceFigures(

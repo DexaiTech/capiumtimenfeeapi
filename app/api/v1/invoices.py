@@ -77,7 +77,8 @@ def pdf_response(filename: str, content: bytes) -> Response:
         "status (draft, awaiting_approval, approved, issued, part_paid, paid, credited, "
         "overdue, void; repeatable); `outstanding` keeps issued invoices with (true) or "
         "without (false) a balance; `date_from`/`date_to` filter the issue date; `q` matches "
-        "the number or client name or code. Requires `invoice.read`."
+        "the number or client name or code. Deleted (void) invoices are left out. "
+        "Requires `invoice.read`."
     ),
     responses=error_responses(403, 404),
 )
@@ -160,14 +161,16 @@ async def create_invoice(
     "/invoices/bulk",
     summary="Bulk action on invoices",
     description=(
-        "Deletes 1-200 draft invoices (`invoice_ids`, `action`: `delete`, no `value`) in one "
-        "transaction: all or nothing, each with the rule of `DELETE /invoices/{invoice_id}` "
-        "(its WIP items return to `unbilled`). An invoice that is not a draft (issued, paid, "
-        "void, awaiting approval...) answers 409 `INVOICE_NOT_DRAFT` and nothing is deleted: "
-        "`details` lists each one (`invoice_id`, `number`, `status`, `reason`); correct an "
-        "issued invoice with a credit note. 404 when any id is not the practice's "
-        "(`details.invoice_ids` lists them). Each deleted draft gets its own audit row "
-        "(`invoice.draft_deleted`, `bulk: true`). Requires `invoice.create`."
+        "Deletes 1-200 draft and void invoices (`invoice_ids`, `action`: `delete`, no "
+        "`value`) in one transaction: all or nothing, each with the rule of "
+        "`DELETE /invoices/{invoice_id}` (a draft's WIP items return to `unbilled`; a void "
+        "invoice is hidden and kept). An invoice that is neither (issued, paid, awaiting "
+        "approval...) answers 409 `INVOICE_NOT_DRAFT` and nothing is deleted: `details` lists "
+        "each one (`invoice_id`, `number`, `status`, `reason`); void an issued invoice first. "
+        "404 when any id is not the practice's or is already deleted (`details.invoice_ids` "
+        "lists them). Each deleted invoice gets its own audit row (`invoice.draft_deleted` or "
+        "`invoice.deleted`, `bulk: true`). Requires `invoice.create`, and `invoice.issue` when "
+        "a void invoice is among them."
     ),
     responses=error_responses(403, 404, 409),
 )
@@ -178,7 +181,7 @@ async def bulk_invoices(
     ctx: ContextDep,
 ) -> ApiResponse[BulkChangeResult]:
     result = await service.bulk(org, body, ctx)
-    return ok(result, f"{result.changed} draft{'s' if result.changed != 1 else ''} deleted")
+    return ok(result, f"{result.changed} invoice{'s' if result.changed != 1 else ''} deleted")
 
 
 @router.get(
@@ -187,7 +190,8 @@ async def bulk_invoices(
     description=(
         "The invoice with its lines (each with the WIP it bills: WIP value, billed value "
         "and write-up/off), VAT summary, payments, credit notes, balance and display "
-        "status. Requires `invoice.read`."
+        "status. A deleted void invoice still opens here (`deleted_at` set) for the audit "
+        "trail. Requires `invoice.read`."
     ),
     responses=error_responses(403, 404),
 )
@@ -220,18 +224,23 @@ async def update_invoice(
 
 @router.delete(
     "/invoices/{invoice_id}",
-    summary="Delete a draft",
+    summary="Delete a draft or a void invoice",
     description=(
-        "Deletes a draft invoice (409 `INVOICE_NOT_DRAFT` otherwise) and returns its WIP "
-        "items to `unbilled`. Requires `invoice.create`."
+        "Deletes a draft (removed; its WIP items return to `unbilled`) or a void invoice. A "
+        "void invoice is deleted softly: `deleted_at`/`deleted_by` are set and it leaves the "
+        "invoice list, its status counts and the client's figures, but the row, its number "
+        "(numbers stay gapless), its lines and its audit trail are kept and it still opens by "
+        "id; audited `invoice.deleted`, and it needs `invoice.issue` as well. Any other "
+        "status answers 409 `INVOICE_NOT_DRAFT` (void an issued invoice first); a void "
+        "invoice already deleted 404. Requires `invoice.create`."
     ),
     responses=error_responses(403, 404, 409),
 )
 async def delete_invoice(
     invoice_id: uuid.UUID, org: Drafter, service: InvoiceServiceDep, ctx: ContextDep
 ) -> ApiResponse[None]:
-    await service.delete_draft(org, invoice_id, ctx)
-    return ok(message="Draft deleted")
+    status_ = await service.delete(org, invoice_id, ctx)
+    return ok(message="Draft deleted" if status_ == "draft" else "Invoice deleted")
 
 
 @router.post(
@@ -469,9 +478,13 @@ async def issue_invoice(
     "/invoices/{invoice_id}/void",
     summary="Void an invoice",
     description=(
-        "Voids an issued invoice that has no payments (409 `INVOICE_HAS_PAYMENTS`) and no "
-        "credit notes (409 `INVOICE_HAS_CREDITS`): its WIP allocations are reversed and the "
-        "items return to `unbilled`. The number is kept. Requires `invoice.issue`."
+        "Voids an issued invoice that has no payments (409 `INVOICE_HAS_PAYMENTS`: unmatch "
+        "them first) and no credit notes (409 `INVOICE_HAS_CREDITS`): its WIP allocations are "
+        "reversed and the items return to `unbilled`. The number is kept. With "
+        "`notify_client` (needs `invoice.send`) a `send_invoice_void_email` job emails the "
+        "client the Invoice cancelled template, to the addresses an invoice email goes to (422 "
+        "`NO_RECIPIENT` when there are none, and nothing is voided); audited "
+        "`invoice.void_email_queued`. Requires `invoice.issue`."
     ),
     responses=error_responses(403, 404, 409),
 )

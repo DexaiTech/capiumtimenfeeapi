@@ -539,6 +539,39 @@ _SYSTEM: tuple[TemplateSpec, ...] = (
         ),
     ),
     TemplateSpec(
+        key="invoice_void",
+        name="Invoice cancelled",
+        description="Tells the client that an invoice sent to them has been voided.",
+        category="system",
+        audience="external",
+        fields=(
+            "recipient_name",
+            "practice_name",
+            "app_name",
+            "client_name",
+            "invoice_number",
+            "issue_date",
+            "invoice_total",
+        ),
+        subject="Invoice {{ invoice_number }} from {{ practice_name }} has been cancelled",
+        html=(
+            "<p>Dear {{ recipient_name }},</p>"
+            "<p>Invoice <strong>{{ invoice_number }}</strong> dated {{ issue_date }} for "
+            "{{ client_name }} ({{ invoice_total }}) has been cancelled. Please disregard it: "
+            "nothing is owed on it.</p>"
+            "<p>If you have any questions, please get in touch.</p>"
+            "<p>Thank you,<br>{{ practice_name }}</p>"
+        ),
+        text=(
+            "Dear {{ recipient_name }},\n\n"
+            "Invoice {{ invoice_number }} dated {{ issue_date }} for {{ client_name }} "
+            "({{ invoice_total }}) has been cancelled. Please disregard it: nothing is owed on "
+            "it.\n\n"
+            "If you have any questions, please get in touch.\n\n"
+            "Thank you,\n{{ practice_name }}"
+        ),
+    ),
+    TemplateSpec(
         key="staff_invitation",
         name="Staff invitation",
         description="Invites a staff member to sign in and choose a password.",

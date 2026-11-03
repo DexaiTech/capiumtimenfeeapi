@@ -89,16 +89,20 @@ from app.services.billing_common import (
 )
 from app.services.common import record_audit_many
 from app.services.email import Attachment, EmailService
-from app.services.email_templates import load_override
+from app.services.email_templates import default_content, load_override
 from app.services.invoice_advances import advance_reads
 from app.services.policy import OrgContext
 from app.services.sequences import next_number
+from app.services.template_catalogue import TEMPLATES
+from app.services.template_render import render_email
 from app.services.wip import LockedItems, lock_items, lock_wip_items, set_items_status
 from app.utils.ids import new_id
 from app.utils.money import apportion, line_net, round_half_up, vat_on
 from app.utils.pagination import PageParams
 
 SEND_JOB = "send_invoice_email"
+VOID_EMAIL_JOB = "send_invoice_void_email"
+VOID_TEMPLATE = "invoice_void"
 MAX_DESCRIPTION = 1000
 WIP_KINDS = frozenset({"time", "fixed_fee", "disbursement"})
 ADVANCE_NOT_POSITIVE = "Fees billed in advance must be more than zero."
@@ -106,6 +110,12 @@ ADVANCE_NOT_POSITIVE = "Fees billed in advance must be more than zero."
 
 class InvoiceEmailError(Exception):
     """The invoice email can never be sent (unknown invoice, not issued, no recipient)."""
+
+
+def _not_deletable_reason(status: str) -> str:
+    if status == "issued":
+        return "Void it first: only drafts and void invoices can be deleted."
+    return "Reject it back to a draft first: only drafts and void invoices can be deleted."
 
 
 def display_status(invoice: Invoice, today: date) -> DisplayStatus:
@@ -456,6 +466,8 @@ class InvoiceService:
             issued_by=invoice.issued_by,
             voided_at=invoice.voided_at,
             void_reason=invoice.void_reason,
+            deleted_at=invoice.deleted_at,
+            email_recipients=await self._recipients(ctx, client) if client else [],
             created_by=invoice.created_by,
             approvals=[
                 ApprovalEventRead(
@@ -777,36 +789,62 @@ class InvoiceService:
             detail = await self._detail(ctx, invoice)
         return detail
 
-    async def delete_draft(
-        self, ctx: OrgContext, invoice_id: uuid.UUID, rctx: RequestContext
-    ) -> None:
+    async def delete(self, ctx: OrgContext, invoice_id: uuid.UUID, rctx: RequestContext) -> str:
+        """Delete a draft (removed; its WIP is unbilled again) or a void invoice (hidden: see
+        ``_hide``). Returns the status the invoice had. Anything else is 409
+        ``INVOICE_NOT_DRAFT``; a void invoice already deleted is 404."""
         async with unit_of_work(self.session):
-            invoice = await self._locked_draft(ctx, invoice_id)
-            allocations = await self.wip.allocations_for_invoice(ctx.organization_id, invoice.id)
-            await self._release(ctx, allocations)
+            invoice = await self._get(ctx, invoice_id, lock=True)
+            if invoice.deleted_at is not None:
+                raise NotFoundError("Invoice not found.")
+            if invoice.status not in ("draft", "void"):
+                raise conflict("INVOICE_NOT_DRAFT", _not_deletable_reason(invoice.status))
+            status = invoice.status
             client = await self.refs.get_client(ctx.organization_id, invoice.client_id)
-            meta = _meta(invoice, client, item_count=len(allocations))
-            await self.invoices.delete(invoice)
+            if status == "void":
+                policy.ensure(ctx, "invoice.issue")
+                self._hide(ctx, invoice)
+                await self.session.flush()
+                action, meta = "invoice.deleted", _meta(invoice, client)
+            else:
+                allocations = await self.wip.allocations_for_invoice(
+                    ctx.organization_id, invoice.id
+                )
+                await self._release(ctx, allocations)
+                meta = _meta(invoice, client, item_count=len(allocations))
+                await self.invoices.delete(invoice)
+                action = "invoice.draft_deleted"
             await record(
                 self.session,
                 ctx,
                 rctx,
-                "invoice.draft_deleted",
+                action,
                 target_type="invoice",
                 target_id=invoice_id,
                 meta=meta,
             )
+        return status
+
+    @staticmethod
+    def _hide(ctx: OrgContext, invoice: Invoice) -> None:
+        """The delete of a void invoice: it leaves every list, but the row, its number (numbers
+        stay gapless for VAT), its lines and its audit trail are kept, and it opens by id."""
+        invoice.deleted_at = now_utc()
+        invoice.deleted_by = ctx.user.id
 
     async def bulk(
         self, ctx: OrgContext, data: InvoiceBulkAction, rctx: RequestContext
     ) -> BulkChangeResult:
-        """Delete up to 200 drafts, all or nothing: one invoice that is not a draft (409
-        ``INVOICE_NOT_DRAFT``) stops the whole action, which then deletes nothing."""
+        """Delete up to 200 drafts and void invoices, all or nothing: one invoice that is
+        neither (409 ``INVOICE_NOT_DRAFT``) stops the whole action, which then deletes nothing.
+        A void invoice already deleted counts as not found."""
         policy.ensure(ctx, "invoice.create")
         org_id = ctx.organization_id
         ids = unique_ids(data.invoice_ids)
         async with unit_of_work(self.session):
-            invoices = await self.invoices.lock_many(org_id, ids)
+            invoices = [
+                i for i in await self.invoices.lock_many(org_id, ids) if i.deleted_at is None
+            ]
             if len(invoices) != len(ids):
                 found = {i.id for i in invoices}
                 raise NotFoundError(
@@ -814,35 +852,38 @@ class InvoiceService:
                     details={"invoice_ids": [str(i) for i in ids if i not in found]},
                 )
             clients = await self.refs.clients_by_ids(org_id, {i.client_id for i in invoices})
-            locked = [i for i in invoices if i.status != "draft"]
+            locked = [i for i in invoices if i.status not in ("draft", "void")]
             if locked:
                 raise conflict(
                     "INVOICE_NOT_DRAFT",
-                    f"{len(locked)} of the invoices {'are' if len(locked) != 1 else 'is'} not a "
-                    "draft and cannot be deleted. Nothing was deleted.",
+                    f"{len(locked)} of the invoices {'are' if len(locked) != 1 else 'is'} neither "
+                    "a draft nor void and cannot be deleted. Nothing was deleted.",
                     details=[
                         {
                             "invoice_id": str(i.id),
                             "number": i.number,
                             "status": i.status,
-                            "reason": "Only a draft can be deleted: correct an issued invoice "
-                            "with a credit note.",
+                            "reason": _not_deletable_reason(i.status),
                         }
                         for i in locked
                     ],
                 )
+            if any(i.status == "void" for i in invoices):
+                policy.ensure(ctx, "invoice.issue")
             rows: list[AuditRow] = []
             for invoice in invoices:
+                client = clients.get(invoice.client_id)
+                if invoice.status == "void":
+                    self._hide(ctx, invoice)
+                    meta = _meta(invoice, client, bulk=True)
+                    rows.append(("invoice.deleted", "invoice", invoice.id, meta))
+                    continue
                 allocations = await self.wip.allocations_for_invoice(org_id, invoice.id)
                 await self._release(ctx, allocations)
-                meta = _meta(
-                    invoice,
-                    clients.get(invoice.client_id),
-                    item_count=len(allocations),
-                    bulk=True,
-                )
+                meta = _meta(invoice, client, item_count=len(allocations), bulk=True)
                 await self.invoices.delete(invoice)
                 rows.append(("invoice.draft_deleted", "invoice", invoice.id, meta))
+            await self.session.flush()
             await record_audit_many(self.session, ctx, rctx, rows)
         return BulkChangeResult(action=data.action, affected=len(ids), changed=len(rows))
 
@@ -1100,6 +1141,8 @@ class InvoiceService:
     async def void(
         self, ctx: OrgContext, invoice_id: uuid.UUID, data: InvoiceVoid, rctx: RequestContext
     ) -> InvoiceRead:
+        if data.notify_client:
+            policy.ensure(ctx, "invoice.send")
         async with unit_of_work(self.session):
             invoice = await self._get(ctx, invoice_id, lock=True)
             if invoice.status != "issued":
@@ -1112,6 +1155,15 @@ class InvoiceService:
             if invoice.credited_total > 0:
                 raise conflict(
                     "INVOICE_HAS_CREDITS", "An invoice with credit notes cannot be voided."
+                )
+            client = await self.refs.get_client(ctx.organization_id, invoice.client_id)
+            to = await self._recipients(ctx, client) if data.notify_client and client else []
+            if data.notify_client and not to:
+                raise invalid(
+                    "NO_RECIPIENT",
+                    "notify_client",
+                    "The client has no billing contact or email to tell: void it without "
+                    "emailing the client.",
                 )
             allocations = [
                 a
@@ -1135,7 +1187,6 @@ class InvoiceService:
             invoice.voided_by = ctx.user.id
             invoice.void_reason = data.reason
             await self.session.flush()
-            client = await self.refs.get_client(ctx.organization_id, invoice.client_id)
             await record(
                 self.session,
                 ctx,
@@ -1149,6 +1200,27 @@ class InvoiceService:
                     "wip_reinstated": items.wip_value,
                 },
             )
+            if to:
+                await job_queue.enqueue(
+                    self.session,
+                    VOID_EMAIL_JOB,
+                    {
+                        "organization_id": str(ctx.organization_id),
+                        "invoice_id": str(invoice.id),
+                        "to": to,
+                    },
+                    organization_id=ctx.organization_id,
+                    dedupe_key=f"{VOID_EMAIL_JOB}:{invoice.id}",
+                )
+                await record(
+                    self.session,
+                    ctx,
+                    rctx,
+                    "invoice.void_email_queued",
+                    target_type="invoice",
+                    target_id=invoice.id,
+                    meta={**_meta(invoice, client), "to": to},
+                )
             detail = await self._detail(ctx, invoice)
         return detail
 
@@ -1587,3 +1659,54 @@ async def deliver_invoice_email(
             request_key=requested_at.isoformat(),
         )
     return {**payload, "sent_at": locked.sent_at.isoformat()}
+
+
+async def deliver_invoice_void_email(
+    session: AsyncSession, settings: Settings, payload: dict[str, Any]
+) -> dict[str, Any]:
+    """The ``send_invoice_void_email`` job: tell the client the invoice is cancelled, with the
+    practice's Invoice cancelled template (else the built-in one). Queued once per invoice."""
+    try:
+        organization_id = uuid.UUID(str(payload["organization_id"]))
+        invoice_id = uuid.UUID(str(payload["invoice_id"]))
+        to = [str(a) for a in payload["to"]]
+    except (KeyError, ValueError, TypeError) as exc:
+        raise InvoiceEmailError(f"bad payload: {exc}") from exc
+    if not to:
+        raise InvoiceEmailError("no recipients")
+    refs = BillingReferenceRepository(session)
+    organization = await refs.get_organization(organization_id)
+    if organization is None:
+        raise InvoiceEmailError("organization not found")
+    invoice = await InvoiceRepository(session).get(organization_id, invoice_id)
+    if invoice is None or invoice.status != "void":
+        raise InvoiceEmailError("invoice not found or not void")
+    client = await refs.get_client(organization_id, invoice.client_id)
+    if client is None:
+        raise InvoiceEmailError("client not found")
+    spec = TEMPLATES[VOID_TEMPLATE]
+    content = await load_override(session, organization_id, VOID_TEMPLATE) or default_content(spec)
+    values = {
+        "recipient_name": await addressee_for(refs, organization_id, client) or client.name,
+        "practice_name": organization.name,
+        "app_name": settings.app_name,
+        "client_name": client.name,
+        "invoice_number": invoice.number or "",
+        "issue_date": invoice_pdf.long_date(invoice.issue_date),
+        "invoice_total": invoice_pdf.money(invoice.gross_total, invoice.currency),
+    }
+    rendered = render_email(
+        content,
+        {name: values.get(name, "") for name in spec.fields},
+        brand=organization.name,
+        app_name=settings.app_name,
+    )
+    await EmailService(settings).send(
+        to=", ".join(to),
+        subject=rendered.subject,
+        html=rendered.html,
+        text=rendered.text,
+        template=VOID_TEMPLATE,
+        organization_id=organization_id,
+    )
+    return {**payload, "sent": True}
