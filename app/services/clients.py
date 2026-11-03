@@ -330,60 +330,63 @@ class ClientsService:
         today = practice_today(ctx)
         out = io.StringIO()
         writer = csv.writer(out, lineterminator="\r\n")
-        writer.writerow(
-            [
-                "code",
-                "name",
-                "client_type",
-                "status",
-                "company_number",
-                "segment",
-                "health_score",
-                "contact_name",
-                "contact_email",
-                "email",
-                "phone",
-                "deadline_status",
-                "overdue_jobs",
-                "overdue_days",
-                "next_due_date",
-                "aml_status",
-                "accounting_software",
-                "services",
-                "last_activity_at",
-                "created_at",
-            ]
-        )
+        header = [
+            "code",
+            "name",
+            "client_type",
+            "status",
+            "company_number",
+            "segment",
+            "health_score",
+            "contact_name",
+            "contact_email",
+            "email",
+            "phone",
+            "deadline_status",
+            "overdue_jobs",
+            "overdue_days",
+            "next_due_date",
+            "aml_status",
+            "accounting_software",
+            "services",
+            "last_activity_at",
+            "created_at",
+        ]
+        # A practice that has switched client segments off (APT70) gets no segment column.
+        kept = [
+            i
+            for i, name in enumerate(header)
+            if name != "segment" or ctx.organization.client_segments_enabled
+        ]
+        writer.writerow([header[i] for i in kept])
         pages = await self.clients.iter_all(
             ctx.organization_id, filters, sort=sort, descending=descending, batch=EXPORT_BATCH
         )
         for page in pages:
             for item in await self._items(ctx, page.rows, today):
-                writer.writerow(
-                    _csv_cell(v)
-                    for v in (
-                        item.code,
-                        item.name,
-                        item.client_type,
-                        item.status,
-                        item.company_number,
-                        item.segment,
-                        item.health_score,
-                        item.contact_name,
-                        item.contact_email,
-                        item.email,
-                        item.phone,
-                        item.deadlines.status,
-                        item.deadlines.overdue,
-                        item.deadlines.overdue_days,
-                        item.deadlines.next_due_date,
-                        item.aml_status,
-                        item.accounting_software,
-                        "; ".join(s.name for s in item.services),
-                        item.last_activity_at,
-                        item.created_at,
-                    )
+                row = (
+                    item.code,
+                    item.name,
+                    item.client_type,
+                    item.status,
+                    item.company_number,
+                    item.segment,
+                    item.health_score,
+                    item.contact_name,
+                    item.contact_email,
+                    item.email,
+                    item.phone,
+                    item.deadlines.status,
+                    item.deadlines.overdue,
+                    item.deadlines.overdue_days,
+                    item.deadlines.next_due_date,
+                    item.aml_status,
+                    item.accounting_software,
+                    "; ".join(s.name for s in item.services),
+                    item.last_activity_at,
+                    item.created_at,
                 )
+                writer.writerow(_csv_cell(row[i]) for i in kept)
         return out.getvalue().encode("utf-8-sig")
 
     # --- Detail -------------------------------------------------------------------------
