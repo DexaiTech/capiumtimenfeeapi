@@ -316,6 +316,13 @@ class ClientRepository:
             stmt = stmt.where(Client.manager_user_id == filters.manager_user_id)
         if filters.partner_user_id is not None:
             stmt = stmt.where(Client.partner_user_id == filters.partner_user_id)
+        if filters.branch_ids or filters.without_branch:
+            branch_clauses: list[ColumnElement[bool]] = []
+            if filters.branch_ids:
+                branch_clauses.append(Client.branch_id.in_(list(filters.branch_ids)))
+            if filters.without_branch:
+                branch_clauses.append(Client.branch_id.is_(None))
+            stmt = stmt.where(or_(*branch_clauses))
         if filters.central == "linked":
             stmt = stmt.where(Client.central_client_id.is_not(None))
         elif filters.central == "local":

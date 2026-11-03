@@ -157,6 +157,7 @@ class LeadService:
             contact = {"name": lead.contact_name, "email": lead.email, "phone": lead.phone}
             values = {
                 "code": data.code,
+                "branch_id": data.branch_id,
                 "name": lead.name,
                 "client_type": lead.client_type,
                 "status": "active",

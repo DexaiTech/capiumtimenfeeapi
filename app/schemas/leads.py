@@ -138,6 +138,13 @@ class LeadConvert(RequestModel):
         max_length=20,
         description="The new client's code; generated from the client sequence if omitted",
     )
+    branch_id: uuid.UUID | None = Field(
+        default=None,
+        description=(
+            "The new client's branch; required while the practice uses branches (422 "
+            "`BRANCH_REQUIRED`)"
+        ),
+    )
 
     @field_validator("code")
     @classmethod
