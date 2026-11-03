@@ -19,6 +19,7 @@ from app.schemas.common import ApiResponse, error_responses, ok, ok_page
 from app.schemas.rate_rules import (
     ChangeAction,
     RateChangeRead,
+    RateImpact,
     RateKind,
     RateLevel,
     RateRuleCreate,
@@ -144,20 +145,48 @@ async def list_rates(
         "rule of the same kind and scope covers any day of the period (`details.conflicts` "
         "lists them); with `close_previous` an earlier rule that runs into the new period is "
         "end-dated the day before instead (only when that is a plain shortening). Existing "
-        "time entries keep their rates. Cost rates in the response are null without "
-        "`rate.read`. Requires `rate.manage`."
+        "time entries keep their rates. With `confirm_impact` (after `POST /rates/impact`) "
+        "the rate is placed between the scope's rates instead: the rate running into it ends "
+        "the day before it, it ends the day before the next rate starts, and the unbilled "
+        "time of its period is re-priced in the same transaction (a re-rate run; billed, "
+        "drafted, written-off and period-locked time is skipped and counted). Cost rates in "
+        "the response are null without `rate.read`. Requires `rate.manage`."
     ),
     responses=error_responses(403, 404, 409),
 )
 async def create_rate(
     body: RateRuleCreate, org: RateManager, service: RuleServiceDep, ctx: ContextDep
 ) -> ApiResponse[RateRuleRead]:
-    view = await service.create(org, body, ctx)
+    view, run = await service.create(org, body, ctx)
     today = _today(org)
+    message = (
+        "Rate added" if run is None else f"Rate added, {run.entries_changed} entries re-priced"
+    )
     return ok(
         RateRuleRead.from_view(view, today=today, show_cost=service.can_see_costs(org)),
-        "Rate added",
+        message,
     )
+
+
+@router.post(
+    "/rates/impact",
+    summary="Preview what adding a rate changes",
+    description=(
+        "Nothing changes. Takes the body of `POST /rates` and says what it would do with "
+        "`confirm_impact`: the new rate's period (`effective_to` is cut to the day before the "
+        "next rate of the scope, named in `stops_at`), the running rate it ends (`ends`), and "
+        "the re-pricing of the unbilled time of the period (`reprice`, `skipped`). "
+        "`needs_confirmation` is true when the rate is cut short, re-prices time, or ends a "
+        "running rate without `close_previous`. 409 `RATE_OVERLAP` when the rate cannot be "
+        "placed (a rate of the scope starts the same day, or the period sits inside a longer "
+        "rate). Cost values are null without `rate.read`. Requires `rate.manage`."
+    ),
+    responses=error_responses(403, 404, 409),
+)
+async def rate_impact(
+    body: RateRuleCreate, org: RateManager, service: RuleServiceDep, ctx: ContextDep
+) -> ApiResponse[RateImpact]:
+    return ok(await service.impact(org, body, ctx))
 
 
 @router.get(

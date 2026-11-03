@@ -146,6 +146,14 @@ class RateRuleCreate(RequestModel):
             "instead of answering 409 RATE_OVERLAP"
         ),
     )
+    confirm_impact: bool = Field(
+        default=False,
+        description=(
+            "The caller confirmed what `POST /rates/impact` showed: the rate running into the "
+            "new one ends the day before it, the new one ends the day before the next rate of "
+            "the scope starts, and the unbilled time of the new period is re-priced"
+        ),
+    )
 
     @model_validator(mode="after")
     def _period(self) -> Self:
@@ -417,6 +425,35 @@ class RerateSkipped(BaseModel):
     in_draft: int
     written_off: int
     period_locked: int
+
+
+class ImpactRule(BaseModel):
+    """An existing rule of the same kind and scope that a new rate meets."""
+
+    id: uuid.UUID
+    rate: int | None = Field(description="Pence per hour; null for a cost rate without rate.read")
+    effective_from: date
+    effective_to: date | None = Field(description="Its last day now")
+    new_effective_to: date | None = Field(description="Its last day once the new rate is added")
+
+
+class RateImpact(BaseModel):
+    """What adding a rate with `confirm_impact` would do. Nothing has changed yet."""
+
+    effective_from: date
+    effective_to: date | None = Field(description="The new rate's last day as it would be saved")
+    ends: ImpactRule | None = Field(description="The rate running into the new one, ended")
+    stops_at: ImpactRule | None = Field(
+        description="The later rate that stays; the new one ends the day before it starts"
+    )
+    reprice: RerateTotals = Field(description="Re-pricing the unbilled time of the new period")
+    skipped: RerateSkipped
+    needs_confirmation: bool = Field(
+        description=(
+            "True when the new rate is cut short by a later one, re-prices recorded time, or "
+            "ends a running rate without `close_previous`"
+        )
+    )
 
 
 class ReratePreview(BaseModel):
