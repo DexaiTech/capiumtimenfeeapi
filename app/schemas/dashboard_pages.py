@@ -213,6 +213,10 @@ class ApprovalItem(BaseModel):
     date: dt.date = Field(description="The week of a timesheet; the submission day otherwise")
     submitted_at: dt.datetime | None
     minutes: int | None = Field(description="Total minutes of a timesheet")
+    zero_rate_minutes: int | None = Field(
+        default=None,
+        description="A timesheet's billable minutes with no charge-out rate (valued at £0)",
+    )
     amount: int | None = Field(description="Pence: an expense claim's gross, an invoice's gross")
     link: str = Field(description="A path inside the practice (below `/{slug}`)")
 

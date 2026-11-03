@@ -28,6 +28,8 @@ class SheetTotals:
     total_minutes: int = 0
     billable_minutes: int = 0
     billable_value: int = 0
+    # Billable minutes with no charge-out rate found (charge_rate 0): they go to WIP at £0.
+    zero_rate_minutes: int = 0
 
 
 EXEMPT_PERMISSION = "timesheet.exempt"
@@ -197,6 +199,18 @@ class TimesheetRepository:
                 func.coalesce(
                     func.sum(case((TimeEntry.is_billable, TimeEntry.charge_value), else_=0)), 0
                 ),
+                func.coalesce(
+                    func.sum(
+                        case(
+                            (
+                                and_(TimeEntry.is_billable, TimeEntry.charge_rate == 0),
+                                TimeEntry.minutes,
+                            ),
+                            else_=0,
+                        )
+                    ),
+                    0,
+                ),
             )
             .where(
                 TimeEntry.organization_id == organization_id,
@@ -205,7 +219,7 @@ class TimesheetRepository:
             .group_by(TimeEntry.timesheet_id)
         )
         return {
-            row[0]: SheetTotals(int(row[1]), int(row[2]), int(row[3]), int(row[4]))
+            row[0]: SheetTotals(*(int(value) for value in row[1:]))
             for row in (await self.session.execute(stmt)).all()
         }
 

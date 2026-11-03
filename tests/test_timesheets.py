@@ -9,6 +9,7 @@ from sqlalchemy import select
 from app.db.models import Organization, TimeEntry
 from app.db.session import get_sessionmaker
 from app.services.time_entries import wip_eligibility_clause
+from tests.dashboard_page_helpers import get_page
 from tests.domain_factories import make_client, practice, staff
 from tests.factories import audit_entries
 from tests.time_helpers import err, log_time, ok_data, org_url, set_entry, set_manager, set_practice
@@ -391,3 +392,42 @@ async def test_wip_eligibility_clause(client: AsyncClient) -> None:
     assert await eligible() == {approved["id"]}
     await set_practice(org, require_timesheet_approval=False)
     assert await eligible() == {approved["id"], open_entry["id"]}
+
+
+async def test_zero_rate_minutes(client: AsyncClient) -> None:
+    """APT17: a sheet says how much of its billable time has no charge-out rate (charge_rate 0),
+    so the approver is warned; non-billable time does not count and approving stays allowed."""
+    _, org = await practice(client)
+    person = await staff(org, full_name="Data Seeder")
+    manager = await staff(org, "manager")
+    acme = await make_client(org)
+    priced = await log_time(client, person, org, client_id=acme.id, minutes=60)
+    unpriced = await log_time(
+        client, person, org, client_id=acme.id, minutes=90, entry_date="2026-09-08"
+    )
+    internal = await log_time(client, person, org, minutes=30, entry_date="2026-09-09")
+    assert internal["is_billable"] is False
+    await set_entry(priced["id"], charge_rate=9_000, charge_value=9_000)
+    for entry in (unpriced, internal):
+        await set_entry(entry["id"], charge_rate=0, charge_value=0)
+    sheet_id = str(priced["timesheet_id"])
+
+    detail = ok_data(
+        await client.get(org_url(org, f"/timesheets/{sheet_id}"), headers=person.headers)
+    )
+    assert detail["zero_rate_minutes"] == 90
+    await _act(client, person, org, sheet_id, "submit")
+    queue = ok_data(await client.get(org_url(org, "/approvals"), headers=manager.headers))
+    assert [(s["id"], s["zero_rate_minutes"]) for s in queue] == [(sheet_id, 90)]
+    pending = await get_page(client, manager, org, "pending-approvals", kind="timesheet")
+    assert [(i["id"], i["zero_rate_minutes"]) for i in pending["items"]] == [(sheet_id, 90)]
+
+    # Once every billable entry has a rate, nothing is flagged.
+    await set_entry(unpriced["id"], charge_rate=9_000, charge_value=13_500)
+    queue = ok_data(await client.get(org_url(org, "/approvals"), headers=manager.headers))
+    assert [s["zero_rate_minutes"] for s in queue] == [0]
+    # A warning, not a block: the sheet is approved as it is.
+    await set_entry(unpriced["id"], charge_rate=0, charge_value=0)
+    approved = await _act(client, manager, org, sheet_id, "approve")
+    assert approved["status"] == "approved" and approved["zero_rate_minutes"] == 90
+    assert approved["billable_value"] == 9_000
