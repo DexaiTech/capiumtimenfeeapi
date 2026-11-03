@@ -156,7 +156,9 @@ async def unarchive_lead(
         "Creates an active client from the lead (name, type, email, phone, notes, and a "
         "primary contact from `contact_name`) and links it: `converted_client` in the "
         "response. `code` is optional (generated from the client sequence; 409 "
-        "`CLIENT_CODE_TAKEN` when used). 409 `LEAD_ALREADY_CONVERTED` for a second "
+        "`CLIENT_CODE_TAKEN` when used). `branch_id` is the client's branch, required while "
+        "the practice uses branches (422 `BRANCH_REQUIRED`). 409 `LEAD_ALREADY_CONVERTED` for a "
+        "second "
         "conversion, 409 `LEAD_ARCHIVED` for an archived lead. Requires `client.create`."
     ),
     responses=error_responses(403, 404, 409),

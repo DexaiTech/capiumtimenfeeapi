@@ -10,6 +10,8 @@ Rules (docs/domain.md, "Clients"):
 * Soft delete only when nothing references the client; otherwise 409 ``CLIENT_IN_USE``.
 * One primary contact per client: making a contact primary unsets the old one in the same
   transaction, under the client row lock.
+* While the practice uses branches (APT74), creating a client, or clearing its branch, without a
+  branch answers 422 ``BRANCH_REQUIRED``.
 """
 
 import csv
@@ -25,6 +27,7 @@ from app.core.context import RequestContext
 from app.core.exceptions import ConflictError, NotFoundError, ValidationError
 from app.db.models import Client, ClientContact, ClientService, DocumentSequence, Service
 from app.db.session import unit_of_work
+from app.repositories.branches import BranchRepository
 from app.repositories.clients import (
     ClientRepository,
     ClientRow,
@@ -37,6 +40,7 @@ from app.repositories.invoice_templates import InvoiceTemplateRepository
 from app.repositories.rates import ClientRateRepository
 from app.repositories.settings import SequenceRepository, ServiceRepository
 from app.schemas.billing import ClientRef
+from app.schemas.branches import BranchRef
 from app.schemas.bulk import BulkChangeResult, unique_ids
 from app.schemas.clients import (
     CENTRALLY_MANAGED_FIELDS,
@@ -209,6 +213,7 @@ class ClientsService:
         self.services = ServiceRepository(session)
         self.templates = InvoiceTemplateRepository(session)
         self.client_rates = ClientRateRepository(session)
+        self.branches = BranchRepository(session)
 
     async def _audit(
         self,
@@ -243,9 +248,12 @@ class ClientsService:
     async def _items(
         self, ctx: OrgContext, rows: Sequence[ClientRow], today: date
     ) -> list[ClientListItem]:
-        """List rows with their derived columns: three batched queries for any page size."""
+        """List rows with their derived columns: four batched queries for any page size."""
         org_id = ctx.organization_id
         ids = [row.client.id for row in rows]
+        branches = await self.branches.names(
+            org_id, {row.client.branch_id for row in rows if row.client.branch_id is not None}
+        )
         primaries = await self.clients.primary_contacts(org_id, ids)
         services = await self.clients.active_services(org_id, ids)
         deadlines = await self.clients.deadlines(
@@ -275,6 +283,9 @@ class ClientsService:
                             ServiceTag(service_id=s.id, code=s.code, name=s.name)
                             for s in services.get(client.id, [])
                         ],
+                        "branch": BranchRef(id=client.branch_id, name=branches[client.branch_id])
+                        if client.branch_id is not None and client.branch_id in branches
+                        else None,
                     }
                 )
             )
@@ -337,6 +348,7 @@ class ClientsService:
             "status",
             "company_number",
             "segment",
+            "branch",
             "health_score",
             "contact_name",
             "contact_email",
@@ -352,12 +364,17 @@ class ClientsService:
             "last_activity_at",
             "created_at",
         ]
-        # A practice that has switched client segments off (APT70) gets no segment column.
-        kept = [
-            i
-            for i, name in enumerate(header)
-            if name != "segment" or ctx.organization.client_segments_enabled
-        ]
+        # A practice that has switched client segments off (APT70) gets no segment column, one
+        # that does not use branches (APT74) no branch column.
+        hidden = {
+            name
+            for name, enabled in (
+                ("segment", ctx.organization.client_segments_enabled),
+                ("branch", ctx.organization.branches_enabled),
+            )
+            if not enabled
+        }
+        kept = [i for i, name in enumerate(header) if name not in hidden]
         writer.writerow([header[i] for i in kept])
         pages = await self.clients.iter_all(
             ctx.organization_id, filters, sort=sort, descending=descending, batch=EXPORT_BATCH
@@ -371,6 +388,7 @@ class ClientsService:
                     item.status,
                     item.company_number,
                     item.segment,
+                    item.branch.name if item.branch else None,
                     item.health_score,
                     item.contact_name,
                     item.contact_email,
@@ -558,6 +576,33 @@ class ClientsService:
                     "invoice_template_id", "This invoice template is inactive."
                 )
 
+    async def _check_branch(
+        self, ctx: OrgContext, values: dict[str, Any], current: Client | None = None
+    ) -> None:
+        """The branch must be an active branch of the practice; another practice's id answers 404.
+        While the practice uses branches (``branches_enabled``, ticket APT74), a new client needs
+        one and an edit cannot take it away: 422 ``BRANCH_REQUIRED``. An edit that leaves the
+        branch out is not refused, so a client that has none yet can still be worked on."""
+        if "branch_id" not in values:
+            return
+        branch_id = values["branch_id"]
+        if branch_id is None:
+            if ctx.organization.branches_enabled:
+                message = "Choose the client's branch."
+                raise ValidationError(
+                    message,
+                    code="BRANCH_REQUIRED",
+                    details=[{"field": "branch_id", "code": "required", "message": message}],
+                )
+            return
+        if current is not None and branch_id == current.branch_id:
+            return
+        branch = await self.branches.get(ctx.organization_id, branch_id)
+        if branch is None:
+            raise NotFoundError("Branch not found.", details={"field": "branch_id"})
+        if not branch.is_active:
+            raise ValidationError.for_field("branch_id", "This branch is inactive.")
+
     def _check_archive_permission(self, ctx: OrgContext, old: str | None, new: str) -> None:
         """Archiving (and un-archiving) is ``client.delete``'s job, whatever the route."""
         if (old == "archived") != (new == "archived"):
@@ -621,6 +666,7 @@ class ClientsService:
             await self._check_people(ctx, values)
             await self._check_vat_rate(ctx, data.default_vat_rate_id)
             await self._check_billing_settings(ctx, values)
+            await self._check_branch(ctx, values)
             if data.code:
                 await self._ensure_code_free(ctx, data.code)
             else:
@@ -665,6 +711,7 @@ class ClientsService:
             self._check_centrally_managed(client, values)
             await self._check_people(ctx, values, client)
             await self._check_billing_settings(ctx, values, client)
+            await self._check_branch(ctx, values, client)
             if "default_vat_rate_id" in values:
                 await self._check_vat_rate(
                     ctx, values["default_vat_rate_id"], client.default_vat_rate_id

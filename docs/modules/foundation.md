@@ -105,7 +105,7 @@ target is looked up, so a caller without the permission gets 403 for any id.
 | `time_increment_minutes` | one of 1, 5, 6, 10, 15, 30, 60 (a new practice starts with 6, tenths of an hour) |
 | `fixed_fee_wip_mode` | `on_completion` or `by_budget_progress` |
 | `wip_adjustment_approval_threshold`, `receipt_required_threshold`, `invoice_approval_threshold` | integer pence, 0–100 000 000 (a fraction, a negative number or more is 422 on that field) |
-| `invoice_approval_required`, `expense_approval_required`, `wip_adjustment_approval_required`, `client_segments_enabled` | booleans |
+| `invoice_approval_required`, `expense_approval_required`, `wip_adjustment_approval_required`, `client_segments_enabled`, `branches_enabled` | booleans |
 | `mileage_rate` | integer pence per mile, 0–1000 |
 | `expense_markup_bp` | integer basis points, 0–100 000 (1000 = 10%) |
 | `cost_plus_markup_bp` | integer basis points, 0–100 000 (5000 = 50%) |
@@ -138,6 +138,7 @@ their own `time_increment_minutes`):
 | `recovery_rate_order` | `client_job`, `task`, `staff` | The order in which the recovery analysis looks for the rate the work could have been billed at |
 | `rate_mode` | `staff_first` | `grade_only` skips the staff-level rate when time is priced (`docs/domain.md`, "Rates") |
 | `client_segments_enabled` | true | Whether the practice uses client segments (see [Client segments switch](#client-segments-switch)) |
+| `branches_enabled` | false | Whether the practice uses branches: on, every client needs one (see [Branches switch](#branches-switch)) |
 
 Out-of-range values are 422 `VALIDATION_ERROR` with the setting in `details[0].field` (a
 threshold of -1 or 100 000 001, a `mileage_rate` of 1001, an `expense_markup_bp` of 100 001, a
@@ -203,6 +204,27 @@ the API keeps reading and accepting them (the segment endpoints, the client fiel
 back. Staff linked to segments ("the segments they look after") is informational: it never limits
 which clients someone can see, so switching segments off changes no one's access. Migration `075`
 adds the column. Tests: `tests/test_client_segments_switch.py`.
+
+### Branches switch
+
+Ticket APT74: a practice with several offices groups its clients by branch. It lists its branches
+on Settings → Branches (next to Client Segments; `/branches`, `docs/modules/clients.md`,
+"Branches") and switches them on there with "Use branches" (`branches_enabled`, default false, so
+nothing changes until a practice switches it on; `PATCH /organizations/{id}`,
+`organization.update`, audited as `organization.updated` like every setting).
+
+On, each client needs a branch: creating a client, converting a lead or importing a row without
+one, or clearing a client's branch, answers 422 `BRANCH_REQUIRED`, and the client form marks the
+Branch field required. Clients that have no branch yet are not blocked: they can still be edited
+elsewhere, archived and worked on, and the clients list's "No branch" filter finds them. The UI
+shows the branch in the clients table (a "Branch" column the Show/Hide Columns menu can hide), the
+card view, a Branch filter, the client form and the client header and overview; the client export
+has a `branch` column.
+
+Off, the UI hides branches everywhere (like segments when they are off) and nothing is required;
+the export leaves the `branch` column out. Nothing is deleted: the branches and every client's
+branch are kept and come back when it is switched on again. Migration `077` adds the column, the
+`branches` table and `clients.branch_id`. Tests: `tests/test_branches.py`.
 
 `MemberRead`:
 

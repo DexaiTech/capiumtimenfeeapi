@@ -22,6 +22,7 @@ from app.core.context import RequestContext
 from app.core.exceptions import FileUploadError, ValidationError
 from app.db.models import Client, ClientContact, ClientService
 from app.db.session import unit_of_work
+from app.repositories.branches import BranchRepository
 from app.repositories.central_clients import CentralClientRepository
 from app.repositories.clients import ClientRepository, ContactRepository, EngagementRepository
 from app.repositories.settings import ServiceRepository
@@ -95,6 +96,7 @@ _EXTRA_FIELDS = (
     "services",
     "manager_email",
     "partner_email",
+    "branch",
 )
 _ALIASES = {
     "client": "name",
@@ -133,6 +135,7 @@ _ALIASES = {
     "service_codes": "services",
     "manager": "manager_email",
     "partner": "partner_email",
+    "branch_name": "branch",
 }
 _ENUM_FIELDS = ("client_type", "status", "aml_status", "accounting_software")
 _SPLIT = re.compile(r"[;|,]")
@@ -150,7 +153,15 @@ def _enum_value(value: str) -> str:
 
 
 class _Row:
-    __slots__ = ("contact", "data", "line", "manager_email", "partner_email", "service_codes")
+    __slots__ = (
+        "branch",
+        "contact",
+        "data",
+        "line",
+        "manager_email",
+        "partner_email",
+        "service_codes",
+    )
 
     def __init__(self, line: int) -> None:
         self.line = line
@@ -159,6 +170,7 @@ class _Row:
         self.service_codes: list[str] = []
         self.manager_email: str | None = None
         self.partner_email: str | None = None
+        self.branch: str | None = None
 
 
 class ClientImportService:
@@ -169,6 +181,7 @@ class ClientImportService:
         self.contacts = ContactRepository(session)
         self.engagements = EngagementRepository(session)
         self.services = ServiceRepository(session)
+        self.branches = BranchRepository(session)
 
     def _parse(self, text: str) -> tuple[list[str], list[str], list[_Row], list[ImportRowError]]:
         try:
@@ -260,6 +273,7 @@ class ClientImportService:
             )
         row.manager_email = record.get("manager_email")
         row.partner_email = record.get("partner_email")
+        row.branch = record.get("branch")
         try:
             row.data = ClientCreate.model_validate(payload)
         except PydanticValidationError as exc:
@@ -320,6 +334,8 @@ class ClientImportService:
         services = await self.services.by_codes(org_id, {c for r in valid for c in r.service_codes})
         emails = {e for r in valid for e in (r.manager_email, r.partner_email) if e}
         members = await self.clients.active_members_by_email(org_id, emails)
+        branches = await self.branches.by_names(org_id, {r.branch for r in valid if r.branch})
+        branch_required = ctx.organization.branches_enabled
         may_archive = policy.has_permission(ctx, "client.delete")
         numbers = {
             n
@@ -372,6 +388,26 @@ class ClientImportService:
                             message=f"There is no active service with the code {code}.",
                         )
                     )
+            if row.branch:
+                branch = branches.get(row.branch.lower())
+                if branch is None or not branch.is_active:
+                    errors.append(
+                        ImportRowError(
+                            row=row.line,
+                            field="branch",
+                            code="unknown_branch",
+                            message=f"There is no active branch called {row.branch}.",
+                        )
+                    )
+            elif branch_required:
+                errors.append(
+                    ImportRowError(
+                        row=row.line,
+                        field="branch",
+                        code="BRANCH_REQUIRED",
+                        message="The practice uses branches: give the client's branch.",
+                    )
+                )
             for field, email in (
                 ("manager_email", row.manager_email),
                 ("partner_email", row.partner_email),
@@ -431,6 +467,8 @@ class ClientImportService:
                     values["manager_user_id"] = members[row.manager_email.lower()]
                 if row.partner_email:
                     values["partner_user_id"] = members[row.partner_email.lower()]
+                if row.branch:
+                    values["branch_id"] = branches[row.branch.lower()].id
                 client_id = new_id()
                 new_clients.append(Client(id=client_id, organization_id=org_id, **values))
                 item.code, item.id = values["code"], client_id

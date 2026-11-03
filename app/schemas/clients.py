@@ -13,6 +13,7 @@ from pydantic import BaseModel, EmailStr, Field, field_validator, model_validato
 
 from app.db.models import Client, ClientContact, ClientService, Service
 from app.schemas.billing import ClientRef
+from app.schemas.branches import BranchRef
 from app.schemas.bulk import MAX_BULK_IDS, need_value, parse_user_id
 from app.schemas.common import RequestModel
 from app.schemas.engagement_jobs import NextJobPeriod
@@ -85,6 +86,9 @@ class ClientFilters:
     service_id: uuid.UUID | None = None
     manager_user_id: uuid.UUID | None = None
     partner_user_id: uuid.UUID | None = None
+    branch_ids: Sequence[uuid.UUID] = ()
+    # Clients without a branch (alone or together with ``branch_ids``).
+    without_branch: bool = False
     # ``linked``: enabled from the central client service; ``local``: created here.
     central: CentralFilter | None = None
 
@@ -339,6 +343,13 @@ class ClientCreate(_ClientFields):
     billing_notes: str | None = Field(default=None, max_length=2000)
     notes: str | None = Field(default=None, max_length=5000)
     segment: str | None = Field(default=None, max_length=40)
+    branch_id: uuid.UUID | None = Field(
+        default=None,
+        description=(
+            "An active branch of the practice (404 for any other id). Required while the "
+            "practice has `branches_enabled` on (422 `BRANCH_REQUIRED`)"
+        ),
+    )
     aml_status: AmlStatus = "not_started"
     aml_checked_on: date | None = None
     health_score: int | None = Field(default=None, ge=0, le=100)
@@ -389,6 +400,13 @@ class ClientUpdate(_ClientFields):
     billing_notes: str | None = Field(default=None, max_length=2000)
     notes: str | None = Field(default=None, max_length=5000)
     segment: str | None = Field(default=None, max_length=40)
+    branch_id: uuid.UUID | None = Field(
+        default=None,
+        description=(
+            "An active branch of the practice (404 for any other id). While the practice has "
+            "`branches_enabled` on, null answers 422 `BRANCH_REQUIRED`"
+        ),
+    )
     aml_status: AmlStatus | None = None
     aml_checked_on: date | None = None
     health_score: int | None = Field(default=None, ge=0, le=100)
@@ -479,6 +497,7 @@ class ClientRead(BaseModel):
     billing_notes: str | None
     notes: str | None
     segment: str | None
+    branch_id: uuid.UUID | None = Field(description="The practice branch the client belongs to")
     aml_status: str
     aml_checked_on: date | None
     health_score: int | None
@@ -540,6 +559,7 @@ class ClientRead(BaseModel):
             "billing_notes": client.billing_notes,
             "notes": client.notes,
             "segment": client.segment,
+            "branch_id": client.branch_id,
             "aml_status": client.aml_status,
             "aml_checked_on": client.aml_checked_on,
             "health_score": client.health_score,
@@ -607,6 +627,7 @@ class ClientListItem(ClientRead):
     last_activity_at: datetime
     # Names of the active engagements, in service display order.
     services: list[ServiceTag]
+    branch: BranchRef | None = Field(description="The branch named by `branch_id`")
 
 
 class Financials(BaseModel):

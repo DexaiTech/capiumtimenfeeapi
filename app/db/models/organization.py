@@ -245,6 +245,11 @@ class Organization(Base, IdMixin, TimestampMixin, SoftDeleteMixin):
     client_segments_enabled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("true")
     )
+    # Whether the practice uses branches. On, every client created or edited needs a branch; off
+    # (the default), the UI hides them everywhere and the client export leaves the column out.
+    branches_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
     email: Mapped[str | None] = mapped_column(Text)
     phone: Mapped[str | None] = mapped_column(Text)
     address_line1: Mapped[str | None] = mapped_column(Text)

@@ -65,6 +65,11 @@ class Client(Base, IdMixin, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
             name="fk_clients_organization_id_default_service_id_services",
         ),
         ForeignKeyConstraint(
+            ["organization_id", "branch_id"],
+            ["branches.organization_id", "branches.id"],
+            name="fk_clients_organization_id_branch_id_branches",
+        ),
+        ForeignKeyConstraint(
             ["organization_id", "invoice_template_id"],
             ["invoice_templates.organization_id", "invoice_templates.id"],
             name="fk_clients_invoice_template_invoice_templates",
@@ -135,6 +140,7 @@ class Client(Base, IdMixin, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
         ),
         Index("ix_clients_organization_id_name_lower", "organization_id", text("lower(name)")),
         Index("ix_clients_organization_id_manager_user_id", "organization_id", "manager_user_id"),
+        Index("ix_clients_organization_id_branch_id", "organization_id", "branch_id"),
         # A central client is enabled at most once per practice.
         Index(
             "uq_clients_organization_id_central_client_id",
@@ -181,6 +187,9 @@ class Client(Base, IdMixin, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
     notes: Mapped[str | None] = mapped_column(Text)
     # Practice-defined tier shown on the client list (Bronze, Silver, Gold, Platinum, ...).
     segment: Mapped[str | None] = mapped_column(Text)
+    # The practice branch (office) the client belongs to; required on create and edit while the
+    # practice has ``branches_enabled`` on.
+    branch_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     # Anti-money-laundering check state (UK MLR 2017 customer due diligence).
     aml_status: Mapped[str] = mapped_column(Text, nullable=False, server_default="not_started")
     aml_checked_on: Mapped[date | None] = mapped_column(Date)

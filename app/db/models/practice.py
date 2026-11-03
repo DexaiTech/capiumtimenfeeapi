@@ -1,4 +1,5 @@
-"""Practice set-up: VAT rates, services, activity codes, grades, segments and number sequences.
+"""Practice set-up: VAT rates, services, activity codes, grades, segments, branches and number
+sequences.
 
 Conventions shared by every business table:
 
@@ -45,7 +46,7 @@ class VatRate(Base, IdMixin, OrgScopedMixin, TimestampMixin):
             "code IN ('standard', 'reduced', 'zero', 'exempt', 'outside_scope')", name="code"
         ),
         CheckConstraint("rate_bp BETWEEN 0 AND 10000", name="rate_bp"),
-        CheckConstraint("length(name) BETWEEN 1 AND 60", name="name_length"),
+        CheckConstraint("length(name) BETWEEN 1 AND 40", name="name_length"),
         Index(
             "uq_vat_rates_organization_id_name_lower",
             "organization_id",
@@ -335,6 +336,28 @@ class Segment(Base, IdMixin, OrgScopedMixin, TimestampMixin):
     description: Mapped[str | None] = mapped_column(Text)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+
+
+class Branch(Base, IdMixin, OrgScopedMixin, TimestampMixin):
+    """A branch (office) of the practice, managed in the settings. A client belongs to at most one
+    (``clients.branch_id``); with ``organizations.branches_enabled`` on, every client created or
+    edited needs one. A branch that clients have is deactivated, not deleted.
+    """
+
+    __tablename__ = "branches"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "id", name="uq_branches_organization_id_id"),
+        CheckConstraint("length(name) BETWEEN 1 AND 40", name="name_length"),
+        Index(
+            "uq_branches_organization_id_name_lower",
+            "organization_id",
+            text("lower(name)"),
+            unique=True,
+        ),
+    )
+
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
 
 
 class StaffSegment(Base, IdMixin, OrgScopedMixin):

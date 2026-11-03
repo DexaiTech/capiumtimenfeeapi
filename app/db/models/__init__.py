@@ -65,6 +65,7 @@ from app.db.models.period_locks import LockedPeriod, PeriodLock, PeriodLockEvent
 from app.db.models.platform import AuditLog, BackgroundJob, RateLimitCounter
 from app.db.models.practice import (
     ActivityCode,
+    Branch,
     DocumentSequence,
     Grade,
     Segment,
@@ -107,6 +108,7 @@ __all__ = [
     "BackgroundJob",
     "BookkeepingServiceMapping",
     "BookkeepingVatMapping",
+    "Branch",
     "CentralClientCache",
     "Client",
     "ClientContact",

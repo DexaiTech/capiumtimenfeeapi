@@ -89,6 +89,13 @@ def client_filters(
     ] = None,
     manager_user_id: Annotated[uuid.UUID | None, Query()] = None,
     partner_user_id: Annotated[uuid.UUID | None, Query()] = None,
+    branch_id: Annotated[
+        list[uuid.UUID] | None, Query(description="Clients in this branch; repeat for several")
+    ] = None,
+    without_branch: Annotated[
+        bool,
+        Query(description="Clients without a branch (together with `branch_id`: either one)"),
+    ] = False,
     central: Annotated[
         CentralFilter | None,
         Query(
@@ -109,6 +116,8 @@ def client_filters(
         service_id=service_id,
         manager_user_id=manager_user_id,
         partner_user_id=partner_user_id,
+        branch_ids=tuple(branch_id or ()),
+        without_branch=without_branch,
         central=central,
     )
 
@@ -191,7 +200,9 @@ async def export_clients(
         "and 5000 rows). The header row is mapped by name: the client fields of "
         "`POST /clients` plus `year_end` (DD/MM), `contact_name`, `contact_email`, "
         "`contact_phone`, `contact_position` (creates the primary contact), `services` "
-        "(service codes separated by `;`), `manager_email` and `partner_email`; aliases "
+        "(service codes separated by `;`), `manager_email`, `partner_email` and `branch` (the "
+        "name of an active branch, ignoring case; required while the practice uses branches); "
+        "aliases "
         "such as `Client name`, `Reg No` or `Contact` work and unknown columns are "
         "ignored. `dry_run=true` validates and returns per-row errors without writing. A "
         "real run is all-or-nothing: 422 `IMPORT_INVALID` (errors in `details`) or every "
@@ -240,10 +251,12 @@ async def import_clients(
         "client's), `deadlines` (open jobs' due dates against today in the practice time "
         "zone: overdue/due today/due within 14 days, worst `status`, `next_due_date`), "
         "`last_activity_at` (latest change to the client, its jobs, time or invoices) and "
-        "the active `services`. Filters: `q` (name, code, company number, client or "
+        "the active `services` and the `branch` (id and name). Filters: `q` (name, code, "
+        "company number, client or "
         "contact email; case-insensitive), `status` (default: all but archived), "
         "`segment`, `client_type`, `aml_status`, `accounting_software`, `service_id`, "
-        "`manager_user_id`, `partner_user_id`, `central` (`linked` or `local`). Sorted by "
+        "`manager_user_id`, `partner_user_id`, `branch_id` (repeatable) and `without_branch` "
+        "(either matches), `central` (`linked` or `local`). Sorted by "
         "`sort`/`order`, keyset-paginated "
         "(the cursor encodes the sort key; a cursor from another sort answers 422). "
         "Requires `client.read`."

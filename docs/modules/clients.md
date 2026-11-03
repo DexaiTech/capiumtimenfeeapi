@@ -46,6 +46,12 @@ practice's ids answer 404.
 | DELETE | `/activity-codes/{activity_id}` | `settings.manage` | Delete if unused, else deactivate. |
 | GET | `/sequences` | any member | The seven sequences (`client`, `credit_note`, `estimate`, `invoice`, `job`, `staff`, `ticket`) with `prefix`, `padding`, `next_number`, `preview`. |
 | PATCH | `/sequences/{kind}` | `organization.update` | Change `prefix`, `padding`, `next_number` of `client`/`job`/`invoice`/`credit_note`/`staff`/`ticket`/`estimate`. |
+| GET | `/branches?is_active=&q=` | any member | The practice's branches (APT74) by name, each with `client_count` (live clients) and `can_delete`. Bounded. |
+| GET | `/branches/{branch_id}` | any member | One branch. |
+| POST | `/branches` | `settings.manage` | Create (`name` 1-40, unique ignoring case: 409 `BRANCH_NAME_TAKEN`; `is_active`). |
+| PATCH | `/branches/{branch_id}` | `settings.manage` | Change `name` or `is_active`. |
+| POST | `/branches/{branch_id}/deactivate` · `/activate` | `settings.manage` | Toggle `is_active`. A deactivated branch is not offered for clients; those that have it keep it. |
+| DELETE | `/branches/{branch_id}` | `settings.manage` | Delete if no client has it (deleted clients included), else deactivate (`outcome` = `deactivated`). |
 
 ### Rates
 
@@ -95,7 +101,7 @@ accounting_software, created_at, updated_at`) plus `initials` (avatar: first let
 first two words, or the first two letters of a one-word name) and, from the Clients 360
 release, the billing settings `invoice_email`, `default_service_id`, `invoice_template_id` and the
 central link `central_client_id`, `central_sync_state`, `central_synced_at`,
-`merged_into_client_id` (see "Clients 360").
+`merged_into_client_id` (see "Clients 360"), and `branch_id` (APT74, see "Branches").
 
 **ClientListItem** (rows of `GET /clients`) = ClientRead plus:
 
@@ -108,7 +114,8 @@ central link `central_client_id`, `central_sync_state`, `central_synced_at`,
                 "due_soon": 1, "due_soon_days": 14, "next_due_date": "2026-10-17",
                 "status": "overdue"},   // overdue | due_today | due_soon | on_track | none
   "last_activity_at": "2026-10-17T09:12:00Z",
-  "services": [{"service_id": "…", "code": "VAT", "name": "VAT return"}]
+  "services": [{"service_id": "…", "code": "VAT", "name": "VAT return"}],
+  "branch": {"id": "…", "name": "London"}  // null without a branch (APT74)
 }
 ```
 
@@ -139,7 +146,8 @@ email), `status` (repeatable; default every status except `archived`), `segment`
 (repeatable, case-insensitive), `client_type`, `aml_status`, `accounting_software`
 (repeatable), `se, `central` (`linked`: enabled from the central client service; `local`: created
 in this practice)rvice_id` (active engagement of that service), `manager_user_id`,
-`partner_user_id`; `sort` = `name` (default, case-insensitive) | `code` | `segment` |
+`partner_user_id`, `branch_id` (repeatable) and `without_branch=true` (clients with none; with
+`branch_id`, either matches; APT74); `sort` = `name` (default, case-insensitive) | `code` | `segment` |
 `health_score` | `aml_status` | `created_at` | `last_activity_at`; `order` = `asc` | `desc`;
 `limit` (1–100, default 25), `cursor`.
 
@@ -168,6 +176,8 @@ active engagements, deadline counts) regardless of page size (tested).
 | `CLIENT_IN_USE` | 409 | Delete of a client with jobs/time/disbursements/invoices/credit notes/payments (`details` has counts; for a bulk delete `details` is a list with one entry per such client: `client_id`, `code`, `name`, `reason`, `usage` counts). |
 | `CLIENT_INACTIVE` | 409 | Raised by `ensure_client_accepts_work` for inactive/archived clients. |
 | `CLIENT_SERVICE_EXISTS` | 409 | The client already takes that service. |
+| `BRANCH_REQUIRED` | 422 | The practice uses branches and a client is created (or a lead converted) without `branch_id`, or `branch_id` is set to null (`details[0].field` = `branch_id`); also an import row error. |
+| `BRANCH_NAME_TAKEN` | 409 | Duplicate branch name (case-insensitive). |
 | `CLIENT_FIELD_MANAGED_CENTRALLY` | 409 | Changing the name or address of a client linked to the central client service (`details`: one entry per field). |
 | `CENTRAL_CLIENT_ALREADY_ENABLED` | 422 | An import row whose company number belongs to an enabled central client (a row error). |
 | `CENTRAL_*`, `CLIENT_ALREADY_LINKED`, `CLIENT_NOT_LINKED`, `CLIENT_MERGED` | 409 / 503 | The central link endpoints: `docs/modules/central-clients.md`. |
@@ -258,8 +268,10 @@ active engagements, deadline counts) regardless of page size (tested).
   (CSV injection). Columns: code, name, client_type, status, company_number, segment,
   health_score, contact_name, contact_email, email, phone, deadline_status, overdue_jobs,
   overdue_days, next_due_date, aml_status, accounting_software, services, last_activity_at,
-  created_at. Without `segment` when the practice has switched client segments off
-  (`client_segments_enabled`, ticket APT70, `docs/modules/foundation.md`).
+  created_at, with `branch` (the branch name) after `segment`. Without `segment` when the
+  practice has switched client segments off (`client_segments_enabled`, ticket APT70,
+  `docs/modules/foundation.md`), and without `branch` while it does not use branches
+  (`branches_enabled`, ticket APT74).
 
 ## Import
 
@@ -271,7 +283,9 @@ dependency. Text is UTF-8 (BOM allowed), falling back to Windows-1252.
 Headers are normalised (case, spaces, punctuation) and mapped to the `POST /clients` fields
 plus `year_end` (`DD/MM` or `DD/MM/YYYY`), `contact_name`, `contact_email`, `contact_phone`,
 `contact_position` (creates the primary contact), `services` (codes separated by `;`, `,`
-or `|`), `manager_email`, `partner_email`. Aliases include `client`/`client name`/
+or `|`), `manager_email`, `partner_email`, `branch` (alias `branch name`: the name of an active
+branch, ignoring case; row error `unknown_branch` otherwise, and `BRANCH_REQUIRED` for a row
+without one while the practice uses branches). Aliases include `client`/`client name`/
 `company name` → name, `reg no`/`company number`/`crn` → company_number, `type` →
 client_type, `contact` → contact_name, `aml` → aml_status, `health` → health_score,
 `software` → accounting_software. Enum values are normalised (`Limited Company` →
@@ -327,6 +341,33 @@ From the Clients 360 release also `client.central_enabled`, `client.central_link
 disbursements and WIP write-offs now carry `client_id` in their metadata, like the other billing
 entries, so they show in the client's activity.
 Leads write `lead.created|updated|archived|unarchived|converted` (see "Leads").
+Branches write `branch.created|updated|deactivated|deleted` (see "Branches").
+
+## Branches
+
+Ticket APT74. A practice can group its clients by branch (office): it lists its branches on
+Settings → Branches (`/branches` above, table `branches`: `name` unique per practice ignoring
+case, `is_active`) and each client has at most one (`clients.branch_id`, a composite foreign key,
+so a client can never point at another practice's branch). Setting a branch that is not the
+practice's answers 404 (`details.field` = `branch_id`); setting an inactive one 422.
+
+The "Use branches" switch (`organizations.branches_enabled`, default off, so nothing changes
+until a practice switches it on; `docs/modules/foundation.md`) decides whether a branch is
+required:
+
+* **On**: `POST /clients`, the lead conversion and every import row need a branch (422
+  `BRANCH_REQUIRED`), and `PATCH /clients/{id}` cannot set `branch_id` to null. An edit that
+  leaves `branch_id` out is not refused, so a client that has no branch yet (one made before the
+  switch, or enabled from the central client service) can still be edited, archived and worked on;
+  the client list's `without_branch=true` filter finds those clients so they can be given one.
+  The client form always sends the branch, so editing such a client in the UI asks for one.
+* **Off**: nothing is required; the UI hides branches (column, filter, form field, header and
+  overview) and the export leaves the `branch` column out. Nothing is deleted: the branches and
+  every client's branch are kept, and the API keeps reading and accepting them.
+
+A client merge leaves `branch_id` alone: the merged-away client keeps its branch and the survivor
+its own (`branches` names no client, so the merge registry is not concerned). Migration `077`.
+Tests: `tests/test_branches.py`.
 
 ## Clients 360
 

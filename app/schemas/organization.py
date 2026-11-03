@@ -138,6 +138,13 @@ class OrganizationRead(BaseModel):
             "client export leaves the column out (the segments and the clients' values are kept)"
         )
     )
+    branches_enabled: bool = Field(
+        description=(
+            "Whether the practice uses branches; on, every client created or edited needs a "
+            "branch; off (the default), the UI hides them and the client export leaves the column "
+            "out"
+        )
+    )
     email: str | None = Field(description="Practice contact email")
     phone: str | None = Field(description="Practice phone number")
     address_line1: str | None = Field(description="Address line 1")
@@ -191,6 +198,7 @@ class OrganizationRead(BaseModel):
             cost_plus_markup_bp=organization.cost_plus_markup_bp,
             recovery_rate_order=organization.recovery_rate_order,
             client_segments_enabled=organization.client_segments_enabled,
+            branches_enabled=organization.branches_enabled,
             email=organization.email,
             phone=organization.phone,
             address_line1=organization.address_line1,
@@ -507,6 +515,14 @@ class OrganizationUpdate(RequestModel):
             "Whether the practice uses client segments. Off hides them everywhere in the UI and "
             "leaves the column out of the client export; nothing is deleted, and switching it "
             "on again brings them back"
+        ),
+    )
+    branches_enabled: bool | None = Field(
+        default=None,
+        description=(
+            "Whether the practice uses branches. On, creating or editing a client needs a branch "
+            "(422 `BRANCH_REQUIRED`); off hides them in the UI and leaves the column out of the "
+            "client export. Nothing is deleted either way"
         ),
     )
     email: EmailStr | None = Field(
