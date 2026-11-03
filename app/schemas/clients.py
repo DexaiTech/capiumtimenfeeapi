@@ -429,7 +429,9 @@ class ClientUpdate(_ClientFields):
         return self
 
 
-ClientBulkActionName = Literal["set_status", "set_manager", "set_partner", "set_segment", "delete"]
+ClientBulkActionName = Literal[
+    "set_status", "set_manager", "set_partner", "set_segment", "set_branch", "delete"
+]
 _CLIENT_STATUSES = ("prospect", "active", "inactive", "archived")
 
 
@@ -441,7 +443,8 @@ class ClientBulkAction(RequestModel):
         description=(
             "`set_status`: a client status (`archived` archives); `set_manager` / "
             "`set_partner`: a staff user id, or null to clear; `set_segment`: a segment of up "
-            "to 40 characters, or null/blank to clear; `delete`: no value"
+            "to 40 characters, or null/blank to clear; `set_branch`: the id of an active branch "
+            "of the practice (required); `delete`: no value"
         ),
     )
 
@@ -457,6 +460,8 @@ class ClientBulkAction(RequestModel):
         elif self.action == "set_segment":
             if value is not None and len(value) > 40:
                 raise ValueError("value: Use at most 40 characters.")
+        elif self.action == "set_branch":
+            _parse_branch_id(need_value(value))
         elif value is not None:
             parse_user_id(value)
         return self
@@ -468,6 +473,17 @@ class ClientBulkAction(RequestModel):
     @property
     def segment(self) -> str | None:
         return self.value or None
+
+    @property
+    def branch_id(self) -> uuid.UUID:
+        return _parse_branch_id(need_value(self.value))
+
+
+def _parse_branch_id(value: str) -> uuid.UUID:
+    try:
+        return uuid.UUID(value)
+    except ValueError as exc:
+        raise ValueError("value: Use the id of a branch.") from exc
 
 
 class ClientRead(BaseModel):

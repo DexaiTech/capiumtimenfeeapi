@@ -315,8 +315,8 @@ clients are locked in id order; a rule that any client breaks stops the whole ac
 | Field | Type | Notes |
 |---|---|---|
 | `client_ids` | uuid[] 1-200 | Duplicates count once. Any id that is not a live client of the practice: 404 `RESOURCE_NOT_FOUND`, `details: {"client_ids": [...]}`, nothing changes. |
-| `action` | `set_status`, `set_manager`, `set_partner`, `set_segment`, `delete` | |
-| `value` | string or null | `set_status`: `prospect`, `active`, `inactive` or `archived` (required; `archived` is how clients are archived in bulk, so there is no separate `archive` action; moving a client into or out of `archived` also needs `client.delete`, 403 otherwise). `set_manager` / `set_partner`: a staff user id (an active member, 422 otherwise), null clears. `set_segment`: up to 40 characters; null or blank clears. `delete`: no value (a value is 422). |
+| `action` | `set_status`, `set_manager`, `set_partner`, `set_segment`, `set_branch`, `delete` | |
+| `value` | string or null | `set_status`: `prospect`, `active`, `inactive` or `archived` (required; `archived` is how clients are archived in bulk, so there is no separate `archive` action; moving a client into or out of `archived` also needs `client.delete`, 403 otherwise). `set_manager` / `set_partner`: a staff user id (an active member, 422 otherwise), null clears. `set_segment`: up to 40 characters; null or blank clears. `set_branch`: the id of an active branch of the practice (required; not a uuid is 422; another practice's or an unknown branch is 404 with `details.field = branch_id`; an inactive branch is 422 on `branch_id`, as for a single edit), e.g. to give the "No branch" clients one in one go (APT74). `delete`: no value (a value is 422). |
 
 `delete` follows `DELETE /clients/{id}`: a client with jobs, time, disbursements, expenses, invoices, credit notes or payments makes
 the whole call answer 409 `CLIENT_IN_USE` (nothing is deleted; archive those instead). The name and address of a centrally
@@ -359,7 +359,9 @@ required:
   `BRANCH_REQUIRED`), and `PATCH /clients/{id}` cannot set `branch_id` to null. An edit that
   leaves `branch_id` out is not refused, so a client that has no branch yet (one made before the
   switch, or enabled from the central client service) can still be edited, archived and worked on;
-  the client list's `without_branch=true` filter finds those clients so they can be given one.
+  the client list's `without_branch=true` filter finds those clients so they can be given one,
+  one at a time or several at once with the bulk `set_branch` action ("Bulk action" above; same
+  checks and the same `client.updated` audit row per client, with `bulk: true`).
   The client form always sends the branch, so editing such a client in the UI asks for one.
 * **Off**: nothing is required; the UI hides branches (column, filter, form field, header and
   overview) and the export leaves the `branch` column out. Nothing is deleted: the branches and

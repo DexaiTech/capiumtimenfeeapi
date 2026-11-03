@@ -407,3 +407,91 @@ async def test_converting_a_lead_needs_a_branch_while_branches_are_on(client):
     assert await sql("SELECT branch_id::text AS b FROM clients WHERE id = :i", i=client_id) == [
         {"b": london["id"]}
     ]
+
+
+# --- Bulk "Set branch" ------------------------------------------------------------------------
+
+
+async def bulk_set_branch(client: AsyncClient, actor, org: dict, ids, value, status: int = 200):
+    response = await client.post(
+        org_url(org, "/clients/bulk"),
+        headers=actor.headers,
+        json={"client_ids": [str(i) for i in ids], "action": "set_branch", "value": value},
+    )
+    assert response.status_code == status, response.text
+    return ok_data(response) if status == 200 else error(response)
+
+
+async def branch_of(client_id) -> str | None:
+    [row] = await sql("SELECT branch_id::text AS b FROM clients WHERE id = :i", i=str(client_id))
+    return row["b"]
+
+
+async def test_bulk_set_branch_gives_the_clients_without_one_a_branch(client):
+    owner, org = await practice(client)
+    london = await create_branch(client, owner, org, name="London")
+    leeds = await create_branch(client, owner, org, name="Leeds")
+    rows = [await make_client(org, f"Client {n} Ltd") for n in range(3)]
+    ids = [row.id for row in rows]
+    await use_branches(client, owner, org)
+
+    result = await bulk_set_branch(client, owner, org, ids[:2], london["id"])
+    assert result == {"action": "set_branch", "affected": 2, "changed": 2}
+    assert [await branch_of(i) for i in ids] == [london["id"], london["id"], None]
+    entries = await audit_entries(org["id"], "client.updated")
+    assert len(entries) == 2
+    assert {e["target_id"] for e in entries} == {str(i) for i in ids[:2]}
+    assert entries[0]["metadata"]["bulk"] is True
+    assert entries[0]["metadata"]["changes"] == {"branch_id": [None, london["id"]]}
+
+    # A client already in the branch does not change; the others move.
+    again = await bulk_set_branch(client, owner, org, ids, leeds["id"])
+    assert again["changed"] == 3
+    same = await bulk_set_branch(client, owner, org, ids, leeds["id"])
+    assert same["changed"] == 0
+    listed = ok_data(
+        await client.get(
+            org_url(org, "/clients"), headers=owner.headers, params={"without_branch": "true"}
+        )
+    )
+    assert listed == []
+
+
+async def test_bulk_set_branch_refuses_foreign_unknown_and_inactive_branches(client):
+    owner, org = await practice(client)
+    other_owner, other = await practice(client, "Other")
+    theirs = await create_branch(client, other_owner, other, name="Theirs")
+    closed = await create_branch(client, owner, org, name="Closed", is_active=False)
+    ids = [(await make_client(org, "Acme Ltd")).id]
+    await use_branches(client, owner, org)
+
+    foreign = await bulk_set_branch(client, owner, org, ids, theirs["id"], 404)
+    assert foreign["details"] == {"field": "branch_id"}
+    await bulk_set_branch(client, owner, org, ids, str(uuid.uuid4()), 404)
+    inactive = await bulk_set_branch(client, owner, org, ids, closed["id"], 422)
+    assert inactive["details"][0]["field"] == "branch_id"
+    # A branch is required and must be an id.
+    missing = await bulk_set_branch(client, owner, org, ids, None, 422)
+    assert missing["details"][0]["field"] == "value"
+    await bulk_set_branch(client, owner, org, ids, "London", 422)
+    assert await branch_of(ids[0]) is None
+    assert await audit_entries(org["id"], "client.updated") == []
+
+
+async def test_bulk_set_branch_needs_the_permission_of_bulk_set_segment(client):
+    owner, org = await practice(client)
+    london = await create_branch(client, owner, org, name="London")
+    ids = [(await make_client(org, "Acme Ltd")).id]
+    plain = await staff(org, "staff")  # no client.update: bulk set_segment is 403 too
+    manager = await staff(org, "manager")  # client.update
+
+    for action, value in (("set_segment", "Gold"), ("set_branch", london["id"])):
+        response = await client.post(
+            org_url(org, "/clients/bulk"),
+            headers=plain.headers,
+            json={"client_ids": [str(ids[0])], "action": action, "value": value},
+        )
+        assert response.status_code == 403, (action, response.text)
+    assert await branch_of(ids[0]) is None
+    done = await bulk_set_branch(client, manager, org, ids, london["id"])
+    assert done["changed"] == 1
