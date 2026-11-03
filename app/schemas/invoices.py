@@ -32,6 +32,8 @@ DisplayStatus = Literal[
 ]
 ApprovalAction = Literal["submitted", "approved", "rejected"]
 ItemIds = Annotated[list[uuid.UUID], Field(max_length=2000)]
+# A field named ``date`` would shadow the type in the class body.
+DateType = date
 
 
 def _blank_is_null(value: str | None) -> str | None:
@@ -76,6 +78,16 @@ class WipSelection(RequestModel):
     overrides: list[LineOverride] = Field(default_factory=list, max_length=500)
 
 
+class AdvanceCreate(RequestModel):
+    """The fees billed in advance on a new draft: one manual line marked as an advance."""
+
+    description: str = Field(min_length=1, max_length=1000, examples=["Fees in advance 2026/27"])
+    net_amount: PositiveMoney = Field(description="The advance before VAT")
+    vat_rate_id: uuid.UUID | None = None
+    service_id: uuid.UUID | None = None
+    job_id: uuid.UUID | None = None
+
+
 class InvoiceCreate(WipSelection):
     client_id: uuid.UUID
     issue_date: date | None = None
@@ -88,6 +100,14 @@ class InvoiceCreate(WipSelection):
             "What the lines were valued on when the draft was prepared: the `contract` value, the "
             "`job` value or the `team` value (see `GET /clients/{id}/billing-summary`). Kept in "
             "the audit entry `invoice.draft_created`; the amounts are the lines' own"
+        ),
+    )
+    advance: AdvanceCreate | None = Field(
+        default=None,
+        description=(
+            "Fees billed in advance: adds one manual line marked `is_advance`, to which the "
+            "client's time is assigned once the invoice is issued "
+            "(`POST /invoices/{id}/lines/{line_id}/assign`)"
         ),
     )
 
@@ -131,6 +151,26 @@ class LineCreate(RequestModel):
     service_id: uuid.UUID | None = None
     job_id: uuid.UUID | None = None
     position: int | None = Field(default=None, ge=1, le=10000)
+    is_advance: bool = Field(
+        default=False,
+        description=(
+            "Fees billed in advance: once the invoice is issued, time is assigned to the line "
+            "later. Its net must be more than zero"
+        ),
+    )
+
+
+class AdvanceAssign(RequestModel):
+    """Items of the invoice's client to assign to, or take off, an advance line."""
+
+    time_entry_ids: ItemIds = Field(default_factory=list)
+    disbursement_ids: ItemIds = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _something(self) -> Self:
+        if not self.time_entry_ids and not self.disbursement_ids:
+            raise ValueError("time_entry_ids: Choose at least one item")
+        return self
 
 
 class LineUpdate(RequestModel):
@@ -217,6 +257,32 @@ class LineWipRead(BaseModel):
     adjustment: int
 
 
+class AdvanceItemRead(BaseModel):
+    """A piece of work assigned to an advance line."""
+
+    kind: Literal["time", "disbursement"]
+    id: uuid.UUID
+    date: DateType
+    person: PersonRef | None = Field(description="Who did the work (time only)")
+    description: str | None
+    minutes: int | None
+    hours: Decimal | None
+    wip_value: int = Field(description="What the work was worth")
+    billed_value: int = Field(description="What the advance covers of it; the rest is written off")
+    assigned_on: DateType | None
+
+
+class AdvanceRead(BaseModel):
+    """How much of an advance line the assigned work has used."""
+
+    amount: int = Field(description="The advance: the line's net")
+    used: int = Field(description="The billed value of the work assigned to it")
+    remaining: int = Field(description="What is left of the advance to assign work to")
+    wip_value: int = Field(description="What the assigned work was worth")
+    written_off: int = Field(description="Work assigned beyond the advance: written off")
+    items: list[AdvanceItemRead]
+
+
 class LineRead(BaseModel):
     id: uuid.UUID
     position: int
@@ -232,9 +298,15 @@ class LineRead(BaseModel):
     vat_amount: int
     gross_amount: int
     wip: LineWipRead | None
+    is_advance: bool = False
+    advance: AdvanceRead | None = Field(
+        default=None, description="On an advance line: the work assigned to it and what is left"
+    )
 
     @classmethod
-    def from_model(cls, line: InvoiceLine, wip: LineWipRead | None) -> "LineRead":
+    def from_model(
+        cls, line: InvoiceLine, wip: LineWipRead | None, advance: AdvanceRead | None = None
+    ) -> "LineRead":
         return cls(
             id=line.id,
             position=line.position,
@@ -250,6 +322,8 @@ class LineRead(BaseModel):
             vat_amount=line.vat_amount,
             gross_amount=line.net_amount + line.vat_amount,
             wip=wip,
+            is_advance=line.is_advance,
+            advance=advance,
         )
 
 

@@ -213,6 +213,7 @@ class InvoiceLine(Base, IdMixin, OrgScopedMixin, TimestampMixin):
         CheckConstraint("quantity > 0", name="quantity"),
         CheckConstraint("vat_rate_bp BETWEEN 0 AND 10000", name="vat_rate_bp"),
         CheckConstraint("length(description) BETWEEN 1 AND 1000", name="description_length"),
+        CheckConstraint("NOT is_advance OR kind = 'manual'", name="advance_is_manual"),
         Index("ix_invoice_lines_invoice_id_position", "invoice_id", "position"),
     )
 
@@ -232,6 +233,8 @@ class InvoiceLine(Base, IdMixin, OrgScopedMixin, TimestampMixin):
     # Snapshot of the rate when the line was written: later rate changes never alter it.
     vat_rate_bp: Mapped[int] = mapped_column(Integer, nullable=False)
     vat_amount: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    # Fees billed in advance (APT69): time is assigned to this manual line once it is issued.
+    is_advance: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
 
 
 class WipWriteOff(Base, IdMixin, OrgScopedMixin, TimestampMixin):
@@ -345,6 +348,9 @@ class WipAllocation(Base, IdMixin, OrgScopedMixin, TimestampMixin):
     wip_value: Mapped[int] = mapped_column(BigInteger, nullable=False)
     billed_value: Mapped[int] = mapped_column(BigInteger, nullable=False)
     reversed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # The day the item was assigned to an advance line (APT69): it left WIP then, not on the
+    # invoice's issue date. Null for every other allocation.
+    assigned_on: Mapped[date | None] = mapped_column(Date)
 
 
 class CreditNote(Base, IdMixin, OrgScopedMixin, TimestampMixin):

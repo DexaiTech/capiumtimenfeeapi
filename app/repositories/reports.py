@@ -215,8 +215,11 @@ def _cleared_after(
             alloc.organization_id == organization_id,
             getattr(alloc, item_fk) == item_id,
             alloc.reversed_at.is_(None),
+            # Work assigned to fees billed in advance left WIP when it was assigned (APT69).
             or_(
-                and_(inv.status == "issued", inv.issue_date > as_at),
+                and_(
+                    inv.status == "issued", or_(inv.issue_date > as_at, alloc.assigned_on > as_at)
+                ),
                 wo.written_off_on > as_at,
             ),
         )
