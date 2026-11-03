@@ -95,6 +95,9 @@ class AdvanceLineCreate(RequestModel):
     quantity: Quantity = Decimal(1)
     unit_amount: PositiveMoney = Field(description="The price of one unit before VAT")
     vat_rate_id: uuid.UUID | None = None
+    service_id: uuid.UUID | None = Field(
+        default=None, description="The service billed; its VAT code applies after the client's"
+    )
 
 
 class InvoiceCreate(WipSelection):

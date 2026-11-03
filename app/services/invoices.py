@@ -571,6 +571,7 @@ class InvoiceService:
                     quantity=a.quantity,
                     unit_amount=a.unit_amount,
                     vat_rate_id=a.vat_rate_id,
+                    service_id=a.service_id,
                     is_advance=True,
                 )
                 for a in data.advance_lines or []
