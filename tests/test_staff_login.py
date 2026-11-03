@@ -113,7 +113,7 @@ async def test_inviting_again_re_sends_a_fresh_link(
 async def test_invitation_rules(client: AsyncClient) -> None:
     owner, org = await practice(client)
     admin = await add_member(org["id"], "admin")
-    nobody = await new_staff(client, owner, org, "No email")
+    nobody = await new_staff(client, owner, org, "No email", email=None)
 
     def url(staff_id: str) -> str:
         return staff_url(org, f"/{staff_id}/invite")
@@ -214,7 +214,7 @@ async def test_link_a_new_account_without_email_and_with_a_chosen_address(
     client: AsyncClient, worker, mailbox: Mailbox
 ) -> None:
     owner, org = await practice(client)
-    person = await new_staff(client, owner, org, "Jane Doe")
+    person = await new_staff(client, owner, org, "Jane Doe", email=None)
     mailbox.clear()
     response = await client.post(
         staff_url(org, f"/{person['id']}/link-login"),
@@ -231,7 +231,7 @@ async def test_link_a_new_account_without_email_and_with_a_chosen_address(
 async def test_link_account_rules(client: AsyncClient) -> None:
     owner, org = await practice(client)
     admin = await add_member(org["id"], "admin")
-    nobody = await new_staff(client, owner, org, "No email")
+    nobody = await new_staff(client, owner, org, "No email", email=None)
 
     async def link(staff_id: str, **body):
         return await client.post(

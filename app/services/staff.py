@@ -238,12 +238,12 @@ class StaffService:
                     "staff_code": code,
                     "grade_id": str(grade.id),
                     "grade_name": grade.name,
-                    "start_date": data.start_date.isoformat(),
+                    "start_date": data.start_date.isoformat() if data.start_date else None,
                 },
             )
             # The person's own rates, in the same transaction: nothing is left half done.
             rates = RateRuleService(self.session)
-            starts = data.rate_effective_from or data.start_date
+            starts = data.rate_effective_from or data.start_date or today_in(org.timezone)
             for kind, rate in (("cost", data.cost_rate), ("charge", data.charge_rate)):
                 if rate is not None:
                     await rates.write_rule(

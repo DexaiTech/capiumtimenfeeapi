@@ -317,7 +317,12 @@ async def test_an_inactive_grade_cannot_be_given_but_those_who_hold_it_keep_it(
     response = await client.post(
         org_url(org, "/staff"),
         headers=owner.headers,
-        json={"full_name": "New", "grade_id": lead["id"], "start_date": "2026-01-05"},
+        json={
+            "full_name": "New",
+            "grade_id": lead["id"],
+            "start_date": "2026-01-05",
+            "email": "new@example.com",
+        },
     )
     assert (
         response.status_code == 422
@@ -444,7 +449,12 @@ async def test_other_practices_grades_are_invisible(client: AsyncClient) -> None
     response = await client.post(
         org_url(org, "/staff"),
         headers=owner.headers,
-        json={"full_name": "X", "grade_id": theirs, "start_date": "2026-01-05"},
+        json={
+            "full_name": "X",
+            "grade_id": theirs,
+            "start_date": "2026-01-05",
+            "email": "x@example.com",
+        },
     )
     assert response.status_code == 422
     # Code and name uniqueness is per practice.

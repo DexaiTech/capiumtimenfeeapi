@@ -63,13 +63,25 @@ async def set_grade(org: dict, user: Actor | str, code: str | None) -> None:
 async def new_staff(
     client: AsyncClient, actor: Actor, org: dict, name: str = "Sam Staff", **body: Any
 ) -> dict:
-    """Create a staff member (no login) through the API; returns ``data``."""
+    """Create a staff member (no login) through the API; returns ``data``.
+
+    ``POST /staff`` needs a work email: without one a unique address is made up. ``email=None``
+    clears it again after creating, for a record without a work email."""
     body.setdefault("grade_id", await grade_id(org))
     body.setdefault("start_date", "2026-01-05")
+    no_email = "email" in body and body["email"] is None
+    if body.get("email") is None:
+        body["email"] = f"staff-{uuid.uuid4().hex[:12]}@example.com"
     response = await client.post(
         org_url(org, "/staff"), headers=actor.headers, json=_plain({"full_name": name, **body})
     )
-    return ok_data(response, 201)
+    created = ok_data(response, 201)
+    if no_email:
+        response = await client.patch(
+            org_url(org, f"/staff/{created['id']}"), headers=actor.headers, json={"email": None}
+        )
+        created = ok_data(response)
+    return created
 
 
 async def new_rate(client: AsyncClient, actor: Actor, org: dict, **body: Any) -> dict:

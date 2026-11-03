@@ -176,7 +176,7 @@ class StaffCreate(RequestModel):
 
     full_name: FullName
     grade_id: uuid.UUID
-    start_date: date
+    start_date: date | None = None
     code: StaffCode | None = Field(default=None, description="Default: the next staff number")
     email: EmailStr | None = Field(default=None, max_length=254, description="Work email")
     approver_id: uuid.UUID | None = Field(
@@ -215,7 +215,7 @@ class StaffCreate(RequestModel):
         ),
     )
     rate_effective_from: date | None = Field(
-        default=None, description="When the rates above start; default `start_date`"
+        default=None, description="When the rates above start; default `start_date`, else today"
     )
 
     _code = field_validator("code")(_staff_code)
@@ -229,9 +229,22 @@ class StaffCreate(RequestModel):
 
     @model_validator(mode="after")
     def _dates(self) -> Self:
-        if self.leaving_date is not None and self.leaving_date < self.start_date:
+        if (
+            self.leaving_date is not None
+            and self.start_date is not None
+            and self.leaving_date < self.start_date
+        ):
             raise ValueError("leaving_date: Must not be before start_date")
         return self
+
+
+class StaffCreateRequest(StaffCreate):
+    """`POST /staff`: the work email is required, as every new person is invited to sign in
+    with it. The CSV import validates its rows with `StaffCreate`, where it stays optional."""
+
+    email: EmailStr = Field(
+        max_length=254, description="Work email; the address they are invited to sign in with"
+    )
 
 
 class StaffUpdate(RequestModel):
