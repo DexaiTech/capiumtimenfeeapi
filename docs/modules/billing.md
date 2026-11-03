@@ -516,6 +516,54 @@ default). Client-facing email templates (category `system`, customisable under S
 * Invoice `status` has three more stored values: anything that meant "not issued yet" by `status = 'draft'` should
   also consider `awaiting_approval` and `approved`.
 
+## Fees billed in advance (APT69)
+
+Some practices bill the year's fees at its start and match the time to that bill as the work is done. An **advance
+invoice** is an ordinary invoice whose manual line is marked `is_advance`; it is issued, sent, paid, credited and voided
+like any other. Code: `app/services/invoice_advances.py`; tests `tests/test_invoice_advances.py`. Migration `074`:
+`invoice_lines.is_advance` (only on `manual` lines, database check) and `wip_allocations.assigned_on`.
+
+| Method | Path | Permission | Purpose |
+|---|---|---|---|
+| POST | `/invoices` | `invoice.create` | `advance: {description, net_amount > 0, vat_rate_id?, service_id?, job_id?}` adds the advance line; the draft may bill no WIP. |
+| POST | `/invoices/{id}/lines` | `invoice.create` | `is_advance: true` marks a manual line of a draft as an advance (net > 0, else 422 `ADVANCE_NOT_POSITIVE`; also on `PATCH`). |
+| POST | `/invoices/{id}/lines/{line_id}/assign` | `invoice.create` | `{time_entry_ids, disbursement_ids}` (at least one): bill that WIP against the advance line. Returns the invoice detail. |
+| POST | `/invoices/{id}/lines/{line_id}/unassign` | `invoice.create` | Same body: take items off the advance line, back to WIP. Returns the invoice detail. |
+
+Every line of the detail has `is_advance`; an advance line also has `advance: {amount, used, remaining, wip_value,
+written_off, items[]{kind, id, date, person, description, minutes, hours, wip_value, billed_value, assigned_on}}`.
+
+**Assigning** works on an **issued** invoice only (409 `INVOICE_NOT_ISSUED`) and on its advance line (409
+`NOT_AN_ADVANCE`). The items follow the drafting rules (`lock_wip_items`: the client's, billable, `unbilled`, on an
+approved timesheet when the practice requires it: 422 `CLIENT_MISMATCH`, 409 `WIP_NOT_AVAILABLE`); time on a
+fixed-fee job is refused too (reason `fixed_fee_job`: it is billed through its fixed fee). Each item gets a WIP
+allocation on the advance line with `assigned_on` = today and becomes `billed`. **The invoice does not change**: lines,
+totals, VAT, balance, number and PDF stay as issued (the `detailed` PDF layout does not list assigned work). The advance
+is used **oldest work first** (item date, time before disbursements): an item's `billed_value` is its WIP value while
+the advance lasts, the item that crosses the end bills what is left, later items bill 0. The difference is a
+**write-off** of those items (`billed_value - wip_value < 0`), as for time on a fixed fee that is already billed; it
+shows in "Billed from WIP" and in every report that reads allocations. `remaining = amount - used`; credit notes do not
+change it. **Unused advance** stays billed: nothing happens to it at the year end.
+
+**Un-assigning** deletes the allocations (as removing a draft line does) and the items are `unbilled` again (409
+`NOT_ASSIGNED` for an item that is not on the line). Voiding the advance invoice returns all its assigned work to WIP,
+as for any invoice; a credit note's `return` to WIP treats assigned work like the items of any line.
+
+Both run under the invoice row lock, then the items (the global order), check the WIP period lock for today (to
+un-assign, also for the days the items were assigned; 409 `PERIOD_LOCKED`) and are audited: `invoice.time_assigned`
+and `invoice.time_unassigned` (target the invoice; meta: number, client, line, advance, the item ids, `item_count`,
+`wip_value`, `billed_value`, `written_off` (assign) and `remaining`). Work dated in a locked period can be assigned,
+as it can be invoiced. **WIP as at a day** (the WIP reports) counts assigned work as WIP until `assigned_on`, not until
+the invoice's issue date.
+
+Worked example: in April the practice bills Widgets Ltd "Fees in advance 2026/27", net £6,000.00 + VAT £1,200.00 =
+£7,200.00, issued as INV-00010 and paid. By July Grace has logged 10 hours at £150.00 an hour (WIP £1,500.00). On
+the invoice, "Assign time" picks the three entries: they become `billed` against INV-00010, leave WIP (the client's
+WIP drops by £1,500.00) and show under "Billed from WIP" (WIP £1,500.00, billed £1,500.00, no write-off). INV-00010
+still reads £7,200.00 and owes nothing; `advance` is `{amount: 600000, used: 150000, remaining: 450000, written_off:
+0}`. Had £6,500.00 of work been assigned by the year end, the last items would bill only the £6,000.00 left in total
+and `written_off` would be 50000; had only £5,000.00 been assigned, £1,000.00 of the advance would simply stay unused.
+
 ## Estimates and recurring invoices
 
 Both sit next to invoices and never touch WIP. Permissions: `estimate.read` / `estimate.manage` and

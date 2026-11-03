@@ -90,6 +90,7 @@ from app.services.billing_common import (
 from app.services.common import record_audit_many
 from app.services.email import Attachment, EmailService
 from app.services.email_templates import load_override
+from app.services.invoice_advances import advance_reads
 from app.services.policy import OrgContext
 from app.services.sequences import next_number
 from app.services.wip import LockedItems, lock_items, lock_wip_items, set_items_status
@@ -100,6 +101,7 @@ from app.utils.pagination import PageParams
 SEND_JOB = "send_invoice_email"
 MAX_DESCRIPTION = 1000
 WIP_KINDS = frozenset({"time", "fixed_fee", "disbursement"})
+ADVANCE_NOT_POSITIVE = "Fees billed in advance must be more than zero."
 
 
 class InvoiceEmailError(Exception):
@@ -418,6 +420,7 @@ class InvoiceService:
         for allocation in allocations:
             if allocation.invoice_line_id:
                 by_line[allocation.invoice_line_id].append(allocation)
+        advances = await advance_reads(self.session, org_id, lines, allocations)
         line_reads = []
         for line in lines:
             mine = by_line.get(line.id, [])
@@ -433,7 +436,7 @@ class InvoiceService:
                     billed_value=billed,
                     adjustment=billed - wip_value,
                 )
-            line_reads.append(LineRead.from_model(line, wip))
+            line_reads.append(LineRead.from_model(line, wip, advances.get(line.id)))
         wip_total = sum(a.wip_value for a in allocations)
         billed_total = sum(a.billed_value for a in allocations)
         payments = await self.invoices.payment_allocations(org_id, invoice.id)
@@ -540,6 +543,22 @@ class InvoiceService:
             )
             planned = await self._plan(ctx, items, data)
             await self._write_lines(ctx, invoice, client, planned, start_position=1)
+            if data.advance is not None:
+                advance = data.advance
+                line = await self._manual_line(
+                    ctx,
+                    invoice,
+                    client,
+                    LineCreate(
+                        description=advance.description,
+                        unit_amount=advance.net_amount,
+                        vat_rate_id=advance.vat_rate_id,
+                        service_id=advance.service_id,
+                        job_id=advance.job_id,
+                        is_advance=True,
+                    ),
+                )
+                await self.invoices.add_lines([line])
             set_items_status(items, "in_draft")
             await self._recompute(invoice)
             await record(
@@ -555,6 +574,7 @@ class InvoiceService:
                     wip_value=items.wip_value,
                     item_count=items.count,
                     **({"valuation_basis": data.valuation_basis} if data.valuation_basis else {}),
+                    **({"advance": data.advance.net_amount} if data.advance else {}),
                 ),
             )
             detail = await self._detail(ctx, invoice)
@@ -652,46 +672,7 @@ class InvoiceService:
         async with unit_of_work(self.session):
             invoice = await self._locked_draft(ctx, invoice_id)
             client = await get_client_or_404(self.refs, ctx.organization_id, invoice.client_id)
-            if data.job_id is not None:
-                job = await self.refs.get_job(ctx.organization_id, data.job_id)
-                if job is None or job.client_id != client.id:
-                    raise ValidationError.for_field(
-                        "job_id", "The job must be one of the client's jobs."
-                    )
-            if data.service_id is not None:
-                service = await self.refs.get_service(ctx.organization_id, data.service_id)
-                if service is None:
-                    raise ValidationError.for_field("service_id", "This service does not exist.")
-            net = (
-                data.net_amount
-                if data.net_amount is not None
-                else line_net(data.quantity, data.unit_amount)
-            )
-            rate_id, rate_bp = await VatResolver(self.refs, ctx.organization).resolve(
-                client=client,
-                line_rate_id=data.vat_rate_id,
-                service_id=data.service_id,
-                validate_line_rate=True,
-            )
-            position = data.position or (
-                await self.invoices.max_position(ctx.organization_id, invoice.id) + 1
-            )
-            line = InvoiceLine(
-                id=new_id(),
-                organization_id=ctx.organization_id,
-                invoice_id=invoice.id,
-                position=position,
-                kind="manual",
-                description=data.description,
-                job_id=data.job_id,
-                service_id=data.service_id,
-                quantity=data.quantity,
-                unit_amount=data.unit_amount,
-                net_amount=net,
-                vat_rate_id=rate_id,
-                vat_rate_bp=rate_bp,
-                vat_amount=vat_on(net, rate_bp),
-            )
+            line = await self._manual_line(ctx, invoice, client, data)
             await self.invoices.add_lines([line])
             await self._recompute(invoice)
             await record(
@@ -744,6 +725,8 @@ class InvoiceService:
                     "net_amount",
                     "A line that bills WIP cannot be negative; add a discount line instead.",
                 )
+            if line.is_advance and line.net_amount <= 0:
+                raise invalid("ADVANCE_NOT_POSITIVE", "net_amount", ADVANCE_NOT_POSITIVE)
             if "vat_rate_id" in fields:
                 line.vat_rate_id, line.vat_rate_bp = await VatResolver(
                     self.refs, ctx.organization
@@ -1273,6 +1256,54 @@ class InvoiceService:
         apply_overrides(planned, data.overrides)
         return planned
 
+    async def _manual_line(
+        self, ctx: OrgContext, invoice: Invoice, client: Client, data: LineCreate
+    ) -> InvoiceLine:
+        """A line that bills no WIP (``kind=manual``), not saved yet; an advance when asked."""
+        if data.job_id is not None:
+            job = await self.refs.get_job(ctx.organization_id, data.job_id)
+            if job is None or job.client_id != client.id:
+                raise ValidationError.for_field(
+                    "job_id", "The job must be one of the client's jobs."
+                )
+        if data.service_id is not None:
+            service = await self.refs.get_service(ctx.organization_id, data.service_id)
+            if service is None:
+                raise ValidationError.for_field("service_id", "This service does not exist.")
+        net = (
+            data.net_amount
+            if data.net_amount is not None
+            else line_net(data.quantity, data.unit_amount)
+        )
+        if data.is_advance and net <= 0:
+            raise invalid("ADVANCE_NOT_POSITIVE", "unit_amount", ADVANCE_NOT_POSITIVE)
+        rate_id, rate_bp = await VatResolver(self.refs, ctx.organization).resolve(
+            client=client,
+            line_rate_id=data.vat_rate_id,
+            service_id=data.service_id,
+            validate_line_rate=True,
+        )
+        position = data.position or (
+            await self.invoices.max_position(ctx.organization_id, invoice.id) + 1
+        )
+        return InvoiceLine(
+            id=new_id(),
+            organization_id=ctx.organization_id,
+            invoice_id=invoice.id,
+            position=position,
+            kind="manual",
+            description=data.description,
+            job_id=data.job_id,
+            service_id=data.service_id,
+            quantity=data.quantity,
+            unit_amount=data.unit_amount,
+            net_amount=net,
+            vat_rate_id=rate_id,
+            vat_rate_bp=rate_bp,
+            vat_amount=vat_on(net, rate_bp),
+            is_advance=data.is_advance,
+        )
+
     def _allocations(
         self, ctx: OrgContext, invoice: Invoice, line_id: uuid.UUID, line: _PlannedLine
     ) -> list[WipAllocation]:
@@ -1471,6 +1502,9 @@ async def render_invoice_pdf(
     names = None
     if template.layout == "detailed":
         details = await document_templates.line_details(session, organization.id, invoice.id)
+        # Work assigned to fees billed in advance later is not part of the issued document.
+        advances = {line.id for line in lines if line.is_advance}
+        details = {k: v for k, v in details.items() if k not in advances}
     elif template.layout == "summary":
         names = await document_templates.job_names(session, organization.id, lines)
     return invoice_pdf.render_invoice(

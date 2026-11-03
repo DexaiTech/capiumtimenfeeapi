@@ -116,6 +116,8 @@ Status life cycle of an item (all three kinds): `unbilled → in_draft` (allocat
 | Invoice voided | `reversed_at` set | `billed → unbilled` |
 | **Credit note returned to WIP** (`POST /credit-notes/{id}/wip`, owned by WIP, billing does nothing) | `reversed_at` set for the items returned | `billed → unbilled` |
 | WIP write-off (`POST /wip/write-offs`) | a row with `write_off_id` | `unbilled → written_off` |
+| **Assigned to fees billed in advance** (`POST /invoices/{id}/lines/{line_id}/assign`, docs/modules/billing.md) | a row on the advance line of an issued invoice, `assigned_on` set | `unbilled → billed` |
+| Taken off the advance (`.../unassign`) | deleted | `billed → unbilled` |
 
 A credit-note return leaves the **invoice `issued`** (it keeps its lines, credit notes and payments): code that lists `allocations_for_invoice` must not assume that a reversed allocation means a void invoice. A reversed item can be billed again: a new allocation is created next to the reversed one.
 

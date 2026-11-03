@@ -12,6 +12,7 @@ from app.repositories.invoices import InvoiceFilters
 from app.schemas.bulk import BulkChangeResult
 from app.schemas.common import ApiResponse, error_responses, ok, ok_page
 from app.schemas.invoices import (
+    AdvanceAssign,
     DisplayStatus,
     InvoiceAddWip,
     InvoiceApprove,
@@ -30,6 +31,7 @@ from app.schemas.invoices import (
     LineCreate,
     LineUpdate,
 )
+from app.services.invoice_advances import AdvanceService
 from app.services.invoices import InvoiceService
 from app.services.policy import OrgContext
 
@@ -41,6 +43,13 @@ def get_invoice_service(session: SessionDep) -> InvoiceService:
 
 
 InvoiceServiceDep = Annotated[InvoiceService, Depends(get_invoice_service)]
+
+
+def get_advance_service(session: SessionDep) -> AdvanceService:
+    return AdvanceService(session)
+
+
+AdvanceServiceDep = Annotated[AdvanceService, Depends(get_advance_service)]
 Reader = Annotated[OrgContext, Depends(require("invoice.read"))]
 Drafter = Annotated[OrgContext, Depends(require("invoice.create"))]
 Issuer = Annotated[OrgContext, Depends(require("invoice.issue"))]
@@ -135,7 +144,8 @@ async def invoice_summary(
         "(`entry`) or one line (`single`); time on fixed-fee jobs always becomes one "
         "`fixed_fee` line per job at the fee; each disbursement its own line. `overrides` "
         "change a line's bill amount, description or VAT rate; the bill amount is "
-        "apportioned over the line's items by WIP value. Items move to `in_draft`. "
+        "apportioned over the line's items by WIP value. Items move to `in_draft`. `advance` "
+        "adds a line of fees billed in advance (the draft may then bill no WIP). "
         "Requires `invoice.create`."
     ),
     responses=error_responses(403, 404, 409),
@@ -232,8 +242,9 @@ async def delete_invoice(
         "A line that bills no WIP (`kind=manual`): net = round(quantity x unit amount) "
         "unless `net_amount` is given; negative for a discount. VAT: the line's rate, else "
         "the client's default, else the service's, else the practice default. The invoice "
-        "total may not go below zero (422 `INVOICE_TOTAL_NEGATIVE`). Drafts only. "
-        "Requires `invoice.create`."
+        "total may not go below zero (422 `INVOICE_TOTAL_NEGATIVE`). `is_advance` marks fees "
+        "billed in advance, to which time is assigned once the invoice is issued (its net must "
+        "be more than zero: 422 `ADVANCE_NOT_POSITIVE`). Drafts only. Requires `invoice.create`."
     ),
     responses=error_responses(403, 404, 409),
 )
@@ -305,6 +316,59 @@ async def add_wip(
     ctx: ContextDep,
 ) -> ApiResponse[InvoiceRead]:
     return ok(await service.add_wip(org, invoice_id, body, ctx), "WIP added")
+
+
+@router.post(
+    "/invoices/{invoice_id}/lines/{line_id}/assign",
+    summary="Assign time to fees billed in advance",
+    description=(
+        "Bills unbilled WIP of the invoice's client (time entries and disbursements, by the "
+        "drafting rules: 422 `CLIENT_MISMATCH`, 409 `WIP_NOT_AVAILABLE`; time on a fixed-fee "
+        "job is refused with the reason `fixed_fee_job`) against an advance line "
+        "(`is_advance`, else 409 `NOT_AN_ADVANCE`) of an issued invoice (else 409 "
+        "`INVOICE_NOT_ISSUED`). The items get allocations on the line, dated today, and become "
+        "`billed`; the invoice and its totals do not change. The advance is used oldest work "
+        "first: an item bills its WIP value while the advance lasts, the rest of the value of "
+        "the work beyond it is written off. The WIP period lock applies to today. Audited "
+        "(`invoice.time_assigned`). Requires `invoice.create`."
+    ),
+    responses=error_responses(403, 404, 409),
+)
+async def assign_to_advance(
+    invoice_id: uuid.UUID,
+    line_id: uuid.UUID,
+    body: AdvanceAssign,
+    org: Drafter,
+    advances: AdvanceServiceDep,
+    service: InvoiceServiceDep,
+    ctx: ContextDep,
+) -> ApiResponse[InvoiceRead]:
+    await advances.assign(org, invoice_id, line_id, body, ctx)
+    return ok(await service.get(org, invoice_id), "Time assigned")
+
+
+@router.post(
+    "/invoices/{invoice_id}/lines/{line_id}/unassign",
+    summary="Take time off fees billed in advance",
+    description=(
+        "Takes items assigned to an advance line off it again: their allocations are deleted "
+        "and they are unbilled WIP once more (409 `NOT_ASSIGNED` for an item that is not on "
+        "the line). The WIP period lock applies to today and to the days they were assigned. "
+        "Audited (`invoice.time_unassigned`). Requires `invoice.create`."
+    ),
+    responses=error_responses(403, 404, 409),
+)
+async def unassign_from_advance(
+    invoice_id: uuid.UUID,
+    line_id: uuid.UUID,
+    body: AdvanceAssign,
+    org: Drafter,
+    advances: AdvanceServiceDep,
+    service: InvoiceServiceDep,
+    ctx: ContextDep,
+) -> ApiResponse[InvoiceRead]:
+    await advances.unassign(org, invoice_id, line_id, body, ctx)
+    return ok(await service.get(org, invoice_id), "Time taken off the advance")
 
 
 @router.post(
