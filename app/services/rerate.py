@@ -339,6 +339,44 @@ class RerateService:
             run, ctx.user.full_name, show_cost=policy.has_permission(ctx, "rate.read")
         )
 
+    async def impact(
+        self, ctx: OrgContext, scope: RerateScope | None
+    ) -> tuple[RerateTotals, RerateSkipped]:
+        """What re-rating the scope (None: no time at all) would do as the rates stand in the
+        caller's transaction. Nothing is written."""
+        if scope is None:
+            plan = Plan([], dict.fromkeys(RerateSkipped.model_fields, 0), "")
+        else:
+            plan = await self._plan(ctx, scope, lock=False)
+        show_cost = policy.has_permission(ctx, "rate.read")
+        return self._totals(plan, show_cost=show_cost), RerateSkipped(**plan.skipped)
+
+    async def apply_confirmed(
+        self,
+        ctx: OrgContext,
+        rctx: RequestContext,
+        scope: RerateScope,
+        *,
+        note: str,
+        audit_meta: dict[str, Any],
+    ) -> RateRerun | None:
+        """Re-rate the scope inside the caller's unit of work for a rate change the caller has
+        confirmed (no preview token). A run is recorded only when the scope has time to change
+        or to report as skipped."""
+        plan = await self._plan(ctx, scope, lock=True)
+        if not plan.changed and not plan.skipped_total:
+            return None
+        return await self._persist(
+            ctx,
+            rctx,
+            plan,
+            scope,
+            source="rerate",
+            note=note,
+            audit_action="rate.rerun",
+            audit_meta={"scope": scope_json(scope), "note": note, **audit_meta},
+        )
+
     async def revalue(
         self, ctx: OrgContext, data: RevalueRequest, rctx: RequestContext
     ) -> RevalueResult:

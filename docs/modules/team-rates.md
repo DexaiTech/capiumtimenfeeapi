@@ -50,6 +50,7 @@ schema is `/openapi.json`; every route there has a summary, a description and it
 | POST | `/grades/{grade_id}/activate` · `/deactivate` | `rate.manage` |
 | GET | `/rates` | `rate.read` |
 | POST | `/rates` | `rate.manage` |
+| POST | `/rates/impact` | `rate.manage` |
 | GET | `/rates/{rule_id}` | `rate.read` |
 | PATCH | `/rates/{rule_id}` | `rate.manage` |
 | DELETE | `/rates/{rule_id}` | `rate.manage` |
@@ -422,6 +423,14 @@ changes for time that is not marked, or while the setting is off.
 * `close_previous: true` on create ends the earlier open-ended rule of the same scope the day before the new
   one starts. It only applies when that is a plain shortening (one earlier rule that started before the new
   period); otherwise 409 `RATE_OVERLAP`.
+* **Backdated rate changes** (`confirm_impact: true` on create, after `POST /rates/impact`): the new rule is
+  placed between the scope's rules like a V1 staff rate. The rule running into it ends the day before it
+  starts; the new rule ends the day before the next rule of the scope starts (that rule and every later one
+  stay as they are). Example: £40 from 01/04/2025 to 25/10/2026 and £60 from 26/10/2026; adding £50 from
+  01/04/2026 ends the £40 on 31/03/2026 and saves the £50 for 01/04/2026 – 25/10/2026. In the same
+  transaction the unbilled time of the new rule's period is re-priced (a re-rate run, below): for its person
+  (or its grade's people) and/or its client. Still 409 `RATE_OVERLAP` when a rule of the scope starts the
+  same day (change that rule instead) or a bounded period sits inside a longer rule (it would split it).
 * A rule is **used** (`is_used`) once any time entry falls inside its scope and period (a rule that *could*
   have priced an entry counts: its empty dimensions match anything). A used rule cannot be deleted
   (409 `RATE_IN_USE`), but its start day, **end date** (`effective_to`) and amount can change; entries
@@ -458,9 +467,34 @@ Permission `rate.manage`. Body:
 | `effective_from` | date | Required. |
 | `effective_to` | date or null | Default null (open-ended). |
 | `close_previous` | bool, default false | See Period rules. |
+| `confirm_impact` | bool, default false | The caller confirmed what `POST /rates/impact` showed: place the rule between the scope's rules and re-price the unbilled time of its period (see Period rules). |
 
 Response 201 `RateRuleRead`. 409 `RATE_OVERLAP`, `MEMBER_REMOVED`; 422 `invalid_scope`, `invalid_kind`. Without
-`rate.read` (a custom role with `rate.manage` only) a cost rule is returned with `rate: null`.
+`rate.read` (a custom role with `rate.manage` only) a cost rule is returned with `rate: null`. With
+`confirm_impact` the message says how many entries were re-priced.
+
+Audit and history of a confirmed change: `rate.created` (the new rule) and `rate.updated` (the end date of the
+rule it ended) with their `rate_changes` rows (`created`, `end_dated`), and `rate.rerun` (target the re-rate
+run, `metadata.rate_rule_id` = the new rule) with the run and its items. The run (source `rerate`, note
+"Re-priced for the new cost rate from 01/04/2026") is listed under `GET /rates/reruns`; none is written when
+the period has no time.
+
+## POST /rates/impact
+
+Permission `rate.manage`. Nothing changes (it is worked out in a savepoint that is rolled back). Body: the
+body of `POST /rates`. Response `RateImpact`:
+
+| Field | Meaning |
+|---|---|
+| `effective_from`, `effective_to` | The new rule's period as `confirm_impact` would save it. |
+| `ends` | The rule running into it, `{id, rate, effective_from, effective_to, new_effective_to}`, or null. |
+| `stops_at` | The later rule that stays and cuts the new period short (same shape), or null. |
+| `reprice` | `RerateTotals` of re-pricing the unbilled time of the new period (cost values null without `rate.read`). |
+| `skipped` | `RerateSkipped`: billed, in-draft, written-off and period-locked time in the period, left alone. |
+| `needs_confirmation` | True when the rule is cut short, re-prices time, or ends a running rule without `close_previous`. |
+
+409 `RATE_OVERLAP` when the rule cannot be placed (see Period rules). The Staff page's rate panel asks for this
+first and shows a confirmation pop-up when `needs_confirmation` is true.
 
 ## GET /rates/{rule_id}, PATCH, DELETE
 
@@ -526,7 +560,8 @@ have no history rows.
 
 # Re-rating unbilled time
 
-Changing a rate never touches recorded time. Re-rating re-takes the charge-out and cost rate of **unbilled**
+Changing a rate never touches recorded time (except a confirmed backdated rate, which re-prices its period
+through the same engine without a token: see Period rules). Re-rating re-takes the charge-out and cost rate of **unbilled**
 entries from the ladder as it is now, in two steps:
 
 1. `POST /rates/rerate/preview`: nothing changes. Returns every affected entry with old and new rate and

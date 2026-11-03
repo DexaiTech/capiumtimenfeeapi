@@ -13,6 +13,10 @@ Rules (docs/domain.md, "Rates"):
   now, so nobody has to enter the time again). The one exception is a missing cost: a cost rule
   for a person or a grade fills in the cost of their unbilled time recorded with none
   (``app/services/time_costs.py``).
+* A backdated rate is added with ``confirm_impact`` after ``POST /rates/impact`` has shown what it
+  does: it is placed between the scope's rules (the rule running into it ends the day before, it
+  ends the day before the next rule starts) and the unbilled time of its period is re-priced by
+  the re-rating engine (``app/services/rerate.py``) in the same transaction.
 * Every create, change, end-date and delete is appended to ``rate_changes`` (the history) and
   to the audit log in the same transaction.
 """
@@ -26,9 +30,10 @@ from asyncpg.exceptions import ExclusionViolationError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.core.context import RequestContext
 from app.core.exceptions import ConflictError, NotFoundError, ValidationError
-from app.db.models import RateChange, RateRule
+from app.db.models import RateChange, RateRerun, RateRule
 from app.db.models.organization import GONE_STATUSES
 from app.db.session import unit_of_work
 from app.repositories.clients import ClientRepository
@@ -44,9 +49,16 @@ from app.repositories.rate_rules import (
     scope_of,
 )
 from app.repositories.settings import ServiceRepository
-from app.schemas.rate_rules import RateRuleCreate, RateRuleUpdate
+from app.schemas.rate_rules import (
+    ImpactRule,
+    RateImpact,
+    RateRuleCreate,
+    RateRuleUpdate,
+    RerateScope,
+)
 from app.services import audit, policy, time_costs
 from app.services.policy import OrgContext
+from app.services.rerate import RerateService
 from app.utils.pagination import Page, PageParams
 from app.utils.practice_dates import end_of_day_utc, start_of_day_utc, today_in
 
@@ -103,6 +115,21 @@ def _closable(overlaps: list[RateRule], start: date, end: date | None) -> bool:
     if other.effective_to is None:
         return end is None
     return end is None or other.effective_to <= end
+
+
+def _impact_rule(rule: RateRule, new_end: date | None, *, mask: bool) -> ImpactRule:
+    return ImpactRule(
+        id=rule.id,
+        rate=None if mask else rule.rate,
+        effective_from=rule.effective_from,
+        effective_to=rule.effective_to,
+        new_effective_to=new_end,
+    )
+
+
+def _rerate_note(rule: RateRule) -> str:
+    label = "cost" if rule.kind == "cost" else "charge-out"
+    return f"Re-priced for the new {label} rate from {rule.effective_from:%d/%m/%Y}"
 
 
 def rule_meta(view: RuleView) -> dict[str, Any]:
@@ -185,28 +212,80 @@ class RateRuleService:
 
     # --- Writes (the V2 endpoints) ------------------------------------------------------------
 
-    async def create(self, ctx: OrgContext, data: RateRuleCreate, rctx: RequestContext) -> RuleView:
+    async def create(
+        self, ctx: OrgContext, data: RateRuleCreate, rctx: RequestContext
+    ) -> tuple[RuleView, RateRerun | None]:
+        """Add a rule. With ``confirm_impact`` it is placed between the scope's rules and the
+        unbilled time of its period is re-priced (the re-rate run is returned)."""
         scope = Scope(data.client_id, data.service_id, data.user_id, data.grade_id)
+        run: RateRerun | None = None
         try:
             async with unit_of_work(self.session):
-                rule = await self.write_rule(
-                    ctx,
-                    rctx,
-                    kind=data.kind,
-                    scope=scope,
-                    rate=data.rate,
-                    start=data.effective_from,
-                    end=data.effective_to,
-                    close_previous=data.close_previous,
-                    audit_action="rate.created",
-                )
+                if data.confirm_impact:
+                    rule, _, _ = await self._place(ctx, rctx, data)
+                    rerate_scope = await self._rerate_scope(ctx, rule)
+                    if rerate_scope is not None:
+                        run = await RerateService(self.session, get_settings()).apply_confirmed(
+                            ctx,
+                            rctx,
+                            rerate_scope,
+                            note=_rerate_note(rule),
+                            audit_meta={"rate_rule_id": str(rule.id)},
+                        )
+                else:
+                    rule = await self.write_rule(
+                        ctx,
+                        rctx,
+                        kind=data.kind,
+                        scope=scope,
+                        rate=data.rate,
+                        start=data.effective_from,
+                        end=data.effective_to,
+                        close_previous=data.close_previous,
+                        audit_action="rate.created",
+                    )
                 view = await self.rules.view(ctx.organization_id, rule.id)
         except IntegrityError as exc:
             if is_exclusion_violation(exc):
                 raise overlap_error() from exc
             raise
         assert view is not None
-        return view
+        return view, run
+
+    async def impact(
+        self, ctx: OrgContext, data: RateRuleCreate, rctx: RequestContext
+    ) -> RateImpact:
+        """What ``create`` with ``confirm_impact`` would do. It is done in a savepoint that is
+        rolled back, so the re-pricing is worked out from the rates as they would be and
+        nothing changes."""
+        try:
+            async with unit_of_work(self.session):
+                savepoint = await self.session.begin_nested()
+                try:
+                    rule, ends, stops_at = await self._place(ctx, rctx, data)
+                    rerate_scope = await self._rerate_scope(ctx, rule)
+                    totals, skipped = await RerateService(self.session, get_settings()).impact(
+                        ctx, rerate_scope
+                    )
+                    impact = RateImpact(
+                        effective_from=rule.effective_from,
+                        effective_to=rule.effective_to,
+                        ends=ends,
+                        stops_at=stops_at,
+                        reprice=totals,
+                        skipped=skipped,
+                        needs_confirmation=stops_at is not None
+                        or totals.entries_to_change > 0
+                        or (ends is not None and not data.close_previous),
+                    )
+                finally:
+                    if savepoint.is_active:
+                        await savepoint.rollback()
+        except IntegrityError as exc:
+            if is_exclusion_violation(exc):
+                raise overlap_error() from exc
+            raise
+        return impact
 
     async def update(
         self, ctx: OrgContext, rule_id: uuid.UUID, data: RateRuleUpdate, rctx: RequestContext
@@ -451,6 +530,60 @@ class RateRuleService:
         )
 
     # --- Internals ------------------------------------------------------------------------
+    async def _place(
+        self, ctx: OrgContext, rctx: RequestContext, data: RateRuleCreate
+    ) -> tuple[RateRule, ImpactRule | None, ImpactRule | None]:
+        """Add the rule between the scope's rules inside the caller's transaction: the rule
+        running into it ends the day before it starts, and it ends the day before the next rule
+        starts (the V1 staff-rate timeline). Still 409 ``RATE_OVERLAP`` for a rule that starts
+        the same day, or a bounded period inside a longer rule (that would split it).
+
+        Returns the rule, the rule it ended and the later rule it stops at (as they were)."""
+        org_id = ctx.organization_id
+        scope = Scope(data.client_id, data.service_id, data.user_id, data.grade_id)
+        mask = data.kind == "cost" and not self.can_see_costs(ctx)
+        start, end = data.effective_from, data.effective_to
+        await self.rules.lock_scope(org_id, data.kind, scope)
+        stops_at = None
+        following = await self.rules.following(org_id, data.kind, scope, start)
+        if following is not None and (end is None or end >= following.effective_from):
+            end = following.effective_from - timedelta(days=1)
+            stops_at = _impact_rule(following, following.effective_to, mask=mask)
+        ends = None
+        earlier = await self.rules.previous(org_id, data.kind, scope, start)
+        if earlier is not None and (earlier.effective_to is None or earlier.effective_to >= start):
+            ends = _impact_rule(earlier, start - timedelta(days=1), mask=mask)
+        rule = await self.write_rule(
+            ctx,
+            rctx,
+            kind=data.kind,
+            scope=scope,
+            rate=data.rate,
+            start=start,
+            end=end,
+            close_previous=True,
+            audit_action="rate.created",
+        )
+        return rule, ends, stops_at
+
+    async def _rerate_scope(self, ctx: OrgContext, rule: RateRule) -> RerateScope | None:
+        """The unbilled time the rule can price: its person (or its grade's people) and/or its
+        client, in its period. None when no one is in the grade."""
+        users = [rule.user_id] if rule.user_id else []
+        if rule.grade_id is not None:
+            users = await time_costs.grade_members(self.session, ctx.organization_id, rule.grade_id)
+            if not users:
+                return None
+        # Not validated: the period may be open-ended (no date_to) and a grade may have more
+        # people than a requested scope allows.
+        return RerateScope.model_construct(
+            client_ids=[rule.client_id] if rule.client_id else [],
+            job_ids=[],
+            user_ids=users,
+            date_from=rule.effective_from,
+            date_to=rule.effective_to,
+        )
+
     async def _log(
         self,
         ctx: OrgContext,
