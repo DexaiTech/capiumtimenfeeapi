@@ -258,7 +258,8 @@ active engagements, deadline counts) regardless of page size (tested).
   (CSV injection). Columns: code, name, client_type, status, company_number, segment,
   health_score, contact_name, contact_email, email, phone, deadline_status, overdue_jobs,
   overdue_days, next_due_date, aml_status, accounting_software, services, last_activity_at,
-  created_at.
+  created_at. Without `segment` when the practice has switched client segments off
+  (`client_segments_enabled`, ticket APT70, `docs/modules/foundation.md`).
 
 ## Import
 

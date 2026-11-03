@@ -105,7 +105,7 @@ target is looked up, so a caller without the permission gets 403 for any id.
 | `time_increment_minutes` | one of 1, 5, 6, 10, 15, 30, 60 (a new practice starts with 6, tenths of an hour) |
 | `fixed_fee_wip_mode` | `on_completion` or `by_budget_progress` |
 | `wip_adjustment_approval_threshold`, `receipt_required_threshold`, `invoice_approval_threshold` | integer pence, 0–100 000 000 (a fraction, a negative number or more is 422 on that field) |
-| `invoice_approval_required`, `expense_approval_required`, `wip_adjustment_approval_required` | booleans |
+| `invoice_approval_required`, `expense_approval_required`, `wip_adjustment_approval_required`, `client_segments_enabled` | booleans |
 | `mileage_rate` | integer pence per mile, 0–1000 |
 | `expense_markup_bp` | integer basis points, 0–100 000 (1000 = 10%) |
 | `cost_plus_markup_bp` | integer basis points, 0–100 000 (5000 = 50%) |
@@ -137,6 +137,7 @@ their own `time_increment_minutes`):
 | `cost_plus_markup_bp` | 5 000 (50%) | The margin on cost of the "cost plus" basis of the recovery analysis (`docs/modules/reports.md`), unless the client or the job has its own |
 | `recovery_rate_order` | `client_job`, `task`, `staff` | The order in which the recovery analysis looks for the rate the work could have been billed at |
 | `rate_mode` | `staff_first` | `grade_only` skips the staff-level rate when time is priced (`docs/domain.md`, "Rates") |
+| `client_segments_enabled` | true | Whether the practice uses client segments (see [Client segments switch](#client-segments-switch)) |
 
 Out-of-range values are 422 `VALIDATION_ERROR` with the setting in `details[0].field` (a
 threshold of -1 or 100 000 001, a `mileage_rate` of 1001, an `expense_markup_bp` of 100 001, a
@@ -181,6 +182,27 @@ Migration `067` adds `expense_approval_required` and `wip_adjustment_approval_re
 on), and marks every sheet of a practice that already had timesheet approval off as
 `approval_exempt`; sheets such a practice had waiting are left for its approvers. Tests:
 `tests/test_approval_switches.py`.
+
+### Client segments switch
+
+Ticket APT70: a practice that does not group its clients into segments switches them off with
+`client_segments_enabled` (default true, so nothing changes until it is switched off), on the
+Settings → Client Segments page (`PATCH /organizations/{id}`, `organization.update`, audited as
+`organization.updated` like every setting).
+
+Off, the UI hides segments wherever they appear: the clients table column (and the column
+chooser), the card view, the Segment filter and the "By segment" analytics, the "Set segment" bulk
+action and the selected-clients CSV, the Segment field of the client form, the segment badges of
+the client header and overview, and the "Client segments" card of a staff member. A segment
+filter carried in a saved filter set or a `?segment=` link is ignored. The client export
+(`GET /clients/export`) leaves the `segment` column out.
+
+Nothing is deleted: the segments, the staff linked to them and every client's value are kept,
+the API keeps reading and accepting them (the segment endpoints, the client fields, the list's
+`segment` filter, the import's `segment` column), and switching segments on again brings them all
+back. Staff linked to segments ("the segments they look after") is informational: it never limits
+which clients someone can see, so switching segments off changes no one's access. Migration `075`
+adds the column. Tests: `tests/test_client_segments_switch.py`.
 
 `MemberRead`:
 

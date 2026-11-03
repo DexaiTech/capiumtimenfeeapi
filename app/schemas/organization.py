@@ -132,6 +132,12 @@ class OrganizationRead(BaseModel):
         "or the job has its own"
     )
     recovery_rate_order: list[RecoveryRate] = Field(description=_RATE_ORDER)
+    client_segments_enabled: bool = Field(
+        description=(
+            "Whether the practice uses client segments; off, the UI hides them everywhere and the "
+            "client export leaves the column out (the segments and the clients' values are kept)"
+        )
+    )
     email: str | None = Field(description="Practice contact email")
     phone: str | None = Field(description="Practice phone number")
     address_line1: str | None = Field(description="Address line 1")
@@ -184,6 +190,7 @@ class OrganizationRead(BaseModel):
             overtime_multiplier_bp=organization.overtime_multiplier_bp,
             cost_plus_markup_bp=organization.cost_plus_markup_bp,
             recovery_rate_order=organization.recovery_rate_order,
+            client_segments_enabled=organization.client_segments_enabled,
             email=organization.email,
             phone=organization.phone,
             address_line1=organization.address_line1,
@@ -493,6 +500,14 @@ class OrganizationUpdate(RequestModel):
     )
     recovery_rate_order: list[RecoveryRate] | None = Field(
         default=None, min_length=3, max_length=3, description=_RATE_ORDER
+    )
+    client_segments_enabled: bool | None = Field(
+        default=None,
+        description=(
+            "Whether the practice uses client segments. Off hides them everywhere in the UI and "
+            "leaves the column out of the client export; nothing is deleted, and switching it "
+            "on again brings them back"
+        ),
     )
     email: EmailStr | None = Field(
         default=None, max_length=254, description="Contact email; null or blank clears it"

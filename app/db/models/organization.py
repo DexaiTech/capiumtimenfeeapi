@@ -240,6 +240,11 @@ class Organization(Base, IdMixin, TimestampMixin, SoftDeleteMixin):
     recovery_rate_order: Mapped[list[str]] = mapped_column(
         ARRAY(Text), nullable=False, server_default=text("'{client_job,task,staff}'::text[]")
     )
+    # Whether the practice uses client segments. Off, the UI hides them everywhere and the client
+    # export leaves the column out; the segments and the clients' values are kept.
+    client_segments_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("true")
+    )
     email: Mapped[str | None] = mapped_column(Text)
     phone: Mapped[str | None] = mapped_column(Text)
     address_line1: Mapped[str | None] = mapped_column(Text)
