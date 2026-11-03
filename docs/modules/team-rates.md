@@ -138,25 +138,28 @@ whatever its size.
 ## POST /staff
 
 Permission `member.invite`. Creates a staff member **without a login**. Response 201: `StaffDetail`.
+Ticket APT5: everyone added through the UI signs in, so the "Add staff member" form invites the new
+person to their work email straight after (`POST /staff/{id}/invite` with an empty body); this endpoint
+therefore requires `email`. The CSV staff import (`POST /imports/staff`) still accepts rows without one.
 
 | Field | Type | Required | Notes |
 |---|---|---|---|
 | `full_name` | string 1–120 | yes | |
 | `grade_id` | uuid | yes | An **active** grade of the practice (422 on `grade_id` otherwise). |
-| `start_date` | date | yes | |
+| `email` | email ≤ 254 | yes | Work email, the address they are invited to sign in with (422 on `email` when missing or blank). Not shared by another **active** staff member (409 `STAFF_EMAIL_TAKEN`, also when it is somebody's sign-in address). |
+| `start_date` | date | no | Null when not given. |
 | `code` | string 1–20 | no | Upper-cased; letters, digits, `_`, `-`. Default: the next number of the `staff` sequence (`S001`, `S002` …). Unique in the practice, including people who left: 409 `STAFF_CODE_TAKEN`. |
-| `email` | email ≤ 254 | no | Work email. Not shared by another **active** staff member (409 `STAFF_EMAIL_TAKEN`, also when it is somebody's sign-in address). Blank = null. |
 | `approver_id` | uuid | no | Must be active **and able to sign in**, and not the person themself (422 on `approver_id`). |
 | `job_title` | string ≤ 120 | no | |
 | `initials` | string | no | Upper-cased, unique in the practice (409 `INITIALS_TAKEN`). |
 | `working_minutes_per_day` | int 1–1440 | no | Default: the practice's minutes per day. |
 | `working_days` | int[] 1–7 | no | ISO weekdays (1 = Monday), unique, 1–7 items. Default: the practice's working days. |
 | `chargeable_target_bp` | int 0–10000 | no | Default: the grade's `default_chargeable_target_bp`, else 7500. |
-| `leaving_date` | date | no | Not before `start_date` (422). |
+| `leaving_date` | date | no | Not before `start_date` when one is given (422). |
 | `role_id` | uuid | no | The role they get once they have a login. Default: the Staff role. 422 when unknown. |
 | `cost_rate` | integer pence/hour | no | Also creates the person's own **cost** rate (a `staff`-level rule) from `rate_effective_from`. Needs `rate.manage` besides `member.invite` (403 otherwise, and nothing is created). |
 | `charge_rate` | integer pence/hour | no | Same for the person's own **charge-out** rate. |
-| `rate_effective_from` | date | no | When those rates start; default `start_date`. A date in the future leaves the grade or practice default in force until then. |
+| `rate_effective_from` | date | no | When those rates start; default `start_date`, else today. A date in the future leaves the grade or practice default in force until then. |
 
 The person and their rates are written in **one transaction**; each rate writes the usual `rate.created` audit entry and a rate-history row (source `staff_rates`).
 

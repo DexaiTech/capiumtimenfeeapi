@@ -507,6 +507,7 @@ class StaffImportService:
             )
         )
         rates = 0
+        assert data.start_date is not None  # the import requires a start date (REQUIRED)
         start = plan.rate_from or data.start_date
         for kind, pence in (("cost", plan.cost), ("charge", plan.charge)):
             if pence is None:

@@ -12,7 +12,7 @@ from app.schemas.common import ApiResponse, error_responses, ok, ok_page
 from app.schemas.staff import (
     StaffBulkAction,
     StaffBulkResult,
-    StaffCreate,
+    StaffCreateRequest,
     StaffDeactivate,
     StaffDetail,
     StaffInvite,
@@ -131,9 +131,10 @@ async def list_staff(
     summary="Create a staff member",
     description=(
         "Creates a staff member without a login (give them one later with `invite` or "
-        "`link-login`). Required: `full_name`, `grade_id` (an active grade) and `start_date`. "
+        "`link-login`). Required: `full_name`, `grade_id` (an active grade) and `email` (the "
+        "work email, which they are invited to sign in with); `start_date` is optional. "
         "`code` is upper-cased and unique (409 `STAFF_CODE_TAKEN`); without it the next staff "
-        "number is used. `email` (work email) must not belong to another active staff member "
+        "number is used. `email` must not belong to another active staff member "
         "(409 `STAFF_EMAIL_TAKEN`). `initials` are unique in the practice (409 "
         "`INITIALS_TAKEN`). `approver_id` must be an active staff member who can sign in. "
         "Working hours default to the practice's minutes per day and working days; the "
@@ -144,7 +145,7 @@ async def list_staff(
     responses=error_responses(403, 404, 409),
 )
 async def create_staff(
-    body: StaffCreate, org: StaffCreator, service: StaffServiceDep, ctx: ContextDep
+    body: StaffCreateRequest, org: StaffCreator, service: StaffServiceDep, ctx: ContextDep
 ) -> ApiResponse[StaffDetail]:
     return ok(await service.create(org, body, ctx), "Staff member created")
 

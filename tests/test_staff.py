@@ -5,6 +5,7 @@ emails and codes, permissions, rate masking and tenant isolation. Logins are in
 import pytest
 from httpx import AsyncClient
 
+from app.utils.practice_dates import today_in
 from tests.clients_helpers import count_queries, scalar, sql
 from tests.domain_factories import make_client, practice, staff
 from tests.factories import add_member, audit_entries, error, role_id
@@ -50,7 +51,7 @@ async def test_the_founder_is_staff_and_new_staff_have_no_login(client: AsyncCli
         founder["weekly_capacity_minutes"],
     ) == (450, [1, 2, 3, 4, 5], 2250)
 
-    created = await new_staff(client, owner, org, "Sam Staff")
+    created = await new_staff(client, owner, org, "Sam Staff", email="sam@example.com")
     assert created["code"] == "S002" and created["full_name"] == "Sam Staff"
     assert (
         created["has_login"],
@@ -60,7 +61,8 @@ async def test_the_founder_is_staff_and_new_staff_have_no_login(client: AsyncCli
     ) == (False, "none", None, None)
     assert (created["status"], created["is_selectable"]) == ("active", True)
     assert created["grade"] == {"id": await grade_id(org), "code": "SNR", "name": "Senior"}
-    assert created["approver"] is None and created["email"] is None and created["initials"] is None
+    assert created["email"] == "sam@example.com"
+    assert created["approver"] is None and created["initials"] is None
     assert created["role"]["system_key"] == "staff"
     assert (
         created["working_minutes_per_day"],
@@ -152,7 +154,6 @@ async def test_defaults_follow_the_practice_and_the_grade(client: AsyncClient) -
     [
         {"grade_id": "G", "start_date": "2026-01-05"},
         {"full_name": "X", "start_date": "2026-01-05"},
-        {"full_name": "X", "grade_id": "G"},
         {"full_name": "", "grade_id": "G", "start_date": "2026-01-05"},
         {"full_name": "X" * 121, "grade_id": "G", "start_date": "2026-01-05"},
         {"full_name": "X", "grade_id": "not-a-uuid", "start_date": "2026-01-05"},
@@ -212,9 +213,41 @@ async def test_defaults_follow_the_practice_and_the_grade(client: AsyncClient) -
 async def test_staff_validation(client: AsyncClient, body: dict) -> None:
     owner, org = await practice(client)
     body = {k: (await grade_id(org) if v == "G" else v) for k, v in body.items()}
+    # A valid work email, so each case fails on its own field.
+    body = {"email": "x@example.com", **body}
     response = await client.post(staff_url(org), headers=owner.headers, json=body)
     assert response.status_code == 422, response.text
     assert len(await listing(client, owner, org)) == 1  # only the founder
+
+
+async def test_a_new_person_needs_a_grade_and_a_work_email_but_no_start_date(
+    client: AsyncClient,
+) -> None:
+    """APT5: everyone added signs in, so the work email is required like the grade."""
+    owner, org = await practice(client)
+    body = {"full_name": "X", "grade_id": await grade_id(org), "email": "x@example.com"}
+    for sent, field in (
+        ({k: v for k, v in body.items() if k != "grade_id"}, "grade_id"),
+        ({k: v for k, v in body.items() if k != "email"}, "email"),
+        ({**body, "email": ""}, "email"),
+        ({**body, "email": None}, "email"),
+    ):
+        response = await client.post(staff_url(org), headers=owner.headers, json=sent)
+        assert response.status_code == 422, response.text
+        assert {d["field"] for d in error(response)["details"]} == {field}, sent
+    assert len(await listing(client, owner, org)) == 1  # only the founder
+
+    created = ok_data(await client.post(staff_url(org), headers=owner.headers, json=body), 201)
+    assert (created["email"], created["start_date"]) == ("x@example.com", None)
+    [log] = await audit_entries(org["id"], "staff.created")
+    assert log["metadata"]["start_date"] is None
+    # Without a start date the person's own rates start today.
+    rated = await new_staff(client, owner, org, "Rated", start_date=None, cost_rate=3_000)
+    assert rated["start_date"] is None
+    [rule] = await sql(
+        "SELECT effective_from::text AS starts FROM rate_rules WHERE user_id = :u", u=rated["id"]
+    )
+    assert rule["starts"] == today_in(org["timezone"]).isoformat()
 
 
 async def test_codes_are_unique_and_generated_codes_skip_taken_ones(client: AsyncClient) -> None:
@@ -231,6 +264,7 @@ async def test_codes_are_unique_and_generated_codes_skip_taken_ones(client: Asyn
                 "full_name": "Dup",
                 "grade_id": await grade_id(org),
                 "start_date": "2026-01-05",
+                "email": "dup@example.com",
                 "code": code,
             },
         )
@@ -273,7 +307,12 @@ async def test_the_staff_sequence_drives_codes_and_can_be_changed(client: AsyncC
     response = await client.post(
         staff_url(org),
         headers=owner.headers,
-        json={"full_name": "Z", "grade_id": await grade_id(org), "start_date": "2026-01-05"},
+        json={
+            "full_name": "Z",
+            "grade_id": await grade_id(org),
+            "start_date": "2026-01-05",
+            "email": "z@example.com",
+        },
     )
     assert response.status_code == 409 and error(response)["code"] == "SEQUENCE_INVALID"
     assert (await new_staff(client, owner, org, "Manual", code="MANUAL1"))["code"] == "MANUAL1"
@@ -346,8 +385,8 @@ async def test_no_duplicate_email_among_active_staff(client: AsyncClient) -> Non
     # Other practices are separate, and an empty email never collides.
     other_owner, other_org = await practice(client, "Other & Co")
     await new_staff(client, other_owner, other_org, "Same", email="first@example.com")
-    await new_staff(client, owner, org, "No email 1")
-    await new_staff(client, owner, org, "No email 2")
+    await new_staff(client, owner, org, "No email 1", email=None)
+    await new_staff(client, owner, org, "No email 2", email=None)
     response = await client.patch(
         staff_url(org, f"/{second['id']}"), headers=owner.headers, json={"email": ""}
     )
@@ -495,6 +534,7 @@ async def test_approvers_must_be_active_staff_who_can_sign_in(client: AsyncClien
                 "full_name": "X",
                 "grade_id": await grade_id(org),
                 "start_date": "2026-01-05",
+                "email": "x@example.com",
                 "approver_id": approver,
             },
         )
@@ -1172,7 +1212,12 @@ async def test_rates_with_a_new_person_need_rate_manage_and_nothing_is_created_w
     )
     assert created.status_code == 201, created.text
     recruiter = await add_member(org["id"], "Recruiter")
-    body = {"full_name": "Sam Staff", "grade_id": await grade_id(org), "start_date": "2026-01-05"}
+    body = {
+        "full_name": "Sam Staff",
+        "grade_id": await grade_id(org),
+        "start_date": "2026-01-05",
+        "email": "sam@example.com",
+    }
     refused = await client.post(
         staff_url(org), headers=recruiter.headers, json={**body, "cost_rate": 4_800}
     )
@@ -1187,7 +1232,12 @@ async def test_rates_with_a_new_person_need_rate_manage_and_nothing_is_created_w
 @pytest.mark.parametrize("field", ["cost_rate", "charge_rate"])
 async def test_the_rates_of_a_new_person_are_validated(client: AsyncClient, field: str) -> None:
     owner, org = await practice(client)
-    body = {"full_name": "Sam Staff", "grade_id": await grade_id(org), "start_date": "2026-01-05"}
+    body = {
+        "full_name": "Sam Staff",
+        "grade_id": await grade_id(org),
+        "start_date": "2026-01-05",
+        "email": "sam@example.com",
+    }
     for bad in (-1, "free", 10**13):
         response = await client.post(
             staff_url(org), headers=owner.headers, json={**body, field: bad}
@@ -1286,7 +1336,12 @@ async def test_permissions_per_role(
     assert (
         await client.get(staff_url(org, f"/{target['id']}"), headers=actor.headers)
     ).status_code == (200 if can_read else 403)
-    body = {"full_name": "New", "grade_id": await grade_id(org), "start_date": "2026-01-05"}
+    body = {
+        "full_name": "New",
+        "grade_id": await grade_id(org),
+        "start_date": "2026-01-05",
+        "email": "new@example.com",
+    }
     created = await client.post(staff_url(org), headers=actor.headers, json=body)
     assert created.status_code == (201 if can_invite else 403)
     patched = await client.patch(
@@ -1356,6 +1411,7 @@ async def test_other_practices_staff_are_invisible(client: AsyncClient) -> None:
             "full_name": "X",
             "grade_id": await grade_id(org),
             "start_date": "2026-01-05",
+            "email": "x@example.com",
             "role_id": foreign_role,
         },
     )
@@ -1367,6 +1423,7 @@ async def test_other_practices_staff_are_invisible(client: AsyncClient) -> None:
             "full_name": "X",
             "grade_id": await grade_id(org),
             "start_date": "2026-01-05",
+            "email": "x@example.com",
             "approver_id": str(other_owner.id),
         },
     )
