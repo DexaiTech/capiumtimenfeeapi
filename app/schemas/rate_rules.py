@@ -21,6 +21,7 @@ RateLevel = Literal[
     "client",
     "service_staff",
     "service_grade",
+    "service",
     "staff",
     "grade",
 ]
@@ -36,6 +37,7 @@ PRECEDENCE: dict[str, int] = {
     "client": 3,
     "service_staff": 5,
     "service_grade": 5,
+    "service": 5,
     "staff": 6,
     "grade": 7,
 }
@@ -46,6 +48,7 @@ LEVEL_LABELS: dict[str, str] = {
     "client": "Client (everyone)",
     "service_staff": "Staff + service",
     "service_grade": "Service + grade",
+    "service": "Service (everyone)",
     "staff": "Staff",
     "grade": "Grade",
 }
@@ -131,7 +134,8 @@ class RateRuleRead(BaseModel):
 class RateRuleCreate(RequestModel):
     kind: RateKind
     # Which of these four are set decides the level: client + service + user = client_service_staff,
-    # client + service, client + user, client alone (everyone), service + grade, user, grade.
+    # client + service, client + user, client alone (everyone), service + user, service + grade,
+    # service alone (everyone), user, grade.
     client_id: uuid.UUID | None = None
     service_id: uuid.UUID | None = None
     user_id: uuid.UUID | None = Field(default=None, description="The staff member's id")

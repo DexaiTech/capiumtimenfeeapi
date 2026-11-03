@@ -5,7 +5,7 @@ from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import date
 
-from sqlalchemy import or_, select
+from sqlalchemy import ColumnElement, and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Grade, Job, OrganizationMember, RateRule
@@ -94,15 +94,21 @@ class RateLookupRepository:
         client_ids: Collection[uuid.UUID],
         user_ids: Collection[uuid.UUID],
         grade_ids: Collection[uuid.UUID],
+        service_ids: Collection[uuid.UUID] = (),
     ) -> dict[RuleKey, list[RuleRow]]:
-        """Every rule that names one of these clients, people or grades, by scope, oldest first."""
-        conditions = []
+        """Every rule that names one of these clients, people or grades, and the rates of these
+        services for everyone, by scope, oldest first."""
+        conditions: list[ColumnElement[bool]] = []
         if client_ids:
             conditions.append(RateRule.client_id.in_(list(client_ids)))
         if user_ids:
             conditions.append(RateRule.user_id.in_(list(user_ids)))
         if grade_ids:
             conditions.append(RateRule.grade_id.in_(list(grade_ids)))
+        if service_ids:
+            conditions.append(
+                and_(RateRule.level == "service", RateRule.service_id.in_(list(service_ids)))
+            )
         if not conditions:
             return {}
         stmt = (
