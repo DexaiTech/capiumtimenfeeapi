@@ -186,7 +186,8 @@ decides the level. The charge-out rate of a time entry is the first that exists 
 2. client + service,
 3. client + staff, else the client's rate for everyone,
 4. `jobs.hourly_rate` of the entry's job (undated),
-5. service + grade (the person's current grade),
+5. staff + service, else service + grade (the person's current grade), else the service's rate
+   for everyone (one charge-out rate per service; the cost rate never depends on the service),
 6. staff,
 7. grade: a rule in force, else the grade's default charge-out rate,
 

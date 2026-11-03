@@ -240,13 +240,17 @@ async def test_cost_ladder_staff_then_grade_then_default_then_zero(client: Async
 
 async def test_cost_rates_exist_only_for_staff_and_grades(client: AsyncClient) -> None:
     owner, org, person, acme, svc, _job = await world(client)
-    for scope in ({"client_id": acme.id}, {"service_id": svc, "client_id": acme.id}):
+    for scope in (
+        {"client_id": acme.id},
+        {"service_id": svc, "client_id": acme.id},
+        {"service_id": svc},
+    ):
         error = await rate_error(
             client, owner, org, 422, kind="cost", rate=100, effective_from=FROM, **scope
         )
         assert error["details"][0]["field"] == "kind"
-    # A scope that is not one of the seven levels, or no scope at all.
-    for scope in ({}, {"user_id": person.id, "grade_id": uuid.uuid4()}, {"service_id": svc}):
+    # A scope that is not one of the levels, or no scope at all.
+    for scope in ({}, {"user_id": person.id, "grade_id": uuid.uuid4()}):
         error = await rate_error(
             client, owner, org, 422, kind="charge", rate=100, effective_from=FROM, **scope
         )

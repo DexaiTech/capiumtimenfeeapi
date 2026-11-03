@@ -12,7 +12,7 @@ from app.db.models import Job, RateRule
 
 # The levels a client's job can be priced at before its own rate and after it (docs/domain.md).
 CLIENT_LEVELS = ("client_service_staff", "client_service", "client_staff", "client")
-TASK_LEVELS = ("service_staff", "service_grade")
+TASK_LEVELS = ("service_staff", "service_grade", "service")
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,7 +62,7 @@ class JobRateRepository:
     ) -> Sequence[ChargeRuleRow]:
         """The charge-out rules in force on ``day`` that can price the client's jobs: the client's
         own (every client level) and the rates set against the services of its jobs (service +
-        grade, staff + service)."""
+        grade, staff + service, the service for everyone)."""
         scope = [RateRule.client_id == client_id]
         if service_ids:
             scope.append(

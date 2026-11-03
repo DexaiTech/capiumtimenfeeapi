@@ -8,7 +8,8 @@ The charge-out rate of a time entry is the first that exists of, most specific f
    for everyone,
 4. ``job``: ``jobs.hourly_rate`` of the entry's job,
 5. ``service_staff``: a rule for the job's service and the person (for every client), else
-   ``service_grade``: a rule for the job's service and the person's grade,
+   ``service_grade``: a rule for the job's service and the person's grade, else
+   ``service``: the job's service's rate for everyone,
 6. ``staff``: a rule for the person,
 7. ``grade``: a rule for the person's grade, else the grade's default charge-out rate,
 
@@ -44,12 +45,15 @@ CHARGE_SOURCES = (
     "job",
     "service_staff",
     "service_grade",
+    "service",
     "staff",
     "grade",
     "default",
 )
-# Level 5 has two sources: the person's own rate for the service, else the grade's.
+# Level 5 has three sources: the person's own rate for the service, else the grade's, else the
+# service's rate for everyone.
 STAFF_SERVICE_LABEL = "Staff rate for the service"
+SERVICE_LABEL = "Service rate"
 LEVEL_LABELS = {
     1: "Client + service + staff",
     2: "Client + service",
@@ -189,8 +193,15 @@ class RateBook:
         grades = await repo.member_grades(org_id, user_ids)
         grade_ids = {g for g in grades.values() if g is not None}
         defaults = await repo.grade_defaults(org_id, grade_ids)
+        service_ids = {q.service_id for q in queries if q.service_id} | {
+            job.service_id for job in jobs.values() if job.service_id
+        }
         rules = await repo.rules(
-            org_id, client_ids=client_ids, user_ids=user_ids, grade_ids=grade_ids
+            org_id,
+            client_ids=client_ids,
+            user_ids=user_ids,
+            grade_ids=grade_ids,
+            service_ids=service_ids,
         )
         overtime = None
         if organization.overtime_enabled and any(q.overtime for q in queries):
@@ -279,7 +290,8 @@ class RateBook:
             rate=job.hourly_rate if job is not None else None,
             origin="job" if job is not None and job.hourly_rate is not None else None,
         )
-        # The person's own rate for the service wins over the grade's rate for the service.
+        # The person's own rate for the service wins over the grade's rate for the service, which
+        # wins over the service's rate for everyone.
         rule5: RuleRow | None = None
         source5 = "service_grade"
         if service is not None:
@@ -288,10 +300,15 @@ class RateBook:
                 source5 = "service_staff"
             elif grade is not None:
                 rule5 = self._rule("charge", None, service, None, grade, day)
+            if rule5 is None:
+                rule5 = self._rule("charge", None, service, None, None, day)
+                if rule5 is not None:
+                    source5 = "service"
+        labels5 = {"service_staff": STAFF_SERVICE_LABEL, "service": SERVICE_LABEL}
         yield _step(
             5,
             source5,
-            STAFF_SERVICE_LABEL if source5 == "service_staff" else LEVEL_LABELS[5],
+            labels5.get(source5, LEVEL_LABELS[5]),
             applicable=service is not None and (grade is not None or rule5 is not None),
             reason="The job has no service." if service is None else "This person has no grade.",
             rule=rule5,
