@@ -7,6 +7,7 @@ the invoice's figures do not change. The advance is used oldest work first; work
 written off; un-assigning returns the items to WIP.
 """
 
+import uuid
 from datetime import date
 
 from sqlalchemy import text
@@ -23,7 +24,13 @@ from tests.billing_helpers import (
     org_url,
     set_org,
 )
-from tests.domain_factories import make_client, make_time_entry, staff, vat_rate_id
+from tests.domain_factories import (
+    make_client,
+    make_time_entry,
+    service_id,
+    staff,
+    vat_rate_id,
+)
 from tests.factories import audit_entries, error
 from tests.period_lock_helpers import set_lock, today
 from tests.reports_helpers import report
@@ -441,4 +448,56 @@ async def test_advance_lines_are_checked_before_any_draft_is_made(client):
     assert (
         await count_rows("SELECT count(*) FROM invoices WHERE client_id = :c", c=str(p.client.id))
         == 0
+    )
+
+
+async def test_an_advance_line_bills_a_service_with_its_vat_code(client):
+    p = await new_practice(client)
+    reduced = await vat_rate_id(p.org, "reduced")
+    zero = await vat_rate_id(p.org, "zero")
+    books = await service_id(p.org, "BOOKS")
+    async with get_sessionmaker()() as session:
+        await session.execute(
+            text("UPDATE services SET vat_rate_id = :rate WHERE id = :id"),
+            {"rate": str(reduced), "id": str(books)},
+        )
+        await session.commit()
+    on_books = {
+        "description": "Bookkeeping 2026/27",
+        "unit_amount": 100_000,
+        "service_id": str(books),
+    }
+    made = await draft(
+        client,
+        p.owner,
+        p.org,
+        p.client.id,
+        advance_lines=[on_books, {"description": "Advice", "unit_amount": 50_000}],
+    )
+    # A client without a VAT code of its own: the service's, else the practice default.
+    assert [(x["service_id"], x["vat_rate_bp"], x["vat_amount"]) for x in made["lines"]] == [
+        (str(books), 500, 5_000),
+        (None, 2000, 10_000),
+    ]
+    # The client's own code comes before the service's.
+    zero_client = await make_client(p.org, "Zero Ltd", default_vat_rate_id=zero)
+    theirs = await draft(client, p.owner, p.org, zero_client.id, advance_lines=[on_books])
+    assert (theirs["lines"][0]["service_id"], theirs["lines"][0]["vat_rate_bp"]) == (str(books), 0)
+
+    # Only a service of the practice.
+    other = await new_practice(client, "Other Accountants")
+    foreign = await service_id(other.org, "BOOKS")
+    for unknown in (foreign, uuid.uuid4()):
+        refused = await draft(
+            client,
+            p.owner,
+            p.org,
+            p.client.id,
+            expect=422,
+            advance_lines=[{**on_books, "service_id": str(unknown)}],
+        )
+        assert [d["field"] for d in refused["details"]] == ["service_id"]
+    assert (
+        await count_rows("SELECT count(*) FROM invoices WHERE client_id = :c", c=str(p.client.id))
+        == 1
     )
