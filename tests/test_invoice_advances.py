@@ -1,4 +1,5 @@
-"""Ticket APT69: fees billed in advance, with the time assigned to the invoice later.
+"""Tickets APT69 and APT75: fees billed in advance, on one line or several, with the time assigned
+to the invoice later.
 
 An advance invoice is an ordinary invoice whose manual line is marked ``is_advance``. Once it is
 issued, the client's unbilled WIP is assigned to that line: the items are billed (out of WIP) and
@@ -13,6 +14,7 @@ from sqlalchemy import text
 from app.db.session import get_sessionmaker
 from tests.billing_helpers import (
     billing_status,
+    count_rows,
     draft,
     get_invoice,
     hourly_job,
@@ -21,7 +23,7 @@ from tests.billing_helpers import (
     org_url,
     set_org,
 )
-from tests.domain_factories import make_client, make_time_entry, staff
+from tests.domain_factories import make_client, make_time_entry, staff, vat_rate_id
 from tests.factories import audit_entries, error
 from tests.period_lock_helpers import set_lock, today
 from tests.reports_helpers import report
@@ -347,3 +349,96 @@ async def test_wip_as_at_a_day_counts_work_assigned_after_it(client):
     assert historic["totals"]["time_wip"] == 12_000
     now = await report(client, p.owner, p.org, "wip", as_at=today(p.org))
     assert now["totals"]["time_value"] == 0
+
+
+async def test_several_advance_lines_on_one_draft(client):
+    """Ticket APT75: the advance is billed on several lines, quantity x unit price each."""
+    p = await new_practice(client)
+    zero = await vat_rate_id(p.org, "zero")
+    made = await draft(
+        client,
+        p.owner,
+        p.org,
+        p.client.id,
+        advance_lines=[
+            {"description": "Accounts 2026/27\nYear end 31 March", "unit_amount": 300_000},
+            {"description": "Payroll 2026/27", "quantity": "12", "unit_amount": 12_500},
+            {
+                "description": "Companies House filing",
+                "quantity": "2.5",
+                "unit_amount": 3_333,
+                "vat_rate_id": str(zero),
+            },
+        ],
+    )
+    assert [
+        (x["kind"], x["is_advance"], x["position"], x["description"]) for x in made["lines"]
+    ] == [
+        ("manual", True, 1, "Accounts 2026/27\nYear end 31 March"),
+        ("manual", True, 2, "Payroll 2026/27"),
+        ("manual", True, 3, "Companies House filing"),
+    ]
+    assert [
+        (x["quantity"], x["unit_amount"], x["net_amount"], x["vat_rate_bp"], x["vat_amount"])
+        for x in made["lines"]
+    ] == [
+        ("1.00", 300_000, 300_000, 2000, 60_000),
+        ("12.00", 12_500, 150_000, 2000, 30_000),
+        # 2.5 x 33.33 = 83.325, rounded half away from zero.
+        ("2.50", 3_333, 8_333, 0, 0),
+    ]
+    assert [x["advance"]["remaining"] for x in made["lines"]] == [300_000, 150_000, 8_333]
+    net = 300_000 + 150_000 + 8_333
+    assert (made["net_total"], made["vat_total"], made["gross_total"]) == (
+        net,
+        90_000,
+        net + 90_000,
+    )
+    [created] = await audit_entries(p.id, "invoice.draft_created")
+    assert created["metadata"]["advance"] == net
+
+    # Each line takes its own time once the invoice is issued.
+    invoice = await issued(client, p.owner, p.org, made["id"], issue_date="2026-04-01")
+    first_id, second_id, _ = (x["id"] for x in invoice["lines"])
+    entry = await make_time_entry(p.org, p.owner, client=p.client, entry_date=date(2026, 5, 4))
+    response = await assign(client, p.owner, p.org, invoice["id"], second_id, time=[entry])
+    assert response.status_code == 200, response.text
+    lines = {x["id"]: x for x in response.json()["data"]["lines"]}
+    assert [i["id"] for i in lines[second_id]["advance"]["items"]] == [str(entry.id)]
+    assert lines[second_id]["advance"]["remaining"] == 150_000 - 12_000
+    assert lines[first_id]["advance"]["items"] == []
+    assert lines[first_id]["advance"]["remaining"] == 300_000
+
+
+async def test_advance_lines_are_checked_before_any_draft_is_made(client):
+    p = await new_practice(client)
+    line = {"description": "Accounts 2026/27", "quantity": "1", "unit_amount": 300_000}
+    refused = [
+        {"advance": ADVANCE, "advance_lines": [line]},
+        {"advance_lines": []},
+        {"advance_lines": [line, {**line, "unit_amount": 0}]},
+        {"advance_lines": [line, {**line, "quantity": "0"}]},
+        {"advance_lines": [{**line, "description": "  "}]},
+        {"advance_lines": [{"unit_amount": 300_000}]},
+    ]
+    for body in refused:
+        response = await client.post(
+            org_url(p.org, "/invoices"),
+            headers=p.owner.headers,
+            json={"client_id": str(p.client.id), **body},
+        )
+        assert response.status_code == 422, (body, response.text)
+    # 0.01 x 0.01 rounds to nothing: not an advance.
+    tiny = await draft(
+        client,
+        p.owner,
+        p.org,
+        p.client.id,
+        expect=422,
+        advance_lines=[{**line, "quantity": "0.01", "unit_amount": 1}],
+    )
+    assert tiny["code"] == "ADVANCE_NOT_POSITIVE"
+    assert (
+        await count_rows("SELECT count(*) FROM invoices WHERE client_id = :c", c=str(p.client.id))
+        == 0
+    )

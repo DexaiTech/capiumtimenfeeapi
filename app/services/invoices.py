@@ -555,22 +555,32 @@ class InvoiceService:
             )
             planned = await self._plan(ctx, items, data)
             await self._write_lines(ctx, invoice, client, planned, start_position=1)
-            if data.advance is not None:
-                advance = data.advance
-                line = await self._manual_line(
-                    ctx,
-                    invoice,
-                    client,
-                    LineCreate(
-                        description=advance.description,
-                        unit_amount=advance.net_amount,
-                        vat_rate_id=advance.vat_rate_id,
-                        service_id=advance.service_id,
-                        job_id=advance.job_id,
-                        is_advance=True,
-                    ),
+            advances = [
+                LineCreate(
+                    description=a.description,
+                    unit_amount=a.net_amount,
+                    vat_rate_id=a.vat_rate_id,
+                    service_id=a.service_id,
+                    job_id=a.job_id,
+                    is_advance=True,
                 )
+                for a in ([data.advance] if data.advance else [])
+            ] + [
+                LineCreate(
+                    description=a.description,
+                    quantity=a.quantity,
+                    unit_amount=a.unit_amount,
+                    vat_rate_id=a.vat_rate_id,
+                    is_advance=True,
+                )
+                for a in data.advance_lines or []
+            ]
+            advance_total = 0
+            for spec in advances:
+                # One at a time: each new line takes the position after the last one saved.
+                line = await self._manual_line(ctx, invoice, client, spec)
                 await self.invoices.add_lines([line])
+                advance_total += line.net_amount
             set_items_status(items, "in_draft")
             await self._recompute(invoice)
             await record(
@@ -586,7 +596,7 @@ class InvoiceService:
                     wip_value=items.wip_value,
                     item_count=items.count,
                     **({"valuation_basis": data.valuation_basis} if data.valuation_basis else {}),
-                    **({"advance": data.advance.net_amount} if data.advance else {}),
+                    **({"advance": advance_total} if advances else {}),
                 ),
             )
             detail = await self._detail(ctx, invoice)

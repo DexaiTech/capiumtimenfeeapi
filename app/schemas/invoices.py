@@ -88,6 +88,15 @@ class AdvanceCreate(RequestModel):
     job_id: uuid.UUID | None = None
 
 
+class AdvanceLineCreate(RequestModel):
+    """One line of fees billed in advance: quantity x unit amount before VAT, more than zero."""
+
+    description: str = Field(min_length=1, max_length=1000, examples=["Accounts 2026/27"])
+    quantity: Quantity = Decimal(1)
+    unit_amount: PositiveMoney = Field(description="The price of one unit before VAT")
+    vat_rate_id: uuid.UUID | None = None
+
+
 class InvoiceCreate(WipSelection):
     client_id: uuid.UUID
     issue_date: date | None = None
@@ -110,8 +119,23 @@ class InvoiceCreate(WipSelection):
             "(`POST /invoices/{id}/lines/{line_id}/assign`)"
         ),
     )
+    advance_lines: list[AdvanceLineCreate] | None = Field(
+        default=None,
+        min_length=1,
+        max_length=200,
+        description=(
+            "Fees billed in advance on several lines: each adds a manual line marked "
+            "`is_advance` (net = round(quantity x unit_amount)). Not together with `advance`"
+        ),
+    )
 
     _blank = field_validator("reference", "notes")(_blank_is_null)
+
+    @model_validator(mode="after")
+    def _one_advance_shape(self) -> Self:
+        if self.advance is not None and self.advance_lines is not None:
+            raise ValueError("advance_lines: Give either advance or advance_lines, not both")
+        return self
 
 
 class InvoiceAddWip(WipSelection):
