@@ -978,7 +978,8 @@ async def test_no_cost_rate_leaks_without_rate_read(client: AsyncClient) -> None
         json={"kind": "cost", "user_id": str(person.id), "rate": 1_234, "effective_from": FROM},
     )
     assert cost.status_code == 201 and cost.json()["data"]["rate"] is None
-    assert "1234" not in cost.text
+    # As a JSON number: a random id in the body can contain the digits "1234".
+    assert ":1234" not in cost.text
     charge = await client.post(
         org_url(org, "/rates"),
         headers=editor.headers,
