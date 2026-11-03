@@ -303,6 +303,7 @@ class FailedJob:
 
 _JOB_LABELS = {
     "send_invoice_email": "Emailing an invoice",
+    "send_invoice_void_email": "Emailing an invoice cancellation",
     "send_payment_reminder_email": "Emailing a payment reminder",
     "send_statement_email": "Emailing a statement",
     "send_email": "Sending an email",

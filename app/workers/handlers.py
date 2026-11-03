@@ -16,7 +16,11 @@ from app.services.email import EmailService, PermanentEmailError
 from app.services.email_templates import CUSTOMISABLE_SYSTEM_KEYS, load_override
 from app.services.engagement_jobs import run_due as run_due_engagement_jobs
 from app.services.integration_runner import run_scheduled
-from app.services.invoices import InvoiceEmailError, deliver_invoice_email
+from app.services.invoices import (
+    InvoiceEmailError,
+    deliver_invoice_email,
+    deliver_invoice_void_email,
+)
 from app.services.notification_delivery import NotificationJobError, deliver_notification
 from app.services.payment_reminders import (
     ReminderEmailError,
@@ -108,6 +112,16 @@ async def send_invoice_email(
     """Render an issued invoice's PDF and email it; sets ``sent_at``. Idempotent."""
     try:
         return await deliver_invoice_email(session, settings, payload)
+    except (InvoiceEmailError, PermanentEmailError, UndefinedError) as exc:
+        raise PermanentJobError(str(exc)) from exc
+
+
+async def send_invoice_void_email(
+    session: AsyncSession, settings: Settings, payload: dict[str, Any]
+) -> dict[str, Any] | None:
+    """Tell the client that a void invoice is cancelled. Queued once per invoice."""
+    try:
+        return await deliver_invoice_void_email(session, settings, payload)
     except (InvoiceEmailError, PermanentEmailError, UndefinedError) as exc:
         raise PermanentJobError(str(exc)) from exc
 
@@ -226,6 +240,7 @@ async def purge_retention(
 HANDLERS: dict[str, Handler] = {
     "send_email": send_email,
     "send_invoice_email": send_invoice_email,
+    "send_invoice_void_email": send_invoice_void_email,
     "send_notification": send_notification,
     "send_timesheet_reminders": send_timesheet_reminders,
     "send_payment_reminders": send_payment_reminders,

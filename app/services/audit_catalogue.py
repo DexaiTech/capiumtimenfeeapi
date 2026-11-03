@@ -131,6 +131,8 @@ ACTION_LABELS: dict[str, str] = {
     "invoice.draft_deleted": "Draft invoice deleted",
     "invoice.issued": "Invoice issued",
     "invoice.voided": "Invoice voided",
+    "invoice.void_email_queued": "Invoice cancellation emailed",
+    "invoice.deleted": "Void invoice deleted",
     "invoice.send_queued": "Invoice emailed",
     "invoice.time_assigned": "Time assigned to fees billed in advance",
     "invoice.time_unassigned": "Time taken off fees billed in advance",

@@ -125,8 +125,8 @@ class InvoiceAddWip(WipSelection):
 class InvoiceBulkAction(RequestModel):
     invoice_ids: list[uuid.UUID] = Field(min_length=1, max_length=MAX_BULK_IDS)
     action: Literal["delete"] = Field(
-        description="`delete`: delete draft invoices (the only bulk action: issued invoices "
-        "are locked)"
+        description="`delete`: delete draft and void invoices (the only bulk action: issued "
+        "invoices are locked until they are voided)"
     )
     value: None = Field(default=None, description="No action takes a value yet")
 
@@ -196,6 +196,13 @@ class InvoiceIssue(RequestModel):
 
 class InvoiceVoid(RequestModel):
     reason: str = Field(min_length=1, max_length=500)
+    notify_client: bool = Field(
+        default=False,
+        description=(
+            "Email the client that the invoice is cancelled (the Invoice cancelled template), "
+            "to the addresses an invoice email goes to. Needs `invoice.send`"
+        ),
+    )
 
 
 class InvoiceSubmit(RequestModel):
@@ -428,6 +435,15 @@ class InvoiceRead(InvoiceSummaryRead):
     issued_by: uuid.UUID | None
     voided_at: datetime | None
     void_reason: str | None
+    deleted_at: datetime | None = Field(
+        description="Set when the void invoice was deleted: it is left out of every list"
+    )
+    email_recipients: list[str] = Field(
+        description=(
+            "Where the invoice's emails go by default: the client's invoice email, else its "
+            "billing contacts, else its primary contact, else the client's email (empty: nowhere)"
+        )
+    )
     created_by: uuid.UUID | None
     approvals: list[ApprovalEventRead]
     can_approve: bool = Field(

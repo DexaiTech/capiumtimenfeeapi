@@ -86,7 +86,9 @@ def display_status_condition(status: str, today: date) -> ColumnElement[bool]:
 def _apply_common_filters(
     stmt: Select[*tuple[Any, ...]], filters: InvoiceFilters
 ) -> Select[*tuple[Any, ...]]:
-    """Client, issue-date range and search: the filters the list and its summary share."""
+    """Client, issue-date range and search: the filters the list and its summary share. A deleted
+    (void) invoice is in neither."""
+    stmt = stmt.where(Invoice.deleted_at.is_(None))
     if filters.client_id is not None:
         stmt = stmt.where(Invoice.client_id == filters.client_id)
     if filters.date_from is not None:

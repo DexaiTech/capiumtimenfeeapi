@@ -49,14 +49,14 @@ unless marked bounded.
 | POST | `/invoices` | `invoice.create` | Draft from WIP (below). 201, returns the detail. |
 | GET | `/invoices/{id}` | `invoice.read` | Detail (below). |
 | PATCH | `/invoices/{id}` | `invoice.create` (+ `invoice.issue` when issued) | Draft: `issue_date`, `due_date`, `reference`, `notes`. Issued: `notes`, `reference` only. |
-| POST | `/invoices/bulk` | `invoice.create` | Delete 1-200 drafts, all or nothing (below). Declared before `/invoices/{id}`. |
-| DELETE | `/invoices/{id}` | `invoice.create` | Delete a draft; its WIP returns to `unbilled`. |
+| POST | `/invoices/bulk` | `invoice.create` (+ `invoice.issue` for void ones) | Delete 1-200 drafts and void invoices, all or nothing (below). Declared before `/invoices/{id}`. |
+| DELETE | `/invoices/{id}` | `invoice.create` (+ `invoice.issue` for a void one) | Delete a draft (its WIP returns to `unbilled`) or a void invoice (hidden and kept: see "Voiding and deleting"). |
 | POST | `/invoices/{id}/lines` | `invoice.create` | Manual line `{description, quantity=1, unit_amount, net_amount?, vat_rate_id?, service_id?, job_id?, position?}`. 201. |
 | PATCH | `/invoices/{id}/lines/{line_id}` | `invoice.create` | `{description, quantity, unit_amount, net_amount, vat_rate_id (null = default resolution), position}`. |
 | DELETE | `/invoices/{id}/lines/{line_id}` | `invoice.create` | Remove a line; its WIP returns to `unbilled`. |
 | POST | `/invoices/{id}/wip` | `invoice.create` | Add WIP `{time_entry_ids, disbursement_ids, group_by, overrides}` to a draft. |
 | POST | `/invoices/{id}/issue` | `invoice.issue` | Optional `{issue_date, due_date}`. Numbers it, WIP → `billed`. |
-| POST | `/invoices/{id}/void` | `invoice.issue` | `{reason}`. Reverses the WIP allocations. |
+| POST | `/invoices/{id}/void` | `invoice.issue` | `{reason, notify_client=false}`. Reverses the WIP allocations; `notify_client` (needs `invoice.send`) emails the client. |
 | GET | `/invoices/{id}/pdf` | `invoice.read` | `application/pdf` (DRAFT/VOID watermark when not issued). |
 | POST | `/invoices/{id}/send` | `invoice.send` | Optional `{to:[email]}`. 202 `{invoice_id, to, queued}`. |
 
@@ -87,7 +87,7 @@ unless marked bounded.
 **Invoice detail** (`InvoiceRead`): `id, number, status (draft|issued|void), display_status,
 client{id,code,name}, issue_date, due_date, reference, notes, currency, net_total, vat_total,
 gross_total, paid_total, credited_total, balance, sent_at, issued_at, issued_by, voided_at,
-void_reason, created_at`, plus
+void_reason, deleted_at, email_recipients, created_at`, plus
 
 * `lines[]`: `id, position, kind (time|fixed_fee|disbursement|manual), description, job_id,
   service_id, quantity, unit_amount, net_amount, vat_rate_id, vat_rate_bp, vat_amount,
@@ -131,7 +131,7 @@ unallocated_cash`.
 | 422 | `OVERRIDE_NO_LINE` / `OVERRIDE_AMBIGUOUS` / `OVERRIDE_DUPLICATE` | An override matches no line / several lines / a line already overridden. |
 | 422 | `NEGATIVE_WIP_LINE` | A line that bills WIP set below zero (use a manual discount line). |
 | 422 | `INVOICE_TOTAL_NEGATIVE` | A change would take the invoice gross below zero. |
-| 409 | `INVOICE_NOT_DRAFT` | Line/WIP changes, delete or issue on a non-draft (bulk delete: `details` lists each such invoice). |
+| 409 | `INVOICE_NOT_DRAFT` | Line/WIP changes or issue on a non-draft; delete of an invoice that is neither a draft nor void (bulk delete: `details` lists each such invoice). |
 | 409 | `INVOICE_LOCKED` | Changing dates of an issued invoice, or anything on a void one. |
 | 409 | `INVOICE_EMPTY` | Issuing a draft without lines. |
 | 409 | `INVOICE_NOT_ISSUED` | Void/send/credit note/payment allocation on a draft or void invoice. |
@@ -144,16 +144,43 @@ unallocated_cash`.
 | 409 | `PAYMENT_VOID` / `PAYMENT_ALLOCATED` | Allocating/voiding a void payment / voiding an allocated one. |
 | 422 | `VALIDATION_ERROR` | Body/query validation (unknown fields, amounts ≤ 0, bad dates, …). |
 
-### Bulk delete of drafts: `POST /invoices/bulk`
+### Bulk delete of drafts and void invoices: `POST /invoices/bulk`
 
 Body `{invoice_ids, action: "delete"}` (1-200 distinct ids; `value` is not accepted). Permission `invoice.create`, as for
-`DELETE /invoices/{id}`, whose rule applies to every invoice: only a draft can be deleted, and its WIP items return to `unbilled`.
-All or nothing in one transaction (the invoices are locked in id order, the same order every writer uses). Any id that is not the
-practice's: 404 `RESOURCE_NOT_FOUND`, `details: {"invoice_ids": [...]}`. Any invoice that is not a draft (issued, part-paid, paid,
-void, awaiting approval, approved, credited): 409 `INVOICE_NOT_DRAFT`, `details` one entry per such invoice (`invoice_id`,
-`number`, `status`, `reason`), and nothing is deleted. Issued invoices stay locked by design: they are corrected with a credit
-note, so delete is the only bulk action. Response `{"action": "delete", "affected", "changed"}` (always equal). Each deleted draft
-gets the `invoice.draft_deleted` audit row of a single delete with `bulk: true`.
+`DELETE /invoices/{id}`, whose rule applies to every invoice: a draft is removed and its WIP items return to `unbilled`; a void
+invoice is deleted softly (below) and needs `invoice.issue` too. All or nothing in one transaction (the invoices are locked in id
+order, the same order every writer uses). Any id that is not the practice's, or a void invoice already deleted: 404
+`RESOURCE_NOT_FOUND`, `details: {"invoice_ids": [...]}`. Any invoice that is neither a draft nor void (issued, part-paid, paid,
+awaiting approval, approved, credited): 409 `INVOICE_NOT_DRAFT`, `details` one entry per such invoice (`invoice_id`, `number`,
+`status`, `reason`: "Void it first…" for an issued one, "Reject it back to a draft first…" for one in approval), and nothing is
+deleted. Response `{"action": "delete", "affected", "changed"}` (always equal). Each deleted invoice gets the audit row of a
+single delete (`invoice.draft_deleted` or `invoice.deleted`) with `bulk: true`.
+
+### Voiding and deleting (APT71)
+
+**Void** (`POST /invoices/{id}/void`, `invoice.issue`): only an issued invoice with no payments matched to it (409
+`INVOICE_HAS_PAYMENTS`: unmatch them first, the money stays on the client's account) and no credit notes (409
+`INVOICE_HAS_CREDITS`: it is corrected with credit notes instead). No money record is ever removed by a void. Its WIP returns
+to `unbilled`, the number is kept and the PDF carries a VOID watermark.
+
+**The client is told** when the body has `notify_client: true` (the UI ticks it by default when the client has an address and
+the user holds `invoice.send`, which it then needs: 403 otherwise). The addresses are those of an invoice email (the client's
+invoice email, else its billing contacts, else its primary contact, else the client's email; the detail lists them as
+`email_recipients`); with none, 422 `NO_RECIPIENT` and nothing is voided. A `send_invoice_void_email` job (deduplicated per
+invoice) sends the **Invoice cancelled** template (`invoice_void`, a client email under Settings → Email templates, editable like
+the others; fields `recipient_name, practice_name, app_name, client_name, invoice_number, issue_date, invoice_total`), with no
+attachment. Audited `invoice.void_email_queued` (meta: the invoice and `to`); the job fails permanently if the invoice is not
+void.
+
+**Delete** (`DELETE /invoices/{id}` or the bulk action, `invoice.create` + `invoice.issue`): only a void invoice (and drafts, as
+before); an issued, part-paid or paid invoice answers 409 `INVOICE_NOT_DRAFT` "Void it first". The delete of a void invoice is
+**soft** (migration `076`: `invoices.deleted_at`, `deleted_by`; a database check allows them on void invoices only): the invoice
+leaves `GET /invoices` (every tab, the client's Invoices tab) and `GET /invoices/summary`, and the client overview's invoice
+figures; reports never counted void invoices. The row, its **number** (invoice numbers stay gapless for VAT: the next issued
+invoice takes the next number), its lines and its audit trail are kept, and `GET /invoices/{id}` (and its PDF) **still answers**
+with `deleted_at` set, so audit links keep working. A second delete answers 404. Audited `invoice.deleted` (meta: number,
+client, totals). Code: `InvoiceService.void / delete / bulk`, `deliver_invoice_void_email`; tests
+`tests/test_invoice_void_delete.py`.
 
 ## Locking (deadlock-free order)
 

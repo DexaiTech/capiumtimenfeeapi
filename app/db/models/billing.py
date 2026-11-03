@@ -142,6 +142,8 @@ class Invoice(Base, IdMixin, OrgScopedMixin, TimestampMixin):
         CheckConstraint("paid_total >= 0 AND credited_total >= 0", name="settled_non_negative"),
         CheckConstraint("paid_total + credited_total <= gross_total", name="not_over_settled"),
         CheckConstraint("status <> 'void' OR paid_total = 0", name="void_has_no_payments"),
+        # A deleted invoice is a void one hidden from the lists; drafts are removed outright.
+        CheckConstraint("deleted_at IS NULL OR status = 'void'", name="deleted_only_void"),
         Index(
             "uq_invoices_organization_id_number",
             "organization_id",
@@ -178,6 +180,8 @@ class Invoice(Base, IdMixin, OrgScopedMixin, TimestampMixin):
     voided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     voided_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
     void_reason: Mapped[str | None] = mapped_column(Text)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    deleted_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
     created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
 
     @property

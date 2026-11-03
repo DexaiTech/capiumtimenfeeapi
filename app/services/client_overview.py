@@ -116,6 +116,8 @@ ACTION_LABELS = {
     "invoice.draft_deleted": "Draft invoice deleted",
     "invoice.issued": "Invoice issued",
     "invoice.voided": "Invoice voided",
+    "invoice.void_email_queued": "Invoice cancellation emailed",
+    "invoice.deleted": "Void invoice deleted",
     "invoice.send_queued": "Invoice emailed",
     "credit_note.issued": "Credit note issued",
     "payment.recorded": "Payment recorded",
