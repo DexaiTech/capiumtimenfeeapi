@@ -38,6 +38,7 @@ from app.db.models import (
     WipAllocation,
     WipWriteOff,
 )
+from app.db.models.clients import ordinary_clients
 from app.repositories.time_paging import keyset_finish, keyset_query, parse_date
 from app.utils.pagination import Page, PageParams
 
@@ -205,6 +206,9 @@ class ClientJobRepository:
         )
         if filters.client_id is not None:
             stmt = stmt.where(Job.client_id == filters.client_id)
+        else:
+            # The built-in Internal client's jobs only when that client is asked for (APT64).
+            stmt = stmt.where(ordinary_clients())
         if filters.statuses:
             stmt = stmt.where(Job.status.in_(list(filters.statuses)))
         if filters.manager_user_id is not None:

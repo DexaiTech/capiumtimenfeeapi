@@ -280,13 +280,18 @@ charge_value_after, value_delta, cost_value_delta` (`null` without `rate.read`).
   touched. One audit record `time_entries.revalued` per call, and a re-rate run of source
   `revalue` (visible in `GET /rates/reruns`). Range at most five years.
 * **Client and job**: every time entry is on a client and a job of that client, billable or
-  not; internal time goes on an internal client and job of the practice. Without them a create,
+  not; internal time goes on the practice's built-in **Internal** client and one of its
+  non-billable jobs (one per non-chargeable activity code: admin, training, business
+  development, holiday; `docs/modules/clients.md`, "The Internal client"). Time on it is never
+  billable (422 on `is_billable` when asked). Without them a create,
   a bulk item (`entries.<i>.client_id`/`job_id`), a copy, a timer start, an edit or a
   correction is 422 `VALIDATION_ERROR` with `details[].code` `required` on `client_id` and/or
   `job_id` (a job brings its client, so sending a job is enough). The opening-balance import
   needs a `job` column and a job number on every row. Entries recorded before the rule may have
   no client or job: they are kept and shown as they are ("No client"/"No job" rows of the week
-  grid and timesheets; being non-billable they never reach WIP), and any edit or correction of
+  grid and timesheets, marked "Needs a client and job" with a link to edit the entry). One with
+  no client is non-billable (a database check) and never reaches WIP; one with a client but no
+  job keeps its billable status and is WIP and billed like any other. Any edit or correction of
   one must add a client and job. Copying one is skipped (`REQUIRED`). A timer started without a
   job before the rule cannot be stopped into an entry (422); it can be discarded. No database
   constraint enforces the rule, so the older rows stay valid.

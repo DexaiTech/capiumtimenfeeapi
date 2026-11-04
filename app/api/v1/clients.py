@@ -1,6 +1,7 @@
 """Clients, their contacts and the client overview. HTTP only."""
 
 import uuid
+from dataclasses import replace
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Query, Request, Response, status
@@ -256,7 +257,8 @@ async def import_clients(
         "contact email; case-insensitive), `status` (default: all but archived), "
         "`segment`, `client_type`, `aml_status`, `accounting_software`, `service_id`, "
         "`manager_user_id`, `partner_user_id`, `branch_id` (repeatable) and `without_branch` "
-        "(either matches), `central` (`linked` or `local`). Sorted by "
+        "(either matches), `central` (`linked` or `local`). The practice's built-in Internal "
+        "client is left out unless `include_internal` is true. Sorted by "
         "`sort`/`order`, keyset-paginated "
         "(the cursor encodes the sort key; a cursor from another sort answers 422). "
         "Requires `client.read`."
@@ -270,9 +272,18 @@ async def list_clients(
     page: PageParamsDep,
     sort: SortQuery = "name",
     order: OrderQuery = "asc",
+    include_internal: Annotated[
+        bool,
+        Query(description="Also the built-in Internal client (`is_internal`), for recording time"),
+    ] = False,
 ) -> ApiResponse[list[ClientListItem]]:
     items, next_cursor = await service.list_clients(
-        org, filters, sort=sort, descending=order == "desc", limit=page.limit, cursor=page.cursor
+        org,
+        replace(filters, include_internal=include_internal),
+        sort=sort,
+        descending=order == "desc",
+        limit=page.limit,
+        cursor=page.cursor,
     )
     return ok_page(items, next_cursor)
 

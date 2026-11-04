@@ -206,7 +206,12 @@ async def test_enabling_after_unlinking_relinks_the_same_client(client):
     assert again.status_code == 200, again.text
     assert again.json()["data"]["result"] == "linked_existing"
     assert again.json()["data"]["client"]["id"] == created["id"]
-    assert await scalar("SELECT count(*) FROM clients WHERE organization_id = :o", o=team.id) == 1
+    assert (
+        await scalar(
+            "SELECT count(*) FROM clients WHERE organization_id = :o AND NOT is_internal", o=team.id
+        )
+        == 1
+    )
 
 
 async def test_another_client_can_take_over_a_central_client_after_the_unlink(client):

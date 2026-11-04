@@ -186,7 +186,12 @@ async def test_the_default_service_must_be_an_active_service_of_the_practice(cli
         json={"name": "Other", "default_service_id": str(books)},
     )
     assert created.status_code == 422
-    assert await scalar("SELECT count(*) FROM clients WHERE organization_id = :o", o=team.id) == 1
+    assert (
+        await scalar(
+            "SELECT count(*) FROM clients WHERE organization_id = :o AND NOT is_internal", o=team.id
+        )
+        == 1
+    )
 
 
 async def test_a_default_service_that_later_goes_inactive_does_not_block_other_edits(client):

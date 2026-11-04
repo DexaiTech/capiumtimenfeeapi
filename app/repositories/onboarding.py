@@ -29,6 +29,7 @@ from app.db.models import (
     TimeEntry,
     User,
 )
+from app.db.models.clients import ordinary_clients
 from app.utils.ids import new_id
 
 COUNT_CAP = 1000
@@ -114,8 +115,17 @@ class OnboardingRepository:
             capped(RateRule, RateRule.kind == "charge").label("charge_rules"),
             capped(Service, Service.is_active.is_(True)).label("services"),
             capped(ActivityCode, ActivityCode.is_active.is_(True)).label("activity_types"),
-            capped(Client, Client.deleted_at.is_(None)).label("clients"),
-            capped(Job, Job.deleted_at.is_(None)).label("jobs"),
+            # The built-in Internal client and its jobs (APT64) are not the practice's own.
+            capped(Client, Client.deleted_at.is_(None), ordinary_clients()).label("clients"),
+            capped(
+                Job,
+                Job.deleted_at.is_(None),
+                exists().where(
+                    Client.organization_id == Job.organization_id,
+                    Client.id == Job.client_id,
+                    ordinary_clients(),
+                ),
+            ).label("jobs"),
             capped(
                 Client, Client.deleted_at.is_(None), Client.central_client_id.is_not(None)
             ).label("linked_clients"),

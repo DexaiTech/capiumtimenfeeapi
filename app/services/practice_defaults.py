@@ -1,6 +1,7 @@
 """What a new practice starts with: UK VAT rates, activity codes, common services, staff
-grades, ticket tags, expense types, number sequences, the Standard invoice template and an empty
-period lock. Everything here can be changed afterwards in Settings."""
+grades, ticket tags, expense types, number sequences, the Standard invoice template, an empty
+period lock and the built-in Internal client with a non-billable job per non-chargeable activity
+code. Everything here but the Internal client can be changed afterwards in Settings."""
 
 import uuid
 
@@ -8,10 +9,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import (
     ActivityCode,
+    Client,
     DocumentSequence,
     ExpenseType,
     Grade,
     InvoiceTemplate,
+    Job,
     Organization,
     PeriodLock,
     Service,
@@ -20,6 +23,16 @@ from app.db.models import (
 )
 from app.services.sequences import DEFAULT_SEQUENCES
 from app.utils.ids import new_id
+
+# The built-in client internal time goes on (APT64); migration 078 gives it to older practices.
+INTERNAL_CLIENT_CODE = "INTERNAL"
+INTERNAL_CLIENT_NAME = "Internal"
+
+
+def internal_job_number(activity_code: str) -> str:
+    """The number of the Internal client's job for a non-chargeable activity code."""
+    return f"INT-{activity_code}"
+
 
 # (name, code, rate in basis points, is default)
 UK_VAT_RATES: tuple[tuple[str, str, int, bool], ...] = (
@@ -117,6 +130,29 @@ async def seed_practice_defaults(session: AsyncSession, organization: Organizati
                 organization_id=organization.id, code=code, name=name, is_chargeable=chargeable
             )
         )
+    internal = Client(
+        id=new_id(),
+        organization_id=organization.id,
+        code=INTERNAL_CLIENT_CODE,
+        name=INTERNAL_CLIENT_NAME,
+        client_type="other",
+        is_internal=True,
+    )
+    session.add(internal)
+    # Jobs reference the client through a composite key: write the client first.
+    await session.flush()
+    for code, name, chargeable in ACTIVITY_CODES:
+        if not chargeable:
+            session.add(
+                Job(
+                    organization_id=organization.id,
+                    client_id=internal.id,
+                    number=internal_job_number(code),
+                    name=name,
+                    status="in_progress",
+                    billing_basis="non_billable",
+                )
+            )
     for order, (code, name, basis, fee) in enumerate(SERVICES):
         session.add(
             Service(

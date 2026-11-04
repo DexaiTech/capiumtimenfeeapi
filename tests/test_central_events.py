@@ -461,9 +461,11 @@ async def test_process_changes_reads_the_feed_in_batches(client, central_gateway
     assert (first["fetched"], first["has_more"], first["cursor"]) == (2, True, "2")
     second = (await process_changes(client, team.owner, team.org)).json()["data"]
     assert (second["fetched"], second["has_more"], second["cursor"]) == (1, False, "3")
-    assert (await sql("SELECT city FROM clients WHERE organization_id = :o", o=team.id))[0][
-        "city"
-    ] == "Town 2"
+    assert (
+        await sql(
+            "SELECT city FROM clients WHERE organization_id = :o AND NOT is_internal", o=team.id
+        )
+    )[0]["city"] == "Town 2"
 
 
 async def test_every_practice_has_its_own_cursor(client, central_gateway):

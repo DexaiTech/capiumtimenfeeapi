@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.expression import ColumnElement, ColumnExpressionArgument
 
 from app.db.models import CentralClientCache, Client
+from app.db.models.clients import ordinary_clients
 from app.utils.ids import new_id
 
 
@@ -43,8 +44,12 @@ def normalised_company_number(
 
 
 def _live_clients(organization_id: uuid.UUID) -> Select[Client]:
+    """Live clients the central client service may link, sync or merge: never the built-in
+    Internal client."""
     return select(Client).where(
-        Client.organization_id == organization_id, Client.deleted_at.is_(None)
+        Client.organization_id == organization_id,
+        Client.deleted_at.is_(None),
+        ordinary_clients(),
     )
 
 

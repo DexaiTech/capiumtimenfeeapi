@@ -51,7 +51,7 @@ from app.services.central_clients import (
     CentralClientGateway,
     CentralUnavailableError,
 )
-from app.services.clients import ClientsService, generate_client_codes
+from app.services.clients import ClientsService, ensure_ordinary_client, generate_client_codes
 from app.services.integration_logs import CENTRAL_CLIENT, record_sync
 from app.services.members import integrity_constraint
 from app.services.policy import OrgContext
@@ -174,6 +174,7 @@ class CentralClientService:
         client = await self.clients.get(ctx.organization_id, client_id, lock=lock)
         if client is None:
             raise NotFoundError("Client not found.")
+        ensure_ordinary_client(client)
         return client
 
     async def _fetch(self, organization_id: uuid.UUID, central_id: str) -> Fetched:

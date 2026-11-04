@@ -15,7 +15,9 @@ HEADER = (
 
 async def job_count(org: dict) -> int:
     return await scalar(
-        "SELECT count(*) FROM jobs WHERE organization_id = :o AND deleted_at IS NULL", o=org["id"]
+        "SELECT count(*) FROM jobs j JOIN clients c ON c.id = j.client_id "
+        "WHERE j.organization_id = :o AND j.deleted_at IS NULL AND NOT c.is_internal",
+        o=org["id"],
     )
 
 

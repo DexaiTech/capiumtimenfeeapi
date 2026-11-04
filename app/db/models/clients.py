@@ -21,6 +21,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.sql.expression import ColumnElement
 
 from app.db.base import Base, IdMixin, OrgScopedMixin, SoftDeleteMixin, TimestampMixin
 
@@ -155,6 +156,13 @@ class Client(Base, IdMixin, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
             "merged_into_client_id",
             postgresql_where=text("merged_into_client_id IS NOT NULL"),
         ),
+        # One built-in Internal client per practice.
+        Index(
+            "uq_clients_organization_id_internal",
+            "organization_id",
+            unique=True,
+            postgresql_where=text("is_internal"),
+        ),
     )
 
     # A short reference such as "ACME01"; generated from the sequence when not given.
@@ -209,6 +217,16 @@ class Client(Base, IdMixin, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
     central_sync_state: Mapped[str] = mapped_column(Text, nullable=False, server_default="local")
     # Set on a client that was merged into another: everything it had now belongs there.
     merged_into_client_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    # The practice's built-in Internal client (APT64): internal time goes on its non-billable
+    # jobs. It is never listed, counted, billed or synced, and cannot be edited or deleted.
+    is_internal: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+
+
+def ordinary_clients() -> ColumnElement[bool]:
+    """Every client but the practice's built-in Internal one (APT64), which only holds internal
+    time: it is left out of the client list and counts, WIP, billing, reports and the central
+    client service."""
+    return Client.is_internal.is_(False)
 
 
 class ClientContact(Base, IdMixin, OrgScopedMixin, TimestampMixin):
