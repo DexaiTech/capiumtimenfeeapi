@@ -17,20 +17,22 @@ class BranchRead(BaseModel):
     id: uuid.UUID
     name: str
     is_active: bool
-    # Live clients in the branch.
-    client_count: int
+    # Live clients in the branch; null for a member without ``client.read``.
+    client_count: int | None
     # False once clients have the branch: DELETE then deactivates it instead.
     can_delete: bool
     created_at: datetime
     updated_at: datetime
 
     @classmethod
-    def from_model(cls, branch: Branch, *, client_count: int) -> "BranchRead":
+    def from_model(
+        cls, branch: Branch, *, client_count: int, show_count: bool = True
+    ) -> "BranchRead":
         return cls(
             id=branch.id,
             name=branch.name,
             is_active=branch.is_active,
-            client_count=client_count,
+            client_count=client_count if show_count else None,
             can_delete=client_count == 0,
             created_at=branch.created_at,
             updated_at=branch.updated_at,

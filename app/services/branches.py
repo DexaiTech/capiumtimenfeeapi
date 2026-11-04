@@ -9,8 +9,8 @@ With ``organizations.branches_enabled`` on, creating or editing a client needs a
   offered for clients, those that have it keep it.
 * While branches are on, the last active branch cannot be deactivated or deleted (409
   ``LAST_ACTIVE_BRANCH``): every new client needs one. Switching branches on needs one too.
-* Reading is open to every member (the client form offers the list); writing needs
-  ``settings.manage``.
+* Reading is open to every member (the client form offers the list), the client counts to
+  those with ``client.read``; writing needs ``settings.manage``.
 """
 
 import uuid
@@ -25,6 +25,7 @@ from app.repositories.branches import BranchRepository
 from app.repositories.organizations import OrganizationRepository
 from app.schemas.branches import BranchCreate, BranchRead, BranchUpdate
 from app.schemas.settings import DeleteOutcome
+from app.services import policy
 from app.services.common import apply_changes, duplicate_error, record_audit
 from app.services.policy import OrgContext
 
@@ -36,7 +37,11 @@ class BranchService:
 
     async def _reads(self, ctx: OrgContext, branches: list[Branch]) -> list[BranchRead]:
         counts = await self.branches.client_counts(ctx.organization_id, [b.id for b in branches])
-        return [BranchRead.from_model(b, client_count=counts.get(b.id, 0)) for b in branches]
+        show = policy.has_permission(ctx, "client.read")
+        return [
+            BranchRead.from_model(b, client_count=counts.get(b.id, 0), show_count=show)
+            for b in branches
+        ]
 
     async def _read(self, ctx: OrgContext, branch: Branch) -> BranchRead:
         [read] = await self._reads(ctx, [branch])
