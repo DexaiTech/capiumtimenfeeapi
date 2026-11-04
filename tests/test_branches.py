@@ -12,6 +12,7 @@ import uuid
 import pytest
 from httpx import AsyncClient
 
+from tests.central_helpers import BAKERY, PLUMBING, central_on, enable
 from tests.clients_helpers import create_client, org_url, sql
 from tests.domain_factories import make_client, practice, staff
 from tests.factories import API, audit_entries, error
@@ -454,6 +455,29 @@ async def test_converting_a_lead_needs_a_branch_while_branches_are_on(client):
     assert await sql("SELECT branch_id::text AS b FROM clients WHERE id = :i", i=client_id) == [
         {"b": london["id"]}
     ]
+
+
+async def test_enabling_a_central_client_needs_a_branch_while_branches_are_on(client):
+    owner, org = await practice(client)
+    london = await create_branch(client, owner, org, name="London")
+    closed = await create_branch(client, owner, org, name="Closed", is_active=False)
+    await central_on(client, owner, org)
+    await use_branches(client, owner, org)
+    refused = await enable(client, owner, org, BAKERY)
+    assert refused.status_code == 422, refused.text
+    assert error(refused)["code"] == "BRANCH_REQUIRED"
+    assert error(refused)["details"][0]["field"] == "branch_id"
+    url = org_url(org, f"/central-clients/{BAKERY}/enable")
+    inactive = await client.post(url, headers=owner.headers, json={"branch_id": closed["id"]})
+    assert inactive.status_code == 422 and error(inactive)["details"][0]["field"] == "branch_id"
+    assert await sql("SELECT id FROM clients WHERE organization_id = :o", o=org["id"]) == []
+    created = await client.post(url, headers=owner.headers, json={"branch_id": london["id"]})
+    data = ok_data(created, 201)
+    assert data["result"] == "created"
+    assert data["client"]["branch"] == {"id": london["id"], "name": "London"}
+    # Switched off, a central client is enabled without one, as before.
+    await use_branches(client, owner, org, enabled=False)
+    assert (await enable(client, owner, org, PLUMBING)).status_code == 201
 
 
 # --- Bulk "Set branch" ------------------------------------------------------------------------

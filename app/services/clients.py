@@ -595,7 +595,7 @@ class ClientsService:
                     "invoice_template_id", "This invoice template is inactive."
                 )
 
-    async def _check_branch(
+    async def check_branch(
         self, ctx: OrgContext, values: dict[str, Any], current: Client | None = None
     ) -> None:
         """The branch must be an active branch of the practice; another practice's id answers 404.
@@ -691,7 +691,7 @@ class ClientsService:
             await self._check_people(ctx, values)
             await self._check_vat_rate(ctx, data.default_vat_rate_id)
             await self._check_billing_settings(ctx, values)
-            await self._check_branch(ctx, values)
+            await self.check_branch(ctx, values)
             if data.code:
                 await self._ensure_code_free(ctx, data.code)
             else:
@@ -737,7 +737,7 @@ class ClientsService:
             await self._check_centrally_managed(ctx, client, values)
             await self._check_people(ctx, values, client)
             await self._check_billing_settings(ctx, values, client)
-            await self._check_branch(ctx, values, client)
+            await self.check_branch(ctx, values, client)
             if "default_vat_rate_id" in values:
                 await self._check_vat_rate(
                     ctx, values["default_vat_rate_id"], client.default_vat_rate_id
@@ -852,7 +852,7 @@ class ClientsService:
                     # The rules of the single edit (APT74): an active branch of the practice,
                     # 404 for another practice's or an unknown id, 422 for an inactive one.
                     branch_id = data.branch_id
-                    await self._check_branch(ctx, {"branch_id": branch_id})
+                    await self.check_branch(ctx, {"branch_id": branch_id})
                     rows = self._bulk_set(clients, "branch_id", branch_id)
             await self.session.flush()
             await record_audit_many(self.session, ctx, rctx, rows)

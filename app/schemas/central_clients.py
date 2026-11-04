@@ -92,6 +92,16 @@ class CentralLinkRequest(RequestModel):
     central_id: CentralId
 
 
+class CentralEnableRequest(RequestModel):
+    branch_id: uuid.UUID | None = Field(
+        default=None,
+        description=(
+            "The branch of the client that is created; required while the practice uses "
+            "branches (422 `BRANCH_REQUIRED`), ignored when an existing client is linked"
+        ),
+    )
+
+
 class ClientSynced(BaseModel):
     client_id: uuid.UUID = Field(description="The synchronised client")
     code: str = Field(description="The client's code")
