@@ -1,6 +1,7 @@
 """Helpers for the central client, client merge, billing settings, invoice template and client
 overview tests. The central service is the mock gateway; the ``central_gateway`` fixture
-(``tests/conftest.py``) gives every test a clean one."""
+(``tests/conftest.py``) gives every test a clean one. The integration is off until a practice
+switches it on: ``new_team`` makes a practice that has it on, ``central_on`` switches it on."""
 
 import itertools
 import uuid
@@ -10,7 +11,8 @@ from httpx import AsyncClient, Response
 
 from tests.clients_helpers import org_url, scalar, sql
 from tests.factories import Actor
-from tests.ticket_helpers import Team, new_team
+from tests.ticket_helpers import Team
+from tests.ticket_helpers import new_team as new_plain_team
 
 __all__ = [
     "ARCHIVED",
@@ -21,6 +23,7 @@ __all__ = [
     "KESTREL",
     "PLUMBING",
     "Team",
+    "central_on",
     "client_row",
     "enable",
     "enabled",
@@ -47,6 +50,21 @@ BOOKKEEPER = "CC-0009"  # Sandra Whitfield t/a Whitfield Bookkeeping: no company
 ARCHIVED = "CC-0023"  # Old Mill Printers Ltd: archived centrally
 
 _event_numbers = itertools.count(1)
+
+
+async def central_on(http: AsyncClient, actor: Actor, org: dict, on: bool = True) -> None:
+    """Switch the central client integration on (or off) for the practice."""
+    response = await http.patch(
+        org_url(org, "/integrations/central_client"), headers=actor.headers, json={"enabled": on}
+    )
+    assert response.status_code == 200, response.text
+
+
+async def new_team(http: AsyncClient, name: str = "Acme Accountants") -> Team:
+    """A practice and its Owner, with the central client integration switched on."""
+    team = await new_plain_team(http, name)
+    await central_on(http, team.owner, team.org)
+    return team
 
 
 def next_event_id(prefix: str = "evt") -> str:

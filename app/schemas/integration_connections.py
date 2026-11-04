@@ -64,7 +64,7 @@ class IntegrationCard(BaseModel):
         description="`2A` (practice management) or `2B` (bookkeeping), else null"
     )
     enabled: bool = Field(description="Switched on for this practice")
-    always_on: bool = Field(description="Cannot be switched off (the central client service)")
+    always_on: bool = Field(description="Cannot be switched off")
     status: CardStatus = Field(
         description=(
             "`disabled`, `ready` (on, nothing synchronised yet), `connected` (the last attempt "

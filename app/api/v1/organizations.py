@@ -15,6 +15,8 @@ from app.schemas.organization import (
     OrganizationRead,
     OrganizationUpdate,
 )
+from app.services.integration_connections import ConnectionService
+from app.services.integrations import CENTRAL_CLIENT
 from app.services.organizations import OrganizationService
 from app.services.policy import OrgContext
 
@@ -40,17 +42,26 @@ NoCreationWhenClosed = Depends(
     summary="List my practices",
     description=(
         "Every practice the caller is an active member of, with the caller's role and "
-        "permissions in each, ordered by name. Not paginated: the set is small and bounded."
+        "permissions in each and whether it has the Capium Central client integration on "
+        "(`central_client_enabled`), ordered by name. Not paginated: the set is small and bounded."
     ),
     responses=error_responses(403),
 )
 async def list_my_organizations(
-    principal: VerifiedPrincipalDep, service: OrganizationServiceDep
+    principal: VerifiedPrincipalDep, service: OrganizationServiceDep, session: SessionDep
 ) -> ApiResponse[list[OrganizationContextRead]]:
     found = await service.list_mine(principal.user)
+    central = await ConnectionService(session).enabled_among(
+        [organization.id for organization, _, _ in found], CENTRAL_CLIENT
+    )
     return ok(
         [
-            OrganizationContextRead.build(organization, role, permissions)
+            OrganizationContextRead.build(
+                organization,
+                role,
+                permissions,
+                central_client_enabled=organization.id in central,
+            )
             for organization, role, permissions in found
         ]
     )
@@ -78,7 +89,11 @@ async def create_organization(
     ctx: ContextDep,
 ) -> ApiResponse[OrganizationContextRead]:
     organization, role = await service.create(principal.user, body, ctx)
-    return ok(OrganizationContextRead.build(organization, role), "Practice created")
+    # A new practice has every integration at its default: Capium Central is off.
+    return ok(
+        OrganizationContextRead.build(organization, role, central_client_enabled=False),
+        "Practice created",
+    )
 
 
 @router.get(
@@ -94,24 +109,36 @@ async def get_organization_by_slug(
     slug: Annotated[str, Path(min_length=1, max_length=40)],
     principal: VerifiedPrincipalDep,
     service: OrganizationServiceDep,
+    session: SessionDep,
 ) -> ApiResponse[OrganizationContextRead]:
     organization, role, permissions = await service.get_by_slug(principal.user, slug)
-    return ok(OrganizationContextRead.build(organization, role, permissions))
+    central = await ConnectionService(session).is_enabled(organization.id, CENTRAL_CLIENT)
+    return ok(
+        OrganizationContextRead.build(
+            organization, role, permissions, central_client_enabled=central
+        )
+    )
 
 
 @router.get(
     "/{organization_id}",
     summary="Get a practice",
     description=(
-        "The practice (with its billing settings) and the caller's role and permissions in it. "
+        "The practice (with its billing settings), the caller's role and permissions in it and "
+        "whether it has the Capium Central client integration on (`central_client_enabled`). "
         "Requires `organization.read`."
     ),
     responses=error_responses(403, 404),
 )
 async def get_organization(
-    org: Annotated[OrgContext, Depends(require("organization.read"))],
+    org: Annotated[OrgContext, Depends(require("organization.read"))], session: SessionDep
 ) -> ApiResponse[OrganizationContextRead]:
-    return ok(OrganizationContextRead.build(org.organization, org.role, org.permissions))
+    central = await ConnectionService(session).is_enabled(org.organization_id, CENTRAL_CLIENT)
+    return ok(
+        OrganizationContextRead.build(
+            org.organization, org.role, org.permissions, central_client_enabled=central
+        )
+    )
 
 
 @router.patch(

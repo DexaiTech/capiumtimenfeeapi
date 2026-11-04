@@ -11,6 +11,7 @@ from tests.central_helpers import (
     JOINERY,
     KESTREL,
     PLUMBING,
+    central_on,
     client_row,
     enabled,
     new_team,
@@ -320,6 +321,7 @@ async def test_events_need_settings_manage_and_a_practice_you_belong_to(client):
 async def test_events_only_touch_the_practice_they_are_sent_to(client):
     first = await new_team(client)
     owner, org = await create_user_with_org(client, "Second Practice")
+    await central_on(client, owner, org)
     mine = (await enabled(client, first.owner, first.org, BAKERY))["client"]
     theirs = (await enabled(client, owner, org, BAKERY))["client"]
     response = await send_event(
@@ -467,6 +469,7 @@ async def test_process_changes_reads_the_feed_in_batches(client, central_gateway
 async def test_every_practice_has_its_own_cursor(client, central_gateway):
     first = await new_team(client)
     owner, org = await create_user_with_org(client, "Second Practice")
+    await central_on(client, owner, org)
     one = (await enabled(client, first.owner, first.org, BAKERY))["client"]
     two = (await enabled(client, owner, org, BAKERY))["client"]
     central_gateway.rename(BAKERY, name="Shared Rename Ltd")

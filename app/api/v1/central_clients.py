@@ -1,7 +1,11 @@
 """The central client integration: search and enable central clients, link and synchronise the
-practice's clients, receive central events, and the mock central service's switches. HTTP only."""
+practice's clients, receive central events, and the mock central service's switches. HTTP only.
+
+Every route but the mock's answers 409 ``INTEGRATION_DISABLED`` while the practice has the
+integration switched off (it is off until switched on in Settings, Integrations: ticket APT74)."""
 
 import uuid
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Annotated
 
@@ -35,12 +39,29 @@ from app.services.central_clients import (
 )
 from app.services.central_events import CentralEventService
 from app.services.central_sync import CentralClientService
+from app.services.integration_connections import ConnectionService
+from app.services.integrations import CENTRAL_CLIENT
 from app.services.policy import OrgContext
 
 router = APIRouter(prefix="/organizations/{organization_id}", tags=["Central clients"])
 
-ClientCreator = Annotated[OrgContext, Depends(require("client.create"))]
-ClientEditor = Annotated[OrgContext, Depends(require("client.update"))]
+
+def require_central(permission: str) -> Callable[..., Awaitable[OrgContext]]:
+    """The caller holds ``permission`` and the practice has the integration on (else 409
+    ``INTEGRATION_DISABLED``, after the permission check)."""
+
+    async def dependency(
+        org: Annotated[OrgContext, Depends(require(permission))], session: SessionDep
+    ) -> OrgContext:
+        await ConnectionService(session).ensure_enabled(org.organization_id, CENTRAL_CLIENT)
+        return org
+
+    return dependency
+
+
+ClientCreator = Annotated[OrgContext, Depends(require_central("client.create"))]
+ClientEditor = Annotated[OrgContext, Depends(require_central("client.update"))]
+CentralSettingsManager = Annotated[OrgContext, Depends(require_central("settings.manage"))]
 SettingsManager = Annotated[OrgContext, Depends(require("settings.manage"))]
 GatewayDep = Annotated[CentralClientGateway, Depends(get_central_gateway)]
 CentralIdPath = Annotated[
@@ -88,9 +109,10 @@ ClientIdPath = Annotated[uuid.UUID, Path(description="The client's id")]
         "linked but has the same company number: enabling links it instead of creating a "
         "second one). `source` is `live`, and every live answer refreshes the practice's cache; "
         "while the central service is down it is `cache` with `stale: true`, and 503 "
-        "`CENTRAL_UNAVAILABLE` when nothing is cached yet. Requires `client.create`."
+        "`CENTRAL_UNAVAILABLE` when nothing is cached yet. "
+        "Requires `client.create`. 409 `INTEGRATION_DISABLED` while the integration is off."
     ),
-    responses=error_responses(403, 404, 503),
+    responses=error_responses(403, 404, 409, 503),
 )
 async def search_central_clients(
     org: ClientCreator,
@@ -118,7 +140,8 @@ async def search_central_clients(
         "down the cached copy is used (`from_cache: true`, the client is marked `stale`). "
         "404 for an id the central service does not know, 409 `CENTRAL_CLIENT_ARCHIVED` for "
         "a client that is archived centrally, 503 `CENTRAL_UNAVAILABLE` when it is down and "
-        "the client is not cached. Requires `client.create`."
+        "the client is not cached. "
+        "Requires `client.create`. 409 `INTEGRATION_DISABLED` while the integration is off."
     ),
     responses={
         **error_responses(403, 404, 409, 503),
@@ -154,9 +177,10 @@ async def enable_central_client(
         "(at most 200 per call, the longest unsynced first; `remaining` counts the rest) and "
         "reports each client's `changes` as `{field: [old, new]}`. While the central service "
         "is down the stored values stay, the clients become `stale` and the failures are "
-        "logged: the answer is still 200 with `available: false`. Requires `client.update`."
+        "logged: the answer is still 200 with `available: false`. "
+        "Requires `client.update`. 409 `INTEGRATION_DISABLED` while the integration is off."
     ),
-    responses=error_responses(403, 404),
+    responses=error_responses(403, 404, 409),
 )
 async def sync_central_clients(
     org: ClientEditor, service: CentralServiceDep, ctx: ContextDep
@@ -172,7 +196,8 @@ async def sync_central_clients(
         "changed). While the service is down the stored values stay, `state` becomes `stale` "
         "and the failure is logged: still 200. `failed` means the central service no longer "
         "knows the client. 409 `CLIENT_NOT_LINKED` for a client that is not linked and 409 "
-        "`CLIENT_MERGED` for one that was merged away. Requires `client.update`."
+        "`CLIENT_MERGED` for one that was merged away. "
+        "Requires `client.update`. 409 `INTEGRATION_DISABLED` while the integration is off."
     ),
     responses=error_responses(403, 404, 409),
 )
@@ -192,7 +217,7 @@ async def sync_central_client(
         "409 `CLIENT_ALREADY_LINKED` when this client is linked (unlink it first), 409 "
         "`CENTRAL_CLIENT_ARCHIVED`, 404 for an unknown client or central id, 503 "
         "`CENTRAL_UNAVAILABLE` when the service is down and the client is not cached. "
-        "Requires `client.create`."
+        "Requires `client.create`. 409 `INTEGRATION_DISABLED` while the integration is off."
     ),
     responses=error_responses(403, 404, 409, 503),
 )
@@ -212,7 +237,7 @@ async def link_central_client(
     description=(
         "Makes the client a local client again: the link is removed and its name and address "
         "can be edited. 409 `CLIENT_NOT_LINKED` for a client that is not linked. "
-        "Requires `client.create`."
+        "Requires `client.create`. 409 `INTEGRATION_DISABLED` while the integration is off."
     ),
     responses=error_responses(403, 404, 409),
 )
@@ -237,12 +262,15 @@ async def unlink_central_client(
         "`skipped` and changes nothing (200). An event for a central client that is not "
         "enabled here is `skipped`, never an error. A merge moves everything of the merged "
         "client to the survivor in one transaction (see the central clients module). "
-        "Requires `settings.manage`."
+        "Requires `settings.manage`. 409 `INTEGRATION_DISABLED` while the integration is off."
     ),
-    responses=error_responses(403, 404),
+    responses=error_responses(403, 404, 409),
 )
 async def receive_central_event(
-    body: CentralEventRequest, org: SettingsManager, service: EventServiceDep, ctx: ContextDep
+    body: CentralEventRequest,
+    org: CentralSettingsManager,
+    service: EventServiceDep,
+    ctx: ContextDep,
 ) -> ApiResponse[CentralEventResult]:
     event = CentralClientEvent(
         event_id=body.event_id,
@@ -272,12 +300,12 @@ async def receive_central_event(
         "call; `has_more` says to call again). The cursor moves forward only when the whole "
         "batch was processed; a repeated event is harmless. While the central service is "
         "down the answer is 200 with `available: false` and the failure is logged. "
-        "Requires `settings.manage`."
+        "Requires `settings.manage`. 409 `INTEGRATION_DISABLED` while the integration is off."
     ),
-    responses=error_responses(403, 404),
+    responses=error_responses(403, 404, 409),
 )
 async def process_central_changes(
-    org: SettingsManager, service: EventServiceDep, ctx: ContextDep
+    org: CentralSettingsManager, service: EventServiceDep, ctx: ContextDep
 ) -> ApiResponse[ProcessedChanges]:
     return ok(await service.process_changes(org, ctx), "Central changes processed")
 
