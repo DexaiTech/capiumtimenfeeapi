@@ -14,14 +14,17 @@ does not cover is a write-off of those items (``billed_value < wip_value``), as 
 fee that is already billed. Whatever is never used stays billed: nothing happens to it.
 
 **Un-assigning** takes items off the line again: their allocations are deleted (as when a draft
-line is removed) and the items are unbilled WIP once more. Both run under the invoice row lock,
-then the items (the order every billing flow uses), check the WIP period lock for today (and, to
-un-assign, for the days the items were assigned) and are audited.
+line is removed) and the items are unbilled WIP once more. The advance is then used again, oldest
+first, on the work left on the line, so work written off for want of it is covered again. Both
+run under the invoice row lock, then the items (the order every billing flow uses), check the WIP
+period lock for today (and, to un-assign, for the days the items were assigned, and of the work
+whose billed value changes) and are audited.
 """
 
 import uuid
 from collections.abc import Sequence
-from typing import Any
+from datetime import date
+from typing import Any, cast
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -244,7 +247,12 @@ class AdvanceService:
                     "Some of the items are not assigned to this advance.",
                     details={"items": sorted(str(i) for i in missing)},
                 )
-            days = {today_for(ctx.organization)} | {a.assigned_on for a in chosen if a.assigned_on}
+            # What the advance no longer covers goes to the work left on it, oldest first.
+            kept = [a for a in assigned if a not in chosen]
+            rebilled = await self._reallocate(org_id, line, kept)
+            days = {today_for(ctx.organization)} | {
+                a.assigned_on for a in [*chosen, *(r for r, _ in rebilled)] if a.assigned_on
+            }
             await period_locks.assert_open_many(self.session, org_id, days, "wip")
             items = await lock_allocation_items(self.session, org_id, chosen)
             set_items_status(items, "unbilled")
@@ -271,6 +279,10 @@ class AdvanceService:
                     "remaining": max(
                         line.net_amount - sum(a.billed_value for a in assigned) + released, 0
                     ),
+                    "rebilled": {
+                        str(a.time_entry_id or a.disbursement_id): [old, a.billed_value]
+                        for a, old in rebilled
+                    },
                 },
             )
 
@@ -296,6 +308,44 @@ class AdvanceService:
                 details={"status": invoice.status},
             )
         return invoice, line
+
+    async def _reallocate(
+        self, organization_id: uuid.UUID, line: InvoiceLine, allocations: Sequence[WipAllocation]
+    ) -> list[tuple[WipAllocation, int]]:
+        """Uses the advance on ``allocations`` again oldest work first, as assigning does: each
+        item bills its WIP value while the advance lasts. Returns the allocations whose billed
+        value changed, each with the value it had."""
+        entries = {
+            e.id: e.entry_date
+            for e in await _rows(
+                self.session, TimeEntry, organization_id, [a.time_entry_id for a in allocations]
+            )
+        }
+        disbursements = {
+            d.id: d.incurred_on
+            for d in await _rows(
+                self.session,
+                Disbursement,
+                organization_id,
+                [a.disbursement_id for a in allocations],
+            )
+        }
+
+        def oldest_first(a: WipAllocation) -> tuple[date, bool, uuid.UUID]:
+            if a.time_entry_id is not None:
+                return entries[a.time_entry_id], False, a.time_entry_id
+            item_id = cast(uuid.UUID, a.disbursement_id)
+            return disbursements[item_id], True, item_id
+
+        remaining = line.net_amount
+        changed: list[tuple[WipAllocation, int]] = []
+        for allocation in sorted(allocations, key=oldest_first):
+            billed = min(allocation.wip_value, remaining)
+            remaining -= billed
+            if billed != allocation.billed_value:
+                changed.append((allocation, allocation.billed_value))
+                allocation.billed_value = billed
+        return changed
 
     async def _live(self, organization_id: uuid.UUID, line: InvoiceLine) -> list[WipAllocation]:
         return [

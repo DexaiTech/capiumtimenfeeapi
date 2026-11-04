@@ -391,7 +391,9 @@ async def assign_to_advance(
     description=(
         "Takes items assigned to an advance line off it again: their allocations are deleted "
         "and they are unbilled WIP once more (409 `NOT_ASSIGNED` for an item that is not on "
-        "the line). The WIP period lock applies to today and to the days they were assigned. "
+        "the line). The advance is then used again, oldest work first, on the items left on the "
+        "line. The WIP period lock applies to today, to the days they were assigned and to the "
+        "days the items whose billed value changes were assigned. "
         "Audited (`invoice.time_unassigned`). Requires `invoice.create`."
     ),
     responses=error_responses(403, 404, 409),

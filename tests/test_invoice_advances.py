@@ -705,3 +705,46 @@ async def test_a_drafts_typed_line_becomes_fees_in_advance_and_back(client):
     )
     assert has_time.status_code == 409 and error(has_time)["code"] == "ADVANCE_HAS_TIME"
     assert (await get_invoice(client, p.owner, p.org, made["id"]))["lines"][1]["is_advance"] is True
+
+
+async def test_taking_time_off_a_used_up_advance_covers_the_later_work_again(client):
+    """APT69: the advance is used oldest work first, after an un-assign too: what it no longer
+    covers goes to the work after it, which was written off."""
+    p = await new_practice(client)
+    invoice, line_id = await advance_invoice(
+        client, p, {"description": "Fees in advance", "net_amount": 100_000}
+    )
+    first, second, third = [
+        await make_time_entry(
+            p.org, p.owner, client=p.client, entry_date=day, minutes=minutes, charge_rate=12_000
+        )
+        for day, minutes in (
+            (date(2026, 5, 1), 300),
+            (date(2026, 5, 2), 300),
+            (date(2026, 5, 3), 150),
+        )
+    ]
+    response = await assign(
+        client, p.owner, p.org, invoice["id"], line_id, time=[first, second, third]
+    )
+    assert response.status_code == 200, response.text
+    advance = response.json()["data"]["lines"][0]["advance"]
+    assert (advance["used"], advance["remaining"], advance["written_off"]) == (100_000, 0, 50_000)
+
+    response = await assign(client, p.owner, p.org, invoice["id"], line_id, time=[first], undo=True)
+    assert response.status_code == 200, response.text
+    data = response.json()["data"]
+    advance = data["lines"][0]["advance"]
+    assert [(i["id"], i["wip_value"], i["billed_value"]) for i in advance["items"]] == [
+        (str(second.id), 60_000, 60_000),
+        (str(third.id), 30_000, 30_000),
+    ]
+    assert (advance["used"], advance["remaining"], advance["written_off"]) == (90_000, 10_000, 0)
+    assert data["wip"]["adjustment"] == 0
+    assert {k: data[k] for k in FIGURES} == {k: invoice[k] for k in FIGURES}
+    [entry] = await audit_entries(p.id, "invoice.time_unassigned")
+    assert entry["metadata"]["remaining"] == 10_000
+    assert entry["metadata"]["rebilled"] == {
+        str(second.id): [40_000, 60_000],
+        str(third.id): [0, 30_000],
+    }
