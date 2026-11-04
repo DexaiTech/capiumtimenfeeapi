@@ -226,7 +226,7 @@ on the day it was worked, resolved by `RateBook.tiers`:
 |---|---|---|
 | `client_job` | The **client job-specific rate**: the rate agreed with the client (client + service + staff, client + service, client + staff, client), else the job's own hourly rate set on the client's Jobs tab (APT54) | 1–4 |
 | `task` | The **task rate**: the rate set against the job's service (staff + service, else service + grade) | 5 |
-| `staff` | The **staff charge-out rate**: the person's own rate (the grade's in `grade_only` mode), else the grade's, else the practice default. Always exists | 6, 7, default |
+| `staff` | The **staff charge-out rate**: the person's own rate (the grade's in `grade_only` mode), else the grade's (not in `staff_only` mode), else the practice default. Always exists | 6, 7, default |
 
 Overtime is priced at the multiplier as everywhere. The rate is resolved from the rules as they
 are now (a rule counts on the days of its period; the job's own rate is undated), not taken from

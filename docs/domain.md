@@ -96,7 +96,7 @@ grade's default cost rate.
   (all on by default) and `invoice_approval_required` (off). Off, the flow is skipped (submitted
   work is approved at once) and switching it off approves what is waiting, unless a locked period
   or the WIP left stops it (`docs/modules/foundation.md`, "Approval switches").
-* `rate_mode`: `staff_first` (default) or `grade_only`. See Rates.
+* `rate_mode`: `staff_first` (default), `grade_only` or `staff_only`. See Rates.
 * `fixed_fee_wip_mode` decides **when the unbilled part of a fixed fee counts as WIP** (hourly
   and non-billable jobs are not affected). This is the contract the WIP module implements:
   * `on_completion` (default): the unbilled fixed fee counts as WIP **once the job is
@@ -206,6 +206,10 @@ the time already recorded for earlier days.
   (`GET /rates/resolve`, where the level 6 step is `applicable: false` with the reason) and
   re-rating, so a preview always equals what saving or re-rating will do. Switching the mode
   never rewrites recorded time.
+  `staff_only` (APT79) **skips the grade rates** instead: the grade's rate for the service
+  (`service_grade`, level 5) and level 7, so a person without a `staff` rate is charged the
+  practice default. The client, job and service rates, the person's own rates and the cost rate
+  are unchanged; the skipped steps are `applicable: false` with the reason in the preview.
 
 * The rate, its source (`rate_source`: the level that priced it) and the value are
   snapshotted on the entry when it is saved. A rate change never rewrites recorded time;

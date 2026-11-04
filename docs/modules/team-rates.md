@@ -407,7 +407,11 @@ created and edited, and they price time again as soon as the mode is switched ba
 (`app/services/charge_rates.py`) serves a time entry that is saved, `GET /rates/resolve` and re-rating, so the
 preview always shows what saving or re-rating will do: in `grade_only` mode the `staff` step of `charge_ladder`
 comes back with `applicable: false` and the reason "This practice prices by grade only: staff rates are not
-used.". Changing the mode never touches recorded entries; they follow it only when they are edited or re-rated.
+used.". It can also be `staff_only` (APT79): the grade rates (the grade's rate for the service at level 5, and
+level 7) are then skipped, so a person without a `staff` rule is charged the practice default; those steps come
+back with `applicable: false` and the reason "This practice prices by staff rates only: grade rates are not
+used.". The other rates of level 5 and the cost rate are unchanged. Changing the mode never touches recorded
+entries; they follow it only when they are edited or re-rated.
 
 **Overtime.** The practice setting `overtime_enabled` (default false) and `overtime_multiplier_bp` (basis points,
 default 15000 = 1.5x) switch on time marked `is_overtime` (`POST`/`PATCH /time-entries`; 422 while the setting is

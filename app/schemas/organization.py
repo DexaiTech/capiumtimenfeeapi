@@ -115,7 +115,9 @@ class OrganizationRead(BaseModel):
     rate_mode: RateMode = Field(
         description=(
             "Which rates price time: `staff_first` uses a staff member's own rate before their "
-            "grade's, `grade_only` skips the staff-level rate so the grade rate applies"
+            "grade's, `grade_only` skips the staff-level rate so the grade rate applies, "
+            "`staff_only` skips the grade rates so a staff member without their own rate is "
+            "charged the practice default"
         )
     )
     overtime_enabled: bool = Field(
@@ -490,7 +492,9 @@ class OrganizationUpdate(RequestModel):
         default=None,
         description=(
             "`staff_first`: a staff member's own rate comes before their grade's; `grade_only`: "
-            "the staff-level rate is skipped and the grade rate applies"
+            "the staff-level rate is skipped and the grade rate applies; `staff_only`: the grade "
+            "rates are skipped and a staff member without their own rate is charged the practice "
+            "default"
         ),
     )
     overtime_enabled: bool | None = Field(

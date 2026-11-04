@@ -137,10 +137,10 @@ async def test_the_organization_routes_name_the_new_settings_and_their_bounds(cl
         "invoice_approval_threshold",
     ):
         assert upper_bound(properties[name]) == 100_000_000, name
-    assert choices(properties["rate_mode"]) == {"staff_first", "grade_only"}
+    assert choices(properties["rate_mode"]) == {"staff_first", "grade_only", "staff_only"}
     assert choices(properties["fixed_fee_wip_mode"]) == {"on_completion", "by_budget_progress"}
     read = spec["components"]["schemas"]["OrganizationRead"]["properties"]
-    assert choices(read["rate_mode"]) == {"staff_first", "grade_only"}
+    assert choices(read["rate_mode"]) == {"staff_first", "grade_only", "staff_only"}
     assert choices(read["fixed_fee_wip_mode"]) == {"on_completion", "by_budget_progress"}
 
 

@@ -110,7 +110,7 @@ target is looked up, so a caller without the permission gets 403 for any id.
 | `expense_markup_bp` | integer basis points, 0–100 000 (1000 = 10%) |
 | `cost_plus_markup_bp` | integer basis points, 0–100 000 (5000 = 50%) |
 | `recovery_rate_order` | `client_job`, `task` and `staff`, each once, in any order |
-| `rate_mode` | `staff_first` or `grade_only` |
+| `rate_mode` | `staff_first`, `grade_only` or `staff_only` |
 | `country` | ISO 3166 alpha-2, upper case |
 | `vat_number`, `company_number` (≤ 20), `email` (valid address), `phone` (≤ 40), `address_line1`, `address_line2` (≤ 200), `city` (≤ 100), `postcode` (≤ 20), `bank_details` (≤ 500), `invoice_footer` (≤ 1000) | nullable: `null`, `""` or blanks clear them; text is trimmed |
 
@@ -136,7 +136,7 @@ their own `time_increment_minutes`):
 | `expense_markup_bp` | 0 | Basis points added when an expense is recharged to the client |
 | `cost_plus_markup_bp` | 5 000 (50%) | The margin on cost of the "cost plus" basis of the recovery analysis (`docs/modules/reports.md`), unless the client or the job has its own |
 | `recovery_rate_order` | `client_job`, `task`, `staff` | The order in which the recovery analysis looks for the rate the work could have been billed at |
-| `rate_mode` | `staff_first` | `grade_only` skips the staff-level rate when time is priced (`docs/domain.md`, "Rates") |
+| `rate_mode` | `staff_first` | `grade_only` skips the staff-level rate when time is priced, `staff_only` the grade rates (`docs/domain.md`, "Rates") |
 | `client_segments_enabled` | true | Whether the practice uses client segments (see [Client segments switch](#client-segments-switch)) |
 | `branches_enabled` | false | Whether the practice uses branches: on, every client needs one (see [Branches switch](#branches-switch)) |
 

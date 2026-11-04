@@ -15,10 +15,12 @@ The charge-out rate of a time entry is the first that exists of, most specific f
 
 and finally ``default``: ``organizations.default_charge_rate``. A rule counts only on the days
 inside its effective period. In the practice's ``grade_only`` rate mode level 6 is skipped, so a
-person's own rate never prices time and the grade's rate does (levels 1-5 are unchanged). The
-cost rate is the person's ``staff`` cost rule, else the grade's cost rule or default cost rate,
-else (``staff_first``) the person's first cost rule when the day is before it starts, else 0,
-in either mode. The cost never depends on the client, the job or how the job is billed.
+person's own rate never prices time and the grade's rate does (levels 1-5 are unchanged). In
+the ``staff_only`` rate mode the grade rates (``service_grade`` and level 7) are skipped, so a
+person without a rate of their own is priced at the practice default. The cost rate is the
+person's ``staff`` cost rule, else the grade's cost rule or default cost rate, else
+(``staff_first``) the person's first cost rule when the day is before it starts, else 0, in
+every mode. The cost never depends on the client, the job or how the job is billed.
 
 The entry's service is the service of its job. The person's grade is their current grade.
 
@@ -63,6 +65,7 @@ LEVEL_LABELS = {
     6: "Staff rate",
     7: "Grade rate",
 }
+STAFF_ONLY_REASON = "This practice prices by staff rates only: grade rates are not used."
 
 
 @dataclass(frozen=True, slots=True)
@@ -292,13 +295,14 @@ class RateBook:
         )
         # The person's own rate for the service wins over the grade's rate for the service, which
         # wins over the service's rate for everyone.
+        staff_only = self.rate_mode == "staff_only"
         rule5: RuleRow | None = None
         source5 = "service_grade"
         if service is not None:
             rule5 = self._rule("charge", None, service, user, None, day)
             if rule5 is not None:
                 source5 = "service_staff"
-            elif grade is not None:
+            elif grade is not None and not staff_only:
                 rule5 = self._rule("charge", None, service, None, grade, day)
             if rule5 is None:
                 rule5 = self._rule("charge", None, service, None, None, day)
@@ -309,8 +313,13 @@ class RateBook:
             5,
             source5,
             labels5.get(source5, LEVEL_LABELS[5]),
-            applicable=service is not None and (grade is not None or rule5 is not None),
-            reason="The job has no service." if service is None else "This person has no grade.",
+            applicable=service is not None
+            and (rule5 is not None or (grade is not None and not staff_only)),
+            reason="The job has no service."
+            if service is None
+            else STAFF_ONLY_REASON
+            if staff_only
+            else "This person has no grade.",
             rule=rule5,
         )
         grade_only = self.rate_mode == "grade_only"
@@ -322,14 +331,16 @@ class RateBook:
             reason="This practice prices by grade only: staff rates are not used.",
             rule=None if grade_only else self._rule("charge", None, None, user, None, day),
         )
-        grade_rule = self._rule("charge", None, None, None, grade, day) if grade else None
-        grade_default = self.defaults.get(grade, (None, None))[0] if grade else None
+        # In ``staff_only`` mode the person's grade does not price time.
+        graded = None if staff_only else grade
+        grade_rule = self._rule("charge", None, None, None, graded, day) if graded else None
+        grade_default = self.defaults.get(graded, (None, None))[0] if graded else None
         yield _step(
             7,
             "grade",
             LEVEL_LABELS[7],
-            applicable=grade is not None,
-            reason="This person has no grade.",
+            applicable=graded is not None,
+            reason=STAFF_ONLY_REASON if staff_only else "This person has no grade.",
             rule=grade_rule,
             rate=grade_default if grade_rule is None else None,
             origin="grade_default" if grade_rule is None and grade_default is not None else None,
