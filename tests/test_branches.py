@@ -487,7 +487,13 @@ async def test_enabling_a_central_client_needs_a_branch_while_branches_are_on(cl
     url = org_url(org, f"/central-clients/{BAKERY}/enable")
     inactive = await client.post(url, headers=owner.headers, json={"branch_id": closed["id"]})
     assert inactive.status_code == 422 and error(inactive)["details"][0]["field"] == "branch_id"
-    assert await sql("SELECT id FROM clients WHERE organization_id = :o", o=org["id"]) == []
+    # The practice's built-in Internal client is there from the start: no other client was made.
+    assert (
+        await sql(
+            "SELECT id FROM clients WHERE organization_id = :o AND NOT is_internal", o=org["id"]
+        )
+        == []
+    )
     created = await client.post(url, headers=owner.headers, json={"branch_id": london["id"]})
     data = ok_data(created, 201)
     assert data["result"] == "created"
