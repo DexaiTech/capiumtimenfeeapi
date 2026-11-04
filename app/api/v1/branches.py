@@ -76,8 +76,9 @@ async def get_branch(
     "/branches/{branch_id}",
     summary="Update a branch",
     description=(
-        "Changes the name or the active state. 409 `BRANCH_NAME_TAKEN` for a duplicate. "
-        "Requires `settings.manage`."
+        "Changes the name or the active state. 409 `BRANCH_NAME_TAKEN` for a duplicate; 409 "
+        "`LAST_ACTIVE_BRANCH` for deactivating the last active branch while the practice uses "
+        "branches. Requires `settings.manage`."
     ),
     responses=error_responses(403, 404, 409),
 )
@@ -96,9 +97,10 @@ async def update_branch(
     summary="Deactivate a branch",
     description=(
         "A deactivated branch is not offered for new clients; clients that have it keep it. "
+        "409 `LAST_ACTIVE_BRANCH` for the last active branch while the practice uses branches. "
         "Requires `settings.manage`."
     ),
-    responses=error_responses(403, 404),
+    responses=error_responses(403, 404, 409),
 )
 async def deactivate_branch(
     branch_id: uuid.UUID, org: BranchManager, service: BranchServiceDep, ctx: ContextDep
@@ -124,9 +126,10 @@ async def activate_branch(
     description=(
         "Deletes a branch no client has. A branch that clients have (deleted clients included) "
         "is deactivated instead; `data.outcome` says which (`deleted` or `deactivated`). "
+        "409 `LAST_ACTIVE_BRANCH` for the last active branch while the practice uses branches. "
         "Requires `settings.manage`."
     ),
-    responses=error_responses(403, 404),
+    responses=error_responses(403, 404, 409),
 )
 async def delete_branch(
     branch_id: uuid.UUID, org: BranchManager, service: BranchServiceDep, ctx: ContextDep

@@ -89,6 +89,17 @@ class BranchRepository:
         rows = (await self.session.execute(stmt)).all()
         return {row[0]: int(row[1]) for row in rows if row[0] is not None}
 
+    async def any_active(
+        self, organization_id: uuid.UUID, exclude_id: uuid.UUID | None = None
+    ) -> bool:
+        """Whether the practice has an active branch (other than ``exclude_id``)."""
+        stmt = select(Branch.id).where(
+            Branch.organization_id == organization_id, Branch.is_active.is_(True)
+        )
+        if exclude_id is not None:
+            stmt = stmt.where(Branch.id != exclude_id)
+        return (await self.session.execute(stmt.limit(1))).first() is not None
+
     async def any_client(self, organization_id: uuid.UUID, branch_id: uuid.UUID) -> bool:
         """Whether any client, deleted ones included, has the branch (the foreign key would
         refuse to delete it)."""
