@@ -31,7 +31,7 @@ BranchServiceDep = Annotated[BranchService, Depends(get_branch_service)]
     description=(
         "The practice's branches, by name. Bounded list, not paginated. `is_active` limits to "
         "active or inactive branches; `q` searches the name. Each carries `client_count` (live "
-        "clients in the branch) and `can_delete`. Any member."
+        "clients in the branch; null without `client.read`) and `can_delete`. Any member."
     ),
     responses=error_responses(404),
 )

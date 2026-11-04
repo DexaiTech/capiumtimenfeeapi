@@ -16,6 +16,7 @@ from tests.central_helpers import BAKERY, PLUMBING, central_on, enable
 from tests.clients_helpers import create_client, org_url, sql
 from tests.domain_factories import make_client, practice, staff
 from tests.factories import API, audit_entries, error
+from tests.foundation_helpers import add_custom_role
 from tests.time_helpers import ok_data
 
 
@@ -187,6 +188,22 @@ async def test_every_member_reads_and_settings_managers_write(client, role, can_
     )
     codes = (created.status_code, patched.status_code, off.status_code, deleted.status_code)
     assert codes == ((201, 200, 200, 200) if can_write else (403,) * 4)
+
+
+async def test_the_client_count_is_only_for_members_who_read_clients(client):
+    owner, org = await practice(client)
+    london = await create_branch(client, owner, org, name="London")
+    await make_client(org, branch_id=uuid.UUID(london["id"]))
+    await add_custom_role(org["id"], "No clients", ["organization.read"])
+    member = await staff(org, "No clients")
+    [listed] = ok_data(await client.get(org_url(org, "/branches"), headers=member.headers))
+    assert listed["name"] == "London" and listed["client_count"] is None
+    one = ok_data(
+        await client.get(org_url(org, f"/branches/{london['id']}"), headers=member.headers)
+    )
+    assert one["client_count"] is None
+    [mine] = ok_data(await client.get(org_url(org, "/branches"), headers=owner.headers))
+    assert mine["client_count"] == 1
 
 
 async def test_other_practices_branches_are_invisible(client):
