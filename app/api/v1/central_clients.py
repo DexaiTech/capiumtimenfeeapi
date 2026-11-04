@@ -17,6 +17,7 @@ from app.dependencies.organization import require
 from app.schemas.central_clients import (
     CENTRAL_ID_PATTERN,
     CentralEnabled,
+    CentralEnableRequest,
     CentralEventRequest,
     CentralEventResult,
     CentralLinkRequest,
@@ -140,7 +141,8 @@ async def search_central_clients(
         "down the cached copy is used (`from_cache: true`, the client is marked `stale`). "
         "404 for an id the central service does not know, 409 `CENTRAL_CLIENT_ARCHIVED` for "
         "a client that is archived centrally, 503 `CENTRAL_UNAVAILABLE` when it is down and "
-        "the client is not cached. "
+        "the client is not cached. While the practice uses branches a created client needs "
+        "`branch_id` (an active branch of the practice; 422 `BRANCH_REQUIRED` without one). "
         "Requires `client.create`. 409 `INTEGRATION_DISABLED` while the integration is off."
     ),
     responses={
@@ -154,8 +156,10 @@ async def enable_central_client(
     service: CentralServiceDep,
     ctx: ContextDep,
     response: Response,
+    body: CentralEnableRequest | None = None,
 ) -> ApiResponse[CentralEnabled]:
-    enabled, created = await service.enable(org, central_id, ctx)
+    branch_id = body.branch_id if body else None
+    enabled, created = await service.enable(org, central_id, ctx, branch_id)
     if created:
         response.status_code = status.HTTP_201_CREATED
     messages = {

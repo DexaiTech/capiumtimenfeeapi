@@ -285,10 +285,14 @@ class CentralClientService:
     # --- Enable ---------------------------------------------------------------------------
 
     async def enable(
-        self, ctx: OrgContext, central_id: str, rctx: RequestContext
+        self,
+        ctx: OrgContext,
+        central_id: str,
+        rctx: RequestContext,
+        branch_id: uuid.UUID | None = None,
     ) -> tuple[CentralEnabled, bool]:
         """Enable a central client in the practice. Returns the outcome and whether a client
-        was created."""
+        was created (in ``branch_id``, which the practice's branches rule may require)."""
         org_id = ctx.organization_id
         existing = await self.central.client_by_central_id(org_id, central_id)
         if existing is not None:
@@ -308,7 +312,7 @@ class CentralClientService:
                     client, outcome = existing, "already_enabled"
                 else:
                     await self._remember(org_id, fetched)
-                    client, outcome = await self._enable_new(ctx, rctx, fetched)
+                    client, outcome = await self._enable_new(ctx, rctx, fetched, branch_id)
         except IntegrityError as exc:
             if integrity_constraint(exc) == UNIQUE_CENTRAL_INDEX:
                 raise conflict(
@@ -329,7 +333,11 @@ class CentralClientService:
         )
 
     async def _enable_new(
-        self, ctx: OrgContext, rctx: RequestContext, fetched: Fetched
+        self,
+        ctx: OrgContext,
+        rctx: RequestContext,
+        fetched: Fetched,
+        branch_id: uuid.UUID | None,
     ) -> tuple[Client, EnableOutcome]:
         """Link the practice's own client with this company number, else create one."""
         org_id = ctx.organization_id
@@ -362,6 +370,7 @@ class CentralClientService:
             outcome = "linked_existing"
         else:
             changes = {}
+            await self.client_service.check_branch(ctx, {"branch_id": branch_id})
             code = (await generate_client_codes(self.session, org_id, 1, set()))[0]
             client = await self.clients.add(
                 Client(
@@ -377,6 +386,7 @@ class CentralClientService:
                     postcode=central.postcode,
                     country=central.country,
                     company_number=number,
+                    branch_id=branch_id,
                     central_client_id=central.central_id,
                     central_sync_state=state,
                     central_synced_at=fetched.fetched_at,
