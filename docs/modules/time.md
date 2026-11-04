@@ -47,7 +47,7 @@ queue** (used by the worker), so the client-work job code lives in `time_jobs.py
 | GET | `/time-entries/{id}/history` | own / `time.read_all` / manager | The corrections of an entry, newest first, cursor-paginated |
 | POST | `/rates/revalue` | `rate.manage` | Re-price unbilled entries `{date_from, date_to, user_id?, client_id?}` (V1; the preview and apply pair is in `docs/modules/team-rates.md`) |
 | GET | `/timer` | `time.log` | The caller's timer or `null` |
-| POST | `/timer/start` | `time.log` | `{client_id?, job_id?, activity_code_id?, description?, is_billable?, replace?}` |
+| POST | `/timer/start` | `time.log` | `{client_id?, job_id, activity_code_id?, description?, is_billable?, replace?}` (a job is required; it brings its client) |
 | POST | `/timer/pause` | `time.log` | Pause |
 | POST | `/timer/resume` | `time.log` | Resume |
 | POST | `/timer/stop` | `time.log` | Write the entry (optional body `{description}`), delete the timer, return the entry (201) |
@@ -213,8 +213,9 @@ it existed), `billing_status, is_locked, period_locked_through` (the last day of
 the entry's date lies in, `null` when it is open: such time cannot be edited or deleted; filled in
 by the list, one entry and the day view), `created_by, created_at, updated_at`.
 
-**TimeEntryCreate**: `user_id?, entry_date, minutes (1–1440), client_id?, job_id?,
-activity_code_id?, description?, internal_note? (up to 2000 characters), is_billable?`.
+**TimeEntryCreate**: `user_id?, entry_date, minutes (1–1440), client_id?, job_id,
+activity_code_id?, description?, internal_note? (up to 2000 characters), is_billable?`
+(`client_id` defaults to the job's client; see "Client and job").
 **TimeEntryUpdate**: all optional; `client_id`/`job_id`/`activity_code_id`/`is_billable`/
 `internal_note` accept `null` (a blank note is stored as `null`). **Bulk**: `{entries: [...]}`.
 
@@ -263,7 +264,7 @@ charge_value_after, value_delta, cost_value_delta` (`null` without `rate.read`).
 | 403 | `SELF_APPROVAL_FORBIDDEN` | Approve/reject/reopen one's own sheet without `organization.update` |
 | 422 | `DAY_LIMIT_EXCEEDED` | More than 1440 minutes for one person on one day (after rounding) |
 | 422 | `TIMESHEET_EMPTY` | Submitting a sheet with no entries |
-| 422 | `VALIDATION_ERROR` | Body/query validation; people (`user_id`, `manager_user_id`, assignees) that are not active members; inactive service or activity code; job of another client; fixed job without fee; billable without client; `details[].code` `activity_not_allowed` (activity code outside the job's service's list; also on bulk entries and the timer) and `after_leaving_date` (time after the person's leaving date) |
+| 422 | `VALIDATION_ERROR` | Body/query validation; people (`user_id`, `manager_user_id`, assignees) that are not active members; inactive service or activity code; job of another client; fixed job without fee; time or a timer without a client or job (`details[].code` `required` on `client_id`/`job_id`); `details[].code` `activity_not_allowed` (activity code outside the job's service's list; also on bulk entries and the timer) and `after_leaving_date` (time after the person's leaving date) |
 
 ## Rules and decisions beyond docs/domain.md
 
@@ -278,15 +279,26 @@ charge_value_after, value_delta, cost_value_delta` (`null` without `rate.read`).
   status, at the current hierarchy; `in_draft`/`billed`/`written_off` entries are never
   touched. One audit record `time_entries.revalued` per call, and a re-rate run of source
   `revalue` (visible in `GET /rates/reruns`). Range at most five years.
-* **Billable default**: false without a client, for `non_billable` jobs and non-chargeable
-  activity codes. Explicit `is_billable: true` is accepted for a non-chargeable activity code
-  but refused (422) without a client or on a `non_billable` job.
+* **Client and job**: every time entry is on a client and a job of that client, billable or
+  not; internal time goes on an internal client and job of the practice. Without them a create,
+  a bulk item (`entries.<i>.client_id`/`job_id`), a copy, a timer start, an edit or a
+  correction is 422 `VALIDATION_ERROR` with `details[].code` `required` on `client_id` and/or
+  `job_id` (a job brings its client, so sending a job is enough). The opening-balance import
+  needs a `job` column and a job number on every row. Entries recorded before the rule may have
+  no client or job: they are kept and shown as they are ("No client"/"No job" rows of the week
+  grid and timesheets; being non-billable they never reach WIP), and any edit or correction of
+  one must add a client and job. Copying one is skipped (`REQUIRED`). A timer started without a
+  job before the rule cannot be stopped into an entry (422); it can be discarded. No database
+  constraint enforces the rule, so the older rows stay valid.
+* **Billable default**: false for `non_billable` jobs and non-chargeable activity codes.
+  Explicit `is_billable: true` is accepted for a non-chargeable activity code but refused (422)
+  on a `non_billable` job.
 * **Editing**: the rules `CLIENT_INACTIVE`/`JOB_CLOSED` apply on create, and on update when
   the client/job/activity, minutes or date change; a description-only edit of time on a
   completed job is allowed. Deleting is allowed (lock rules still apply). `is_billable` is
   recomputed when it is sent as `null` or when the client/job/activity changes without it.
-  Setting `job_id` without `client_id` takes the job's client; clearing `job_id` keeps the
-  client. Moving an entry to another week moves it to that week's sheet (both must be
+  Setting `job_id` without `client_id` takes the job's client; clearing `job_id` (or the
+  client) is refused (see "Client and job"). Moving an entry to another week moves it to that week's sheet (both must be
   editable). `user_id` cannot be changed.
 * **Who may log for whom**: own time `time.log`; anyone else's `time.manage_all` and the
   person must be an active member. Reading others' entries needs `time.read_all`; timesheets

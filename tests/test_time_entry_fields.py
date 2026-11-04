@@ -7,7 +7,7 @@ from httpx import AsyncClient
 from tests.domain_factories import make_client, make_job, practice, service_id, staff
 from tests.factories import audit_entries
 from tests.time_gap_helpers import day
-from tests.time_helpers import err, log_time, ok_data, org_url, set_manager
+from tests.time_helpers import err, log_time, ok_data, org_url, set_manager, time_job
 
 
 async def test_the_note_is_stored_trimmed_edited_and_cleared(client: AsyncClient) -> None:
@@ -54,13 +54,14 @@ async def test_the_note_is_limited_to_2000_characters(client: AsyncClient) -> No
 async def test_bulk_entries_take_notes(client: AsyncClient) -> None:
     _, org = await practice(client)
     person = await staff(org)
+    job_id = str(await time_job(org))
     response = await client.post(
         org_url(org, "/time-entries/bulk"),
         headers=person.headers,
         json={
             "entries": [
-                {"entry_date": day(0), "minutes": 60, "internal_note": "first"},
-                {"entry_date": day(1), "minutes": 30},
+                {"entry_date": day(0), "minutes": 60, "job_id": job_id, "internal_note": "first"},
+                {"entry_date": day(1), "minutes": 30, "job_id": job_id},
             ]
         },
     )
@@ -138,8 +139,8 @@ async def test_entries_carry_the_service_of_their_job(client: AsyncClient) -> No
     assert entry["service_name"] == "Year-end accounts"
     plain = await log_time(client, person, org, job_id=without_service.id)
     assert plain["service_id"] is None and plain["service_name"] is None
-    no_job = await log_time(client, person, org)
-    assert no_job["service_id"] is None
+    internal = await log_time(client, person, org)  # the internal job has no service
+    assert internal["service_id"] is None
     # Read-only: the entry has no service of its own.
     response = await client.patch(
         org_url(org, f"/time-entries/{entry['id']}"),

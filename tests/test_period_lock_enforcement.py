@@ -9,7 +9,15 @@ import pytest
 
 from app.db.session import get_sessionmaker
 from app.services import period_locks
-from tests.billing_helpers import billing_status, count_rows, draft, issued, new_practice, pay
+from tests.billing_helpers import (
+    billing_status,
+    count_rows,
+    draft,
+    hourly_job,
+    issued,
+    new_practice,
+    pay,
+)
 from tests.clients_helpers import count_queries, sql
 from tests.domain_factories import (
     make_client,
@@ -20,13 +28,19 @@ from tests.domain_factories import (
 )
 from tests.factories import audit_entries
 from tests.period_lock_helpers import assert_locked, lock_period, org_url, set_lock, today
-from tests.time_helpers import entry_row, make_client_rate, ok_data
+from tests.time_helpers import entry_row, make_client_rate, ok_data, time_job
 
 DAY = timedelta(days=1)
 
 
-def entry_body(p, day: date, minutes: int = 60, **extra) -> dict:
-    return {"entry_date": str(day), "minutes": minutes, "client_id": str(p.client.id), **extra}
+async def entry_body(p, day: date, minutes: int = 60, **extra) -> dict:
+    return {
+        "entry_date": str(day),
+        "minutes": minutes,
+        "client_id": str(p.client.id),
+        "job_id": str(await time_job(p.org, p.client.id)),
+        **extra,
+    }
 
 
 def expense_body(p, day: date, **extra) -> dict:
@@ -57,13 +71,13 @@ async def test_time_cannot_be_logged_in_a_locked_period(client):
     for actor in (worker, p.owner):
         for day in (lock, lock - DAY, lock - 200 * DAY):
             response = await client.post(
-                p.url("/time-entries"), headers=actor.headers, json=entry_body(p, day)
+                p.url("/time-entries"), headers=actor.headers, json=await entry_body(p, day)
             )
             assert_locked(response, day, lock, "time")
     assert await count_rows("SELECT count(*) FROM time_entries") == 0
     # The next day is open.
     created = await client.post(
-        p.url("/time-entries"), headers=worker.headers, json=entry_body(p, lock + DAY)
+        p.url("/time-entries"), headers=worker.headers, json=await entry_body(p, lock + DAY)
     )
     assert created.status_code == 201, created.text
     # The lock is about the date of the time, not the day it is recorded: later days still work.
@@ -73,9 +87,9 @@ async def test_time_cannot_be_logged_in_a_locked_period(client):
 async def test_a_bulk_batch_with_one_locked_day_writes_nothing(client):
     p, worker, lock = await scene(client)
     batch = [
-        entry_body(p, lock + DAY),
-        entry_body(p, lock + 2 * DAY),
-        entry_body(p, lock - 3 * DAY),
+        await entry_body(p, lock + DAY),
+        await entry_body(p, lock + 2 * DAY),
+        await entry_body(p, lock - 3 * DAY),
     ]
     refused = await client.post(
         p.url("/time-entries/bulk"), headers=worker.headers, json={"entries": batch}
@@ -92,11 +106,12 @@ async def test_a_bulk_batch_with_one_locked_day_writes_nothing(client):
 
 async def test_locked_time_cannot_be_edited_or_moved_and_open_time_cannot_move_in(client):
     p, worker, lock = await scene(client)
+    job = await hourly_job(p)
     inside = await make_time_entry(
-        p.org, worker, client=p.client, entry_date=lock - 2 * DAY, timesheet_status="open"
+        p.org, worker, client=p.client, job=job, entry_date=lock - 2 * DAY, timesheet_status="open"
     )
     outside = await make_time_entry(
-        p.org, worker, client=p.client, entry_date=lock + 3 * DAY, timesheet_status="open"
+        p.org, worker, client=p.client, job=job, entry_date=lock + 3 * DAY, timesheet_status="open"
     )
     in_url = p.url(f"/time-entries/{inside.id}")
     out_url = p.url(f"/time-entries/{outside.id}")
@@ -200,10 +215,9 @@ async def test_time_reads_say_which_entries_lie_in_a_locked_period(client):
 async def test_a_timer_started_in_a_period_that_gets_locked_cannot_be_stopped(client):
     p = await new_practice(client)
     worker = await staff(p.org)
+    on_job = {"job_id": str((await hourly_job(p)).id)}
     started = ok_data(
-        await client.post(
-            p.url("/timer/start"), headers=worker.headers, json={"client_id": str(p.client.id)}
-        ),
+        await client.post(p.url("/timer/start"), headers=worker.headers, json=on_job),
         201,
     )
     day = date.fromisoformat(started["started_on"])
@@ -215,7 +229,7 @@ async def test_a_timer_started_in_a_period_that_gets_locked_cannot_be_stopped(cl
     assert await count_rows("SELECT count(*) FROM time_entries") == 0
     # Replacing it stops it first, which is refused as well.
     replaced = await client.post(
-        p.url("/timer/start"), headers=worker.headers, json={"replace": True}
+        p.url("/timer/start"), headers=worker.headers, json={**on_job, "replace": True}
     )
     assert_locked(replaced, day, day, "time")
     assert ok_data(await client.get(p.url("/timer"), headers=worker.headers))["id"] == started["id"]
@@ -223,7 +237,7 @@ async def test_a_timer_started_in_a_period_that_gets_locked_cannot_be_stopped(cl
     assert (await client.delete(p.url("/timer"), headers=worker.headers)).status_code == 200
 
     await set_lock(p.org, None)
-    ok_data(await client.post(p.url("/timer/start"), headers=worker.headers, json={}), 201)
+    ok_data(await client.post(p.url("/timer/start"), headers=worker.headers, json=on_job), 201)
     ok_data(await client.post(p.url("/timer/stop"), headers=worker.headers), 201)
 
 

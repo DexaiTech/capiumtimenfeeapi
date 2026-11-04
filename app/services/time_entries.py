@@ -370,6 +370,7 @@ class TimeEntryService:
             job = self.job_ref(jobs, item.job_id, prefix)
             task = task_ref(tasks, item.task_id, job, _f(prefix, "task_id"))
             client = self.client_ref(clients, item.client_id, job, prefix)
+            self.ensure_client_and_job(client, job, prefix)
             activity = self.activity_ref(activities, item.activity_code_id, prefix, check=True)
             self.ensure_activity_allowed(allowed, job, activity, prefix)
             self.ensure_before_leaving(leaving.get(owner), item.entry_date, prefix)
@@ -529,6 +530,9 @@ class TimeEntryService:
             client_ids = {c for c in (client_id, job.client_id if job else None) if c}
             clients = await self.refs.get_clients(org_id, client_ids)
             client = self.client_ref(clients, client_id, job, "")
+            # Time from before every entry needed a client and a job may lack them: any edit
+            # of it must add them.
+            self.ensure_client_and_job(client, job, "")
             activities = await self.refs.get_activity_codes(
                 org_id, {activity_id} if activity_id else set()
             )
@@ -706,6 +710,30 @@ class TimeEntryService:
         if client is None:
             raise NotFoundError("Client not found.", details={"field": _f(prefix, "client_id")})
         return client
+
+    @staticmethod
+    def ensure_client_and_job(client: Client | None, job: Job | None, prefix: str) -> None:
+        """Every time entry is on a client and one of its jobs, billable or not (internal time
+        goes on an internal client and job). A job brings its client, so only a job is needed."""
+        missing = []
+        if client is None:
+            missing.append(
+                {
+                    "field": _f(prefix, "client_id"),
+                    "code": "required",
+                    "message": "Time must be recorded against a client.",
+                }
+            )
+        if job is None:
+            missing.append(
+                {
+                    "field": _f(prefix, "job_id"),
+                    "code": "required",
+                    "message": "Time must be recorded against a job.",
+                }
+            )
+        if missing:
+            raise ValidationError(details=missing)
 
     @staticmethod
     def activity_ref(

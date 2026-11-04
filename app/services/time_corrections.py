@@ -251,6 +251,7 @@ class TimeCorrectionService:
             client = self.time.client_ref(
                 await self.refs.get_clients(org_id, client_ids), client_id, job, ""
             )
+            self.time.ensure_client_and_job(client, job, "")
             activity = self.time.activity_ref(
                 await self.refs.get_activity_codes(org_id, {activity_id} if activity_id else set()),
                 activity_id,

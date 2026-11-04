@@ -8,8 +8,10 @@ from httpx import AsyncClient, Response
 from sqlalchemy import select, text, update
 
 from app.db.models import (
+    Client,
     Invoice,
     InvoiceLine,
+    Job,
     Organization,
     OrganizationMember,
     RateRule,
@@ -130,11 +132,70 @@ async def age_timer(org: dict, user: Actor, seconds: int) -> None:
         await session.commit()
 
 
+INTERNAL_CLIENT_CODE = "TINTERNAL"
+
+
+async def time_job(org: dict, client_id: str | uuid.UUID | None = None) -> uuid.UUID | None:
+    """A job to put time on when a test does not mind which (every entry needs a client and a
+    job): an hourly job of the given client, or without one the non-billable job of an
+    internal client, which keeps the time non-billable. Made once and reused. None for a
+    client that is not one of the practice's (the API answers 404 for it)."""
+    org_id = uuid.UUID(org["id"])
+    async with get_sessionmaker()() as session:
+        if client_id is None:
+            found = await session.scalar(
+                select(Client.id).where(
+                    Client.organization_id == org_id, Client.code == INTERNAL_CLIENT_CODE
+                )
+            )
+            if found is None:
+                internal = Client(
+                    organization_id=org_id, code=INTERNAL_CLIENT_CODE, name="Internal time"
+                )
+                session.add(internal)
+                await session.flush()
+                found = internal.id
+            owner, basis = found, "non_billable"
+        else:
+            owner, basis = uuid.UUID(str(client_id)), "hourly"
+            known = await session.scalar(
+                select(Client.id).where(Client.organization_id == org_id, Client.id == owner)
+            )
+            if known is None:
+                return None
+        job_id = await session.scalar(
+            select(Job.id).where(
+                Job.organization_id == org_id,
+                Job.client_id == owner,
+                Job.name == "Time",
+                Job.deleted_at.is_(None),
+            )
+        )
+        if job_id is None:
+            job = Job(
+                organization_id=org_id,
+                client_id=owner,
+                number=f"TT{uuid.uuid4().hex[:8].upper()}",
+                name="Time",
+                billing_basis=basis,
+                status="in_progress",
+            )
+            session.add(job)
+            await session.flush()
+            job_id = job.id
+        await session.commit()
+    return job_id
+
+
 async def log_time(
     client: AsyncClient, actor: Actor, org: dict, *, status: int = 201, **body: Any
 ) -> Any:
+    """``POST /time-entries``. Without ``job_id`` the time goes on ``time_job`` (of the
+    ``client_id`` given, else internal); pass ``job_id=None`` to send no job."""
     body.setdefault("entry_date", MONDAY.isoformat())
     body.setdefault("minutes", 60)
+    if "job_id" not in body:
+        body["job_id"] = await time_job(org, body.get("client_id"))
     payload = {k: (str(v) if isinstance(v, uuid.UUID | date) else v) for k, v in body.items()}
     response = await client.post(org_url(org, "/time-entries"), headers=actor.headers, json=payload)
     assert response.status_code == status, response.text
