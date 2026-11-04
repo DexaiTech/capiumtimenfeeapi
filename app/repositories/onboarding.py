@@ -19,6 +19,7 @@ from app.db.models import (
     Client,
     DocumentSequence,
     Grade,
+    IntegrationConnection,
     InvoiceTemplate,
     Job,
     OnboardingProgress,
@@ -47,6 +48,8 @@ class OnboardingFacts:
     clients: int
     jobs: int
     linked_clients: int
+    # The practice switched on an integration that is off until it is switched on.
+    integration_switched_on: bool
     has_time_entry: bool
     has_period_lock_event: bool
     # A prefix, padding or next number differs from the starting values, or a number was used.
@@ -72,6 +75,7 @@ class OnboardingRepository:
         default_template_name: str,
         default_sequences: Mapping[str, tuple[str, int]],
         numbered_kinds: tuple[str, ...],
+        off_by_default: tuple[str, ...],
     ) -> OnboardingFacts:
         org = organization_id
 
@@ -129,6 +133,13 @@ class OnboardingRepository:
             capped(
                 Client, Client.deleted_at.is_(None), Client.central_client_id.is_not(None)
             ).label("linked_clients"),
+            exists()
+            .where(
+                IntegrationConnection.organization_id == org,
+                IntegrationConnection.integration.in_(off_by_default),
+                IntegrationConnection.enabled.is_(True),
+            )
+            .label("integration_switched_on"),
             exists().where(TimeEntry.organization_id == org).label("has_time_entry"),
             exists().where(PeriodLockEvent.organization_id == org).label("has_period_lock_event"),
             exists()
