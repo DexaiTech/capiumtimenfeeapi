@@ -3,7 +3,7 @@
 import pytest
 from sqlalchemy.exc import IntegrityError
 
-from tests.central_helpers import BAKERY, PLUMBING, enabled, new_team, sql
+from tests.central_helpers import BAKERY, PLUMBING, central_on, enabled, new_team, sql
 from tests.clients_helpers import create_client, org_url
 from tests.migration_helpers import head_revision, migrate
 
@@ -112,6 +112,8 @@ async def test_existing_practices_get_the_standard_template_and_keep_their_clien
     # The practices can use all of it straight away.
     listed = await client.get(org_url(first.org, "/invoice-templates"), headers=first.owner.headers)
     assert [t["name"] for t in listed.json()["data"]] == ["Standard"]
+    # Going back to 015 drops the integration switches; Central Client is off until switched on.
+    await central_on(client, first.owner, first.org)
     enabled_client = await enabled(client, first.owner, first.org, BAKERY)
     assert enabled_client["client"]["central_client_id"] == BAKERY
     overview = await client.get(
