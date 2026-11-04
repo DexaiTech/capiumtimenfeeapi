@@ -1431,6 +1431,20 @@ class InvoiceService:
                 "net_amount",
                 "A line that bills WIP cannot be negative; add a discount line instead.",
             )
+        if data.is_advance is not None and data.is_advance != line.is_advance:
+            if line.kind != "manual":
+                raise invalid(
+                    "ADVANCE_NOT_MANUAL",
+                    "is_advance",
+                    "Only a line typed in can be fees billed in advance.",
+                )
+            if await self.wip.allocations_for_line(ctx.organization_id, line.id):
+                raise conflict(
+                    "ADVANCE_HAS_TIME",
+                    "Time is on this line: take it off before changing whether the line is "
+                    "billed in advance.",
+                )
+            line.is_advance = data.is_advance
         if line.is_advance and line.net_amount <= 0:
             raise invalid("ADVANCE_NOT_POSITIVE", "net_amount", ADVANCE_NOT_POSITIVE)
         if "vat_rate_id" in fields:
@@ -1596,6 +1610,7 @@ def _line_meta(line: InvoiceLine) -> dict[str, Any]:
         "net_amount": line.net_amount,
         "vat_rate_bp": line.vat_rate_bp,
         "vat_amount": line.vat_amount,
+        "is_advance": line.is_advance,
     }
 
 

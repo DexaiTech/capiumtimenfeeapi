@@ -219,10 +219,19 @@ class LineUpdate(RequestModel):
         default=None, description="null re-applies the default rate resolution"
     )
     position: int | None = Field(default=None, ge=1, le=10000)
+    is_advance: bool | None = Field(
+        default=None,
+        description=(
+            "A line typed in (`kind=manual`) becomes, or stops being, fees billed in advance: its "
+            "net must be more than zero, and no time may be on it"
+        ),
+    )
 
     @model_validator(mode="after")
     def _no_nulls(self) -> Self:
-        _reject_nulls(self, "description", "quantity", "unit_amount", "net_amount", "position")
+        _reject_nulls(
+            self, "description", "quantity", "unit_amount", "net_amount", "position", "is_advance"
+        )
         return self
 
 

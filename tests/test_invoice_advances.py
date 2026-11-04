@@ -627,3 +627,81 @@ async def test_manual_advance_lines_without_wip_take_time_later(client):
     after = await get_invoice(client, p.owner, p.org, invoice["id"])
     assert [x["advance"]["used"] for x in after["lines"]] == [100_000, 0]
     assert len(await audit_entries(p.id, "invoice.time_assigned")) == 1
+
+
+async def test_a_drafts_typed_line_becomes_fees_in_advance_and_back(client):
+    """APT69: whether a line typed in is billed in advance is chosen per line, and can be
+    changed on the draft: only for a line of more than zero with no time on it."""
+    p = await new_practice(client)
+    entry = await make_time_entry(p.org, p.owner, client=p.client)
+    made = await draft(
+        client,
+        p.owner,
+        p.org,
+        p.client.id,
+        time=[entry],
+        manual_lines=[
+            {"description": "Accounts 2026/27", "unit_amount": 250_000},
+            {"description": "Loyalty discount", "unit_amount": -1_000},
+        ],
+    )
+    work, fee, discount = made["lines"]
+    assert fee["is_advance"] is False
+
+    def line_url(line: dict) -> str:
+        return org_url(p.org, f"/invoices/{made['id']}/lines/{line['id']}")
+
+    marked = await client.patch(line_url(fee), headers=p.owner.headers, json={"is_advance": True})
+    assert marked.status_code == 200, marked.text
+    line = marked.json()["data"]["lines"][1]
+    assert line["is_advance"] is True and line["advance"]["remaining"] == 250_000
+    [changed] = await audit_entries(p.id, "invoice.line_updated")
+    assert (changed["metadata"]["old"]["is_advance"], changed["metadata"]["new"]["is_advance"]) == (
+        False,
+        True,
+    )
+    unmarked = await client.patch(
+        line_url(fee), headers=p.owner.headers, json={"is_advance": False}
+    )
+    line = unmarked.json()["data"]["lines"][1]
+    assert line["is_advance"] is False and line["advance"] is None
+
+    # A discount is not fees in advance, nor is a line of work.
+    refused = await client.patch(
+        line_url(discount), headers=p.owner.headers, json={"is_advance": True}
+    )
+    assert refused.status_code == 422 and error(refused)["code"] == "ADVANCE_NOT_POSITIVE"
+    work_line = await client.patch(
+        line_url(work), headers=p.owner.headers, json={"is_advance": True}
+    )
+    assert work_line.status_code == 422 and error(work_line)["code"] == "ADVANCE_NOT_MANUAL"
+    nulled = await client.patch(line_url(fee), headers=p.owner.headers, json={"is_advance": None})
+    assert nulled.status_code == 422
+
+    # Saving the grid in one request takes it too.
+    saved = await client.put(
+        org_url(p.org, f"/invoices/{made['id']}/lines"),
+        headers=p.owner.headers,
+        json={
+            "lines": [
+                {"id": work["id"]},
+                {"id": fee["id"], "is_advance": True},
+                {"id": discount["id"]},
+            ]
+        },
+    )
+    assert saved.status_code == 200, saved.text
+    assert [x["is_advance"] for x in saved.json()["data"]["lines"]] == [False, True, False]
+
+    # A line with time on it keeps what it is (the work's allocation moved onto the fee).
+    async with get_sessionmaker()() as session:
+        await session.execute(
+            text("UPDATE wip_allocations SET invoice_line_id = :fee WHERE invoice_id = :invoice"),
+            {"fee": fee["id"], "invoice": made["id"]},
+        )
+        await session.commit()
+    has_time = await client.patch(
+        line_url(fee), headers=p.owner.headers, json={"is_advance": False}
+    )
+    assert has_time.status_code == 409 and error(has_time)["code"] == "ADVANCE_HAS_TIME"
+    assert (await get_invoice(client, p.owner, p.org, made["id"]))["lines"][1]["is_advance"] is True
