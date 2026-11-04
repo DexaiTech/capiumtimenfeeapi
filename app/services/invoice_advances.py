@@ -30,7 +30,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.context import RequestContext
-from app.core.exceptions import NotFoundError
+from app.core.exceptions import AuthorizationError, NotFoundError
 from app.db.models import Disbursement, Invoice, InvoiceLine, TimeEntry, WipAllocation
 from app.db.session import unit_of_work
 from app.repositories.billing_common import BillingReferenceRepository
@@ -38,7 +38,7 @@ from app.repositories.invoices import InvoiceRepository
 from app.repositories.wip import WipRepository
 from app.schemas.billing import PersonRef, hours_of
 from app.schemas.invoices import AdvanceAssign, AdvanceItemRead, AdvanceRead
-from app.services import period_locks
+from app.services import period_locks, policy
 from app.services.billing_common import conflict, get_client_or_404, record, today_for
 from app.services.policy import OrgContext
 from app.services.wip import lock_allocation_items, lock_wip_items, set_items_status
@@ -195,6 +195,13 @@ class AdvanceService:
                         assigned_on=today,
                         **{column: item_id},
                     )
+                )
+            if not policy.has_permission(ctx, "wip.write_off") and any(
+                a.billed_value < a.wip_value for a in allocations
+            ):
+                raise AuthorizationError(
+                    "The advance does not cover all of this work: what it does not cover is "
+                    "written off, which needs the permission to write off WIP."
                 )
             await self.wip.add_allocations(allocations)
             set_items_status(items, "billed")
