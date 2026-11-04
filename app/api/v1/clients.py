@@ -367,7 +367,8 @@ async def get_client(
         "A client linked to the central client service (`central_client_id`) has its name "
         "and address managed there: changing `name`, `address_line1`, `address_line2`, "
         "`city`, `postcode` or `country` answers 409 `CLIENT_FIELD_MANAGED_CENTRALLY` "
-        "(`details` names the fields) until the client is unlinked. The billing settings "
+        "(`details` names the fields) until the client is unlinked; while the practice has "
+        "Capium Central switched off they are editable and the link is kept. The billing settings "
         "`invoice_email`, `default_service_id` and `invoice_template_id` follow the rules "
         "of `POST /clients`. Requires `client.update`."
     ),
