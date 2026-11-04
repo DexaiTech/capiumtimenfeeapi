@@ -30,6 +30,7 @@ from tests.time_helpers import (
     set_practice,
     set_sheet,
     sheet_count,
+    time_job,
 )
 
 
@@ -95,7 +96,10 @@ async def test_timesheet_created_on_demand_per_week(client: AsyncClient) -> None
 async def test_parallel_first_entries_share_one_sheet(client: AsyncClient) -> None:
     _, org = await practice(client)
     person = await staff(org)
-    results = await asyncio.gather(*(log_time(client, person, org, minutes=30) for _ in range(5)))
+    job_id = await time_job(org)  # made once, before the parallel requests
+    results = await asyncio.gather(
+        *(log_time(client, person, org, minutes=30, job_id=job_id) for _ in range(5))
+    )
     assert len({r["timesheet_id"] for r in results}) == 1
     assert await sheet_count(org) == 1
 
@@ -151,7 +155,7 @@ async def test_billable_defaults_and_rules(client: AsyncClient) -> None:
     internal = await make_job(org, acme, billing_basis="non_billable")
     admin = await activity_code_id(org, "ADM")  # non-chargeable
     acc = await activity_code_id(org, "ACC")
-    assert (await log_time(client, person, org))["is_billable"] is False  # no client
+    assert (await log_time(client, person, org))["is_billable"] is False  # internal job
     assert (await log_time(client, person, org, client_id=acme.id))["is_billable"] is True
     assert (await log_time(client, person, org, job_id=hourly.id))["is_billable"] is True
     assert (await log_time(client, person, org, job_id=internal.id))["is_billable"] is False
@@ -279,12 +283,13 @@ async def test_parallel_entries_cannot_exceed_day_cap(client: AsyncClient) -> No
     _, org = await practice(client)
     await set_practice(org, time_increment_minutes=1)
     person = await staff(org)
+    job_id = str(await time_job(org))
     responses = await asyncio.gather(
         *(
             client.post(
                 org_url(org, "/time-entries"),
                 headers=person.headers,
-                json={"entry_date": MONDAY.isoformat(), "minutes": 500},
+                json={"entry_date": MONDAY.isoformat(), "minutes": 500, "job_id": job_id},
             )
             for _ in range(4)
         )
@@ -353,14 +358,13 @@ async def test_update_reprices_and_moves_week(client: AsyncClient) -> None:
     assert on_job["charge_rate"] == 20_000 and on_job["client_id"] == str(acme.id)
     row = await entry_row(entry["id"])
     assert row.cost_rate == 3_000 and row.cost_value == 1_500
-    # Clearing the job keeps the client; clearing both makes it non-billable by default.
-    cleared = ok_data(await client.patch(url, headers=person.headers, json={"job_id": None}))
-    assert cleared["client_id"] == str(acme.id) and cleared["job_id"] is None
-    assert cleared["charge_rate"] == 9_000
-    none = ok_data(await client.patch(url, headers=person.headers, json={"client_id": None}))
-    assert none["client_id"] is None and none["is_billable"] is False
-    response = await client.patch(url, headers=person.headers, json={"is_billable": True})
-    assert err(response, 422)["details"][0]["field"] == "is_billable"
+    # Every entry keeps a client and a job (APT64): neither can be cleared.
+    response = await client.patch(url, headers=person.headers, json={"job_id": None})
+    assert [d["field"] for d in err(response, 422)["details"]] == ["job_id"]
+    response = await client.patch(
+        url, headers=person.headers, json={"client_id": None, "job_id": None}
+    )
+    assert {d["field"] for d in err(response, 422)["details"]} == {"client_id", "job_id"}
     assert (
         await client.patch(url, headers=person.headers, json={"minutes": None})
     ).status_code == 422
@@ -555,7 +559,8 @@ async def test_week_grid(client: AsyncClient) -> None:
     assert first["client_name"] == "Acme Ltd" and first["activity_code"] == "ACC"
     assert first["minutes"] == [90, 0, 45, 0, 0, 0, 0] and first["total_minutes"] == 135
     assert len(first["entry_ids"]) == 3
-    assert second["client_id"] is None and second["minutes"] == [0, 120, 0, 0, 0, 0, 0]
+    assert second["client_name"] == "Internal time"
+    assert second["minutes"] == [0, 120, 0, 0, 0, 0, 0]
     assert grid["day_totals"] == [90, 120, 45, 0, 0, 0, 0]
     assert grid["total_minutes"] == 255
     assert grid["chargeable_minutes"] == 135 and grid["non_chargeable_minutes"] == 120
@@ -664,13 +669,14 @@ async def test_bulk_create(client: AsyncClient) -> None:
     await make_staff_rate(org, person, 12_000)
     acme = await make_client(org)
     job = await make_job(org, acme)
+    internal = str(await time_job(org))
     url = org_url(org, "/time-entries/bulk")
     body = {
         "entries": [
             {"entry_date": f"2026-09-{d:02d}", "minutes": 60, "job_id": str(job.id)}
             for d in range(7, 12)
         ]
-        + [{"entry_date": "2026-09-14", "minutes": 30}]
+        + [{"entry_date": "2026-09-14", "minutes": 30, "job_id": internal}]
     }
     created = ok_data(await client.post(url, headers=person.headers, json=body), 201)
     assert len(created) == 6
@@ -682,7 +688,7 @@ async def test_bulk_create(client: AsyncClient) -> None:
     closed = await make_job(org, acme, status="completed")
     bad = {
         "entries": [
-            {"entry_date": "2026-09-21", "minutes": 60},
+            {"entry_date": "2026-09-21", "minutes": 60, "job_id": internal},
             {"entry_date": "2026-09-21", "minutes": 60, "job_id": str(uuid.uuid4())},
         ]
     }
@@ -690,7 +696,7 @@ async def test_bulk_create(client: AsyncClient) -> None:
     assert error["details"]["field"] == "entries.1.job_id"
     bad = {
         "entries": [
-            {"entry_date": "2026-09-21", "minutes": 60},
+            {"entry_date": "2026-09-21", "minutes": 60, "job_id": internal},
             {"entry_date": "2026-09-21", "minutes": 60, "job_id": str(closed.id)},
         ]
     }
@@ -700,8 +706,8 @@ async def test_bulk_create(client: AsyncClient) -> None:
     # The cap counts entries within the batch.
     bad = {
         "entries": [
-            {"entry_date": "2026-09-21", "minutes": 800},
-            {"entry_date": "2026-09-21", "minutes": 700},
+            {"entry_date": "2026-09-21", "minutes": 800, "job_id": internal},
+            {"entry_date": "2026-09-21", "minutes": 700, "job_id": internal},
         ]
     }
     error = err(await client.post(url, headers=person.headers, json=bad), 422)
@@ -709,6 +715,21 @@ async def test_bulk_create(client: AsyncClient) -> None:
         error["code"] == "DAY_LIMIT_EXCEEDED"
         and error["details"][0]["field"] == "entries.1.minutes"
     )
+    # Every item needs a client and a job (APT64), named by its index.
+    bad = {
+        "entries": [
+            {"entry_date": "2026-09-21", "minutes": 60, "job_id": internal},
+            {"entry_date": "2026-09-21", "minutes": 60, "client_id": str(acme.id)},
+        ]
+    }
+    error = err(await client.post(url, headers=person.headers, json=bad), 422)
+    assert error["details"] == [
+        {
+            "field": "entries.1.job_id",
+            "code": "required",
+            "message": "Time must be recorded against a job.",
+        }
+    ]
     listed = ok_data(
         await client.get(
             org_url(org, "/time-entries"),
@@ -724,3 +745,109 @@ async def test_bulk_create(client: AsyncClient) -> None:
     other = await staff(org)
     mixed = {"entries": [{"entry_date": "2026-09-28", "minutes": 1, "user_id": str(other.id)}]}
     assert (await client.post(url, headers=person.headers, json=mixed)).status_code == 403
+
+
+async def test_every_entry_needs_a_client_and_a_job(client: AsyncClient) -> None:
+    """APT64: billable or not, time is recorded against a client and a job."""
+    _, org = await practice(client)
+    person = await staff(org)
+    acme = await make_client(org)
+    job = await make_job(org, acme)
+    for billable in (None, True, False):
+        extra = {} if billable is None else {"is_billable": billable}
+        error = await log_time(client, person, org, status=422, job_id=None, **extra)
+        assert error["code"] == "VALIDATION_ERROR"
+        assert error["details"] == [
+            {
+                "field": "client_id",
+                "code": "required",
+                "message": "Time must be recorded against a client.",
+            },
+            {
+                "field": "job_id",
+                "code": "required",
+                "message": "Time must be recorded against a job.",
+            },
+        ]
+        error = await log_time(
+            client, person, org, status=422, client_id=acme.id, job_id=None, **extra
+        )
+        assert [(d["field"], d["code"]) for d in error["details"]] == [("job_id", "required")]
+    listed = ok_data(await client.get(org_url(org, "/time-entries"), headers=person.headers))
+    assert listed == []
+    # A job is enough: it brings its client.
+    billable = await log_time(client, person, org, job_id=job.id)
+    assert billable["client_id"] == str(acme.id) and billable["is_billable"] is True
+    internal = await log_time(client, person, org, job_id=job.id, is_billable=False)
+    assert internal["client_id"] == str(acme.id) and internal["is_billable"] is False
+
+
+async def test_an_older_entry_without_a_client_or_job_must_get_them_when_edited(
+    client: AsyncClient,
+) -> None:
+    """APT64: time recorded before the rule is kept and readable; any edit must add a client and
+    a job."""
+    _, org = await practice(client)
+    person = await staff(org)
+    acme = await make_client(org)
+    job = await make_job(org, acme)
+    entry = await log_time(client, person, org, minutes=60)
+    await set_entry(entry["id"], client_id=None, job_id=None, is_billable=False)
+    url = org_url(org, f"/time-entries/{entry['id']}")
+    kept = ok_data(await client.get(url, headers=person.headers))
+    assert kept["client_id"] is None and kept["job_id"] is None and kept["minutes"] == 60
+    grid = ok_data(
+        await client.get(
+            org_url(org, "/time-entries/week"),
+            headers=person.headers,
+            params={"week_start": MONDAY.isoformat()},
+        )
+    )
+    assert [(r["client_id"], r["job_id"], r["minutes"][0]) for r in grid["rows"]] == [
+        (None, None, 60)
+    ]
+
+    for body, fields in (
+        ({"minutes": 120}, {"client_id", "job_id"}),
+        ({"description": "Admin"}, {"client_id", "job_id"}),
+        ({"client_id": str(acme.id)}, {"job_id"}),
+    ):
+        response = await client.patch(url, headers=person.headers, json=body)
+        assert {d["field"] for d in err(response, 422)["details"]} == fields, body
+    assert (await entry_row(entry["id"])).minutes == 60
+    fixed = ok_data(
+        await client.patch(
+            url, headers=person.headers, json={"job_id": str(job.id), "minutes": 120}
+        )
+    )
+    assert fixed["client_id"] == str(acme.id) and fixed["job_id"] == str(job.id)
+    assert fixed["minutes"] == 120
+    # Deleting it needs no client or job.
+    other = await log_time(client, person, org, entry_date="2026-09-08")
+    await set_entry(other["id"], client_id=None, job_id=None, is_billable=False)
+    other_url = org_url(org, f"/time-entries/{other['id']}")
+    assert (await client.delete(other_url, headers=person.headers)).status_code == 200
+
+
+async def test_the_week_grid_cannot_save_a_row_without_a_client_and_job(
+    client: AsyncClient,
+) -> None:
+    """APT64, the tester's case: a grid row added with no client and no job (and no activity),
+    10:00 typed on a day. The grid saves a cell as ``POST /time-entries`` with the row's
+    references and ``is_billable``; with none it is refused and nothing is written."""
+    _, org = await practice(client)
+    person = await staff(org)
+    response = await client.post(
+        org_url(org, "/time-entries"),
+        headers=person.headers,
+        json={"entry_date": "2026-09-09", "minutes": 600, "is_billable": False},
+    )
+    assert {d["field"] for d in err(response, 422)["details"]} == {"client_id", "job_id"}
+    grid = ok_data(
+        await client.get(
+            org_url(org, "/time-entries/week"),
+            headers=person.headers,
+            params={"week_start": "2026-09-07"},
+        )
+    )
+    assert grid["rows"] == [] and grid["total_minutes"] == 0

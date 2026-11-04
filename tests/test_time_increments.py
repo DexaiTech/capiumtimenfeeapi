@@ -4,7 +4,7 @@ from httpx import AsyncClient
 
 from tests.domain_factories import make_client, practice, staff
 from tests.time_gap_helpers import approved_entry, copy_entry, copy_week, correct, day
-from tests.time_helpers import age_timer, log_time, ok_data, org_url, set_practice
+from tests.time_helpers import age_timer, log_time, ok_data, org_url, set_practice, time_job
 
 
 async def test_every_way_of_recording_time_rounds_up_to_the_increment(client: AsyncClient) -> None:
@@ -29,7 +29,12 @@ async def test_every_way_of_recording_time_rounds_up_to_the_increment(client: As
         await client.post(
             org_url(org, "/time-entries/bulk"),
             headers=person.headers,
-            json={"entries": [{"entry_date": day(3), "minutes": m} for m in (7, 16, 30)]},
+            json={
+                "entries": [
+                    {"entry_date": day(3), "minutes": m, "job_id": str(await time_job(org))}
+                    for m in (7, 16, 30)
+                ]
+            },
         ),
         201,
     )
@@ -39,7 +44,11 @@ async def test_every_way_of_recording_time_rounds_up_to_the_increment(client: As
     assert edited["minutes"] == 30
 
     # The timer: a seven minute run is stopped as one increment.
-    await client.post(org_url(org, "/timer/start"), headers=person.headers, json={})
+    await client.post(
+        org_url(org, "/timer/start"),
+        headers=person.headers,
+        json={"job_id": str(await time_job(org))},
+    )
     await age_timer(org, person, 7 * 60)
     stopped = ok_data(await client.post(org_url(org, "/timer/stop"), headers=person.headers), 201)
     assert stopped["minutes"] == 15

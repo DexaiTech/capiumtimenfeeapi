@@ -33,9 +33,10 @@ async def sheet_status(org: dict, user_id, week_start: date) -> str | None:
 async def test_dry_run_validates_without_writing(client):
     owner, org = await practice(client)
     acme = await make_client(org, "Acme Ltd", code="ACME")
+    job = await make_job(org, acme, "Accounts")
     csv = csv_of(
-        "client,staff,date,hours,billable",
-        f"ACME,{owner.email},2024-01-15,3.5,Y",
+        "client,staff,date,hours,job,billable",
+        f"ACME,{owner.email},2024-01-15,3.5,{job.number},Y",
     )
     response = await upload(client, owner, org, csv, dry_run=True)
     assert response.status_code == 200, response.text
@@ -53,10 +54,11 @@ async def test_dry_run_validates_without_writing(client):
 async def test_real_import_creates_and_tags_entries_and_approves_the_fresh_week(client):
     owner, org = await practice(client)
     acme = await make_client(org, "Acme Ltd", code="ACME")
+    job = await make_job(org, acme, "Accounts")
     csv = csv_of(
-        "client,staff,date,hours",
-        f"ACME,{owner.email},2024-01-15,3.5",
-        f"ACME,{owner.email},2024-01-16,2",
+        "client,staff,date,hours,job",
+        f"ACME,{owner.email},2024-01-15,3.5,{job.number}",
+        f"ACME,{owner.email},2024-01-16,2,{job.number}",
     )
     response = await upload(client, owner, org, csv)
     assert response.status_code == 200, response.text
@@ -65,7 +67,7 @@ async def test_real_import_creates_and_tags_entries_and_approves_the_fresh_week(
     assert [e["minutes"] for e in data["entries"]] == [210, 120]
 
     rows = await sql(
-        "SELECT entry_date, minutes, is_opening_balance, billing_status, client_id "
+        "SELECT entry_date, minutes, is_opening_balance, billing_status, client_id, job_id "
         "FROM time_entries WHERE organization_id = :o ORDER BY entry_date",
         o=org["id"],
     )
@@ -73,6 +75,7 @@ async def test_real_import_creates_and_tags_entries_and_approves_the_fresh_week(
     assert all(r["is_opening_balance"] for r in rows)
     assert all(r["billing_status"] == "unbilled" for r in rows)
     assert all(str(r["client_id"]) == str(acme.id) for r in rows)
+    assert all(str(r["job_id"]) == str(job.id) for r in rows)
 
     # The week (Monday 2024-01-15 is a Monday) was created only by this import, so it is
     # approved automatically: the time is immediately usable as WIP.
@@ -99,10 +102,12 @@ async def test_resolves_activity_and_job_by_code(client):
 
 async def test_unknown_client_and_staff_are_row_errors_and_nothing_is_written(client):
     owner, org = await practice(client)
+    acme = await make_client(org, "Acme Ltd", code="ACME")
+    job = await make_job(org, acme, "Accounts")
     csv = csv_of(
-        "client,staff,date,hours",
-        f"NOPE,{owner.email},2024-01-15,1",
-        "ACME,nobody@example.com,2024-01-15,1",
+        "client,staff,date,hours,job",
+        f"NOPE,{owner.email},2024-01-15,1,{job.number}",
+        f"ACME,nobody@example.com,2024-01-15,1,{job.number}",
     )
     response = await upload(client, owner, org, csv)
     assert response.status_code == 422, response.text
@@ -133,11 +138,12 @@ async def test_job_must_belong_to_the_row_s_client(client):
 
 async def test_invalid_date_and_hours_are_row_errors(client):
     owner, org = await practice(client)
-    await make_client(org, "Acme Ltd", code="ACME")
+    acme = await make_client(org, "Acme Ltd", code="ACME")
+    job = await make_job(org, acme, "Accounts")
     csv = csv_of(
-        "client,staff,date,hours",
-        f"ACME,{owner.email},15/01/2024,1",  # not ISO
-        f"ACME,{owner.email},2024-01-16,30",  # more than 24 hours
+        "client,staff,date,hours,job",
+        f"ACME,{owner.email},15/01/2024,1,{job.number}",  # not ISO
+        f"ACME,{owner.email},2024-01-16,30,{job.number}",  # more than 24 hours
     )
     response = await upload(client, owner, org, csv)
     assert response.status_code == 422, response.text
@@ -155,7 +161,8 @@ async def test_never_approves_a_week_that_already_had_other_content(client):
     )
     assert await sheet_status(org, owner.id, date(2024, 1, 15)) == "open"
 
-    csv = csv_of("client,staff,date,hours", f"ACME,{owner.email},2024-01-17,1")
+    job = await make_job(org, acme, "Accounts")
+    csv = csv_of("client,staff,date,hours,job", f"ACME,{owner.email},2024-01-17,1,{job.number}")
     response = await upload(client, owner, org, csv)
     assert response.status_code == 200, response.text
     # The week already had other, unrelated content, so the import must not approve it: that
@@ -179,3 +186,33 @@ async def test_needs_opening_balance_import_permission(client):
     csv = csv_of("client,staff,date,hours", f"ACME,{member.email},2024-01-15,1")
     response = await upload(client, member, org, csv)
     assert response.status_code == 403, response.text
+
+
+async def test_every_row_needs_a_job(client):
+    """APT64: imported time is a time entry, so it is recorded against a job of the client."""
+    owner, org = await practice(client)
+    acme = await make_client(org, "Acme Ltd", code="ACME")
+    job = await make_job(org, acme, "Accounts")
+    without_column = csv_of("client,staff,date,hours", f"ACME,{owner.email},2024-01-15,1")
+    response = await upload(client, owner, org, without_column, dry_run=True)
+    assert response.status_code == 422, response.text
+    error = response.json()["error"]
+    assert error["code"] == "IMPORT_MISSING_COLUMNS" and error["details"]["missing"] == ["job"]
+
+    blank = csv_of(
+        "client,staff,date,hours,job",
+        f"ACME,{owner.email},2024-01-15,1,{job.number}",
+        f"ACME,{owner.email},2024-01-16,1,",
+    )
+    checked = await upload(client, owner, org, blank, dry_run=True)
+    assert checked.status_code == 200, checked.text
+    data = checked.json()["data"]
+    assert data["valid_rows"] == 1
+    assert [(e["row"], e["field"], e["code"]) for e in data["errors"]] == [(2, "job", "required")]
+    response = await upload(client, owner, org, blank)
+    assert response.status_code == 422, response.text
+    assert response.json()["error"]["code"] == "IMPORT_INVALID"
+    assert (
+        await scalar("SELECT count(*) FROM time_entries WHERE organization_id = :o", o=org["id"])
+        == 0
+    )
