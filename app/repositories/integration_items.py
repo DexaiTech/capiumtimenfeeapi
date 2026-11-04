@@ -1,10 +1,11 @@
 """Queries for the sync-item outbox and the integration connections. Every method is scoped to
 one organization, except the ones that say they serve the worker (``due``,
-``enabled_organizations``)."""
+``enabled_organizations``) and ``switches`` (the practices of one person)."""
 
 from __future__ import annotations
 
 import uuid
+from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -220,6 +221,18 @@ class ConnectionRepository:
         if lock:
             stmt = stmt.with_for_update().execution_options(populate_existing=True)
         return (await self.session.execute(stmt)).scalar_one_or_none()
+
+    async def switches(
+        self, organization_ids: Collection[uuid.UUID], integration: str
+    ) -> dict[uuid.UUID, bool]:
+        """The integration's switch of each of these practices that has a connection row."""
+        if not organization_ids:
+            return {}
+        stmt = select(IntegrationConnection.organization_id, IntegrationConnection.enabled).where(
+            IntegrationConnection.organization_id.in_(organization_ids),
+            IntegrationConnection.integration == integration,
+        )
+        return dict((await self.session.execute(stmt)).tuples().all())
 
     async def ensure(
         self, organization_id: uuid.UUID, integration: str, *, enabled: bool, new_id: uuid.UUID

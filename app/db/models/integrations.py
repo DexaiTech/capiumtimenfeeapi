@@ -156,7 +156,7 @@ class IntegrationConnection(Base, IdMixin, OrgScopedMixin, TimestampMixin):
     """A practice's switch, settings and last outcome for one integration.
 
     A row exists once the integration has been changed or has run; without one the integration
-    has its defaults (the central ones on, practice management and bookkeeping off).
+    has its defaults (central user on; central client, practice management and bookkeeping off).
     """
 
     __tablename__ = "integration_connections"
