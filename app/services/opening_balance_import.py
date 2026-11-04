@@ -42,7 +42,7 @@ from app.services.time_entries import TimeEntryService
 from app.services.time_rules import week_start_for
 
 _KNOWN_COLUMNS = ("client", "staff", "date", "hours", "activity", "job", "billable")
-_REQUIRED_COLUMNS = ("client", "staff", "date", "hours")
+_REQUIRED_COLUMNS = ("client", "staff", "date", "hours", "job")
 _TRUE_TOKENS = {"y", "yes", "true", "1", "billable"}
 _FALSE_TOKENS = {"n", "no", "false", "0", "non-billable", "non_billable"}
 
@@ -82,7 +82,7 @@ class OpeningBalanceImportService:
             missing = [c for c in _REQUIRED_COLUMNS if c not in used]
             if missing:
                 raise ValidationError(
-                    "The file needs client, staff, date and hours columns.",
+                    "The file needs client, staff, date, hours and job columns.",
                     code="IMPORT_MISSING_COLUMNS",
                     details={"missing": missing},
                 )
@@ -236,7 +236,16 @@ class OpeningBalanceImportService:
                     )
                 )
             job = jobs_by_number.get(row.job_number.upper()) if row.job_number else None
-            if row.job_number and job is None:
+            if not row.job_number:
+                errors.append(
+                    OpeningBalanceRowError(
+                        row=row.line,
+                        field="job",
+                        code="required",
+                        message="Give the job number: time is recorded against a job.",
+                    )
+                )
+            elif job is None:
                 errors.append(
                     OpeningBalanceRowError(
                         row=row.line,
@@ -260,7 +269,7 @@ class OpeningBalanceImportService:
 
             if len(errors) > row_errors_before:
                 continue
-            assert client is not None and user_id is not None
+            assert client is not None and user_id is not None and job is not None
             assert entry_date is not None and minutes is not None
             creates.append(
                 TimeEntryCreate(
@@ -268,7 +277,7 @@ class OpeningBalanceImportService:
                     entry_date=entry_date,
                     minutes=minutes,
                     client_id=client.id,
-                    job_id=job.id if job else None,
+                    job_id=job.id,
                     activity_code_id=activity.id if activity else None,
                     is_billable=billable,
                     description="Imported opening balance",

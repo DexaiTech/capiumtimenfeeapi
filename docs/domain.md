@@ -350,10 +350,14 @@ audit entries about the client (and clients merged into it) whose kind the calle
 ## Time
 
 * An entry: person, date, minutes (1–1440, rounded up to the practice increment), client and
-  job (optional; a job implies its client), activity code (optional), description,
-  `is_billable`.
-* `is_billable` defaults to: false for `non_billable` jobs, for non-chargeable activity
-  codes and for entries with no client; true otherwise. A billable entry needs a client.
+  job (both required, billable or not; a job implies its client), activity code (optional),
+  description, `is_billable`. Internal time is recorded on an internal client and job of the
+  practice. The rule applies whenever time is recorded (an entry, bulk entries, the week grid,
+  a copy, a timer, the opening-balance import) and to every edit and correction: an older
+  entry without a client or job is kept as it is, but changing it means adding them (422
+  `required` on `client_id`/`job_id`). The database still allows the older entries.
+* `is_billable` defaults to: false for `non_billable` jobs and for non-chargeable activity
+  codes; true otherwise.
 * A service may limit the activity codes of its jobs' time (see Practice settings): another
   code is 422 `activity_not_allowed`, on entries, bulk entries and the timer alike. Time
   cannot be logged after the person's leaving date (422 `after_leaving_date`) and only for
@@ -368,7 +372,7 @@ audit entries about the client (and clients merged into it) whose kind the calle
   timer stop included), editing (the old and the new date), deleting and correcting time dated
   on or before the lock are 409 `PERIOD_LOCKED` (area `time`). Timesheet decisions still work in
   a locked week.
-* Timer: one per person; start (optionally from a job), pause, resume, stop. Stop writes an
+* Timer: one per person; start (on a client and job), pause, resume, stop. Stop writes an
   entry for the elapsed time (rounded up to the increment, minimum one increment) on the
   start date and deletes the timer. Discard deletes it without an entry.
 * The time increment rounds up every way of recording time alike: a new entry, a bulk entry, an

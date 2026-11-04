@@ -5,7 +5,7 @@ from httpx import AsyncClient
 from tests.domain_factories import make_client, practice, staff
 from tests.factories import audit_entries
 from tests.test_member_permissions import put
-from tests.time_helpers import entry_row, err, log_time, ok_data, org_url, set_entry
+from tests.time_helpers import entry_row, err, log_time, ok_data, org_url, set_entry, time_job
 
 
 async def _post(client: AsyncClient, actor, org, sheet_id: str, action: str, **kwargs):
@@ -117,9 +117,10 @@ async def test_approving_alone_does_not_let_a_person_change_anyone_elses_time(
     other = await make_client(org)
     entry = await log_time(client, person, org, client_id=acme.id)
     url = org_url(org, f"/time-entries/{entry['id']}")
+    to_other = {"client_id": str(other.id), "job_id": str(await time_job(org, other.id))}
     await put(client, owner, org, approver, grants=["timesheet.approve", "time.read_all"])
 
-    patch = await client.patch(url, headers=approver.headers, json={"client_id": str(other.id)})
+    patch = await client.patch(url, headers=approver.headers, json=to_other)
     assert patch.status_code == 403, patch.text
     assert (await client.delete(url, headers=approver.headers)).status_code == 403
     await log_time(client, approver, org, status=403, user_id=str(person.id))
@@ -129,10 +130,10 @@ async def test_approving_alone_does_not_let_a_person_change_anyone_elses_time(
     sheet_id = str(entry["timesheet_id"])
     ok_data(await _post(client, person, org, sheet_id, "submit"))
     ok_data(await _post(client, approver, org, sheet_id, "approve"))
-    locked = await client.patch(url, headers=person.headers, json={"client_id": str(other.id)})
+    locked = await client.patch(url, headers=person.headers, json=to_other)
     assert err(locked, 409)["code"] == "TIME_LOCKED"
     assert (await client.delete(url, headers=person.headers)).status_code == 409
     ok_data(await _post(client, approver, org, sheet_id, "reopen"))
-    moved = await client.patch(url, headers=person.headers, json={"client_id": str(other.id)})
+    moved = await client.patch(url, headers=person.headers, json=to_other)
     assert moved.status_code == 200, moved.text
     assert (await client.delete(url, headers=person.headers)).status_code == 200

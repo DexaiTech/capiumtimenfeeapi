@@ -42,7 +42,10 @@ TimeServiceDep = Annotated[TimeEntryService, Depends(get_time_service)]
 TimerServiceDep = Annotated[TimerService, Depends(get_timer_service)]
 
 _WRITE_RULES = (
-    " Own time needs `time.log`, anyone else's `time.manage_all`. Minutes are rounded up to "
+    " Every entry needs a client and a job of that client, billable or not (internal time "
+    "goes on an internal client and job): 422 `required` on `client_id`/`job_id` otherwise, "
+    "also when editing an older entry that has none. "
+    "Own time needs `time.log`, anyone else's `time.manage_all`. Minutes are rounded up to "
     "the practice time increment; a person logs at most 24 hours a day (422 "
     "`DAY_LIMIT_EXCEEDED`). Time on a submitted/approved timesheet or that is not `unbilled` "
     "answers 409 `TIME_LOCKED`; on a completed/cancelled job 409 `JOB_CLOSED`; for an "
@@ -129,8 +132,8 @@ async def week_grid(
     summary="Log time",
     description=(
         "Creates a time entry on the person's timesheet for that week (created on demand). "
-        "A job implies its client. `is_billable` defaults to false for non-billable jobs, "
-        "non-chargeable activity codes and entries without a client." + _WRITE_RULES
+        "A job implies its client. `is_billable` defaults to false for non-billable jobs "
+        "and non-chargeable activity codes." + _WRITE_RULES
     ),
     responses=error_responses(403, 404, 409),
 )
@@ -226,7 +229,8 @@ async def get_timer(org: TimerOrg, service: TimerServiceDep) -> ApiResponse[Time
     status_code=status.HTTP_201_CREATED,
     summary="Start my timer",
     description=(
-        "Starts the caller's timer, optionally on a client, job and activity. One per person: "
+        "Starts the caller's timer on a client and job (422 `required` on `client_id`/`job_id` "
+        "without them) and optionally an activity. One per person: "
         "409 `TIMER_RUNNING` when one exists, unless `replace: true`, which first stops it "
         "(writing its entry). The client and job must accept time (409 `CLIENT_INACTIVE`, "
         "`JOB_CLOSED`). Requires `time.log`."

@@ -6,7 +6,15 @@ from httpx import AsyncClient
 
 from tests.domain_factories import make_client, make_staff_rate, practice, staff
 from tests.time_gap_helpers import approve_sheet, day, pin_today, set_member
-from tests.time_helpers import err, log_time, ok_data, org_url, set_manager, set_practice
+from tests.time_helpers import (
+    err,
+    log_time,
+    ok_data,
+    org_url,
+    set_manager,
+    set_practice,
+    time_job,
+)
 
 OVER = date(2026, 9, 16)  # a Wednesday: the test week (from Monday 7 September) is over
 
@@ -203,7 +211,11 @@ async def test_the_day_view(client: AsyncClient) -> None:
 async def test_the_day_view_shows_the_callers_own_timer_only(client: AsyncClient) -> None:
     owner, org = await practice(client)
     person = await staff(org)
-    started = await client.post(org_url(org, "/timer/start"), headers=person.headers, json={})
+    started = await client.post(
+        org_url(org, "/timer/start"),
+        headers=person.headers,
+        json={"job_id": str(await time_job(org))},
+    )
     assert started.status_code == 201, started.text
     url = org_url(org, "/time-entries/day")
     own = ok_data(await client.get(url, headers=person.headers, params={"date": day(0)}))

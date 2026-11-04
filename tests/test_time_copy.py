@@ -30,6 +30,7 @@ from tests.time_helpers import (
     log_time,
     ok_data,
     org_url,
+    set_entry,
     set_practice,
     sheet_count,
 )
@@ -376,3 +377,20 @@ async def test_copy_routes_need_a_signed_in_user(client: AsyncClient, path: str)
     _, org = await practice(client)
     url = org_url(org, path.format(id="00000000-0000-4000-8000-000000000000"))
     assert (await client.post(url, json={})).status_code == 401
+
+
+async def test_older_time_without_a_client_or_job_is_not_copied(client: AsyncClient) -> None:
+    """APT64: a copy is a new entry, so it needs a client and a job; older time without them
+    is skipped by a week copy and refused as a single copy."""
+    _, org = await practice(client)
+    person = await staff(org)
+    kept = await log_time(client, person, org, entry_date=day(0))
+    old = await log_time(client, person, org, entry_date=day(1))
+    await set_entry(old["id"], client_id=None, job_id=None, is_billable=False)
+    result = await copy_week(client, person, org, from_week_start=day(0), to_week_start=day(7))
+    assert [e["entry_date"] for e in result["created"]] == [day(7)]
+    assert result["created"][0]["job_id"] == kept["job_id"]
+    [skipped] = result["skipped"]
+    assert skipped["source_entry_id"] == old["id"] and skipped["code"] == "REQUIRED"
+    error = await copy_entry(client, person, org, old["id"], status=422, date=day(3))
+    assert {d["field"] for d in error["details"]} == {"client_id", "job_id"}
