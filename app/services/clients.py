@@ -75,6 +75,8 @@ from app.schemas.clients import (
 from app.schemas.rates import ClientRateRead
 from app.services import audit, policy
 from app.services.common import record_audit_many
+from app.services.integration_connections import ConnectionService
+from app.services.integrations import CENTRAL_CLIENT
 from app.services.policy import OrgContext
 from app.services.rates import practice_today
 from app.services.sequences import DEFAULT_SEQUENCES, format_number
@@ -625,10 +627,16 @@ class ClientsService:
         if (old == "archived") != (new == "archived"):
             policy.ensure(ctx, "client.delete")
 
-    @staticmethod
-    def _check_centrally_managed(client: Client, values: dict[str, Any]) -> None:
-        """A linked client's name and address belong to the central service."""
+    async def _check_centrally_managed(
+        self, ctx: OrgContext, client: Client, values: dict[str, Any]
+    ) -> None:
+        """A linked client's name and address belong to the central service while the practice
+        has it switched on; switched off, they are editable and the link is kept."""
         if client.central_client_id is None:
+            return
+        if not await ConnectionService(self.session).is_enabled(
+            ctx.organization_id, CENTRAL_CLIENT
+        ):
             return
         managed = [
             field
@@ -726,7 +734,7 @@ class ClientsService:
                 self._check_archive_permission(ctx, client.status, values["status"])
             if "code" in values and values["code"] != client.code:
                 await self._ensure_code_free(ctx, values["code"], exclude_id=client.id)
-            self._check_centrally_managed(client, values)
+            await self._check_centrally_managed(ctx, client, values)
             await self._check_people(ctx, values, client)
             await self._check_billing_settings(ctx, values, client)
             await self._check_branch(ctx, values, client)

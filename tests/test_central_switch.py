@@ -139,3 +139,21 @@ async def test_switching_capium_central_off_stops_changes_reaching_linked_client
     assert ok_data(await process_changes(client, team.owner, team.org))["applied"] == 1
     detail = ok_data(await client.get(detail_url, headers=team.owner.headers))
     assert detail["name"] == "Northgate Bakehouse Ltd"
+
+
+async def test_a_linked_clients_name_and_address_are_editable_while_capium_central_is_off(client):
+    team = await new_team(client)
+    linked = (await enabled(client, team.owner, team.org, BAKERY))["client"]
+    detail_url = org_url(team.org, f"/clients/{linked['id']}")
+    await central_on(client, team.owner, team.org, on=False)
+    edited = await client.patch(
+        detail_url, headers=team.owner.headers, json={"name": "Our Bakery", "city": "York"}
+    )
+    data = ok_data(edited)
+    assert (data["name"], data["city"]) == ("Our Bakery", "York")
+    # The link is kept: switched back on, Capium Central manages the fields again.
+    assert data["central_client_id"] == BAKERY
+    await central_on(client, team.owner, team.org)
+    refused = await client.patch(detail_url, headers=team.owner.headers, json={"name": "Other"})
+    assert refused.status_code == 409, refused.text
+    assert error(refused)["code"] == "CLIENT_FIELD_MANAGED_CENTRALLY"
