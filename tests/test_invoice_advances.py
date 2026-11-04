@@ -748,3 +748,33 @@ async def test_taking_time_off_a_used_up_advance_covers_the_later_work_again(cli
         str(second.id): [40_000, 60_000],
         str(third.id): [0, 30_000],
     }
+
+
+async def test_writing_work_off_on_an_advance_needs_wip_write_off(client):
+    """APT69: work the advance does not cover is written off, which takes the permission to
+    write off WIP as well as the one to prepare invoices."""
+    p = await new_practice(client)
+    invoice, line_id = await advance_invoice(
+        client, p, {"description": "Fees in advance", "net_amount": 100_000}
+    )
+    manager = await staff(p.org, "manager")
+    covered, beyond = [
+        await make_time_entry(
+            p.org, p.owner, client=p.client, entry_date=day, minutes=300, charge_rate=12_000
+        )
+        for day in (date(2026, 5, 1), date(2026, 5, 2))
+    ]
+    # Within the advance: no write-off, preparing invoices is enough.
+    response = await assign(client, manager, p.org, invoice["id"], line_id, time=[covered])
+    assert response.status_code == 200, response.text
+
+    refused = await assign(client, manager, p.org, invoice["id"], line_id, time=[beyond])
+    assert refused.status_code == 403, refused.text
+    assert "write off" in error(refused)["message"]
+    assert (await billing_status("time_entries", [beyond.id]))[beyond.id] == "unbilled"
+    assert len(await audit_entries(p.id, "invoice.time_assigned")) == 1
+
+    allowed = await assign(client, p.owner, p.org, invoice["id"], line_id, time=[beyond])
+    assert allowed.status_code == 200, allowed.text
+    advance = allowed.json()["data"]["lines"][0]["advance"]
+    assert (advance["used"], advance["written_off"]) == (100_000, 20_000)

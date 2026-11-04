@@ -368,7 +368,8 @@ async def add_wip(
         "`billed`; the invoice and its totals do not change. The advance is used oldest work "
         "first: an item bills its WIP value while the advance lasts, the rest of the value of "
         "the work beyond it is written off. The WIP period lock applies to today. Audited "
-        "(`invoice.time_assigned`). Requires `invoice.create`."
+        "(`invoice.time_assigned`). Requires `invoice.create`, and `wip.write_off` too when the "
+        "advance does not cover all of the work (403 otherwise)."
     ),
     responses=error_responses(403, 404, 409),
 )
