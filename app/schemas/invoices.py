@@ -100,6 +100,26 @@ class AdvanceLineCreate(RequestModel):
     )
 
 
+class LineCreate(RequestModel):
+    description: str = Field(min_length=1, max_length=1000)
+    quantity: Quantity = Decimal(1)
+    unit_amount: SignedMoney
+    net_amount: SignedMoney | None = Field(
+        default=None, description="Overrides round(quantity x unit_amount)"
+    )
+    vat_rate_id: uuid.UUID | None = None
+    service_id: uuid.UUID | None = None
+    job_id: uuid.UUID | None = None
+    position: int | None = Field(default=None, ge=1, le=10000)
+    is_advance: bool = Field(
+        default=False,
+        description=(
+            "Fees billed in advance: once the invoice is issued, time is assigned to the line "
+            "later. Its net must be more than zero"
+        ),
+    )
+
+
 class InvoiceCreate(WipSelection):
     client_id: uuid.UUID
     issue_date: date | None = None
@@ -129,6 +149,16 @@ class InvoiceCreate(WipSelection):
         description=(
             "Fees billed in advance on several lines: each adds a manual line marked "
             "`is_advance` (net = round(quantity x unit_amount)). Not together with `advance`"
+        ),
+    )
+    manual_lines: list[LineCreate] = Field(
+        default_factory=list,
+        max_length=200,
+        description=(
+            "Lines that bill no WIP, drafted in this order after the WIP and advance lines, "
+            "each as `POST /invoices/{id}/lines` adds one (net = round(quantity x unit_amount), "
+            "VAT per line). `is_advance` makes a line fees billed in advance, to which time is "
+            "assigned once the invoice is issued"
         ),
     )
 
@@ -165,26 +195,6 @@ class InvoiceUpdate(RequestModel):
     notes: str | None = Field(default=None, max_length=2000)
 
     _blank = field_validator("reference", "notes")(_blank_is_null)
-
-
-class LineCreate(RequestModel):
-    description: str = Field(min_length=1, max_length=1000)
-    quantity: Quantity = Decimal(1)
-    unit_amount: SignedMoney
-    net_amount: SignedMoney | None = Field(
-        default=None, description="Overrides round(quantity x unit_amount)"
-    )
-    vat_rate_id: uuid.UUID | None = None
-    service_id: uuid.UUID | None = None
-    job_id: uuid.UUID | None = None
-    position: int | None = Field(default=None, ge=1, le=10000)
-    is_advance: bool = Field(
-        default=False,
-        description=(
-            "Fees billed in advance: once the invoice is issued, time is assigned to the line "
-            "later. Its net must be more than zero"
-        ),
-    )
 
 
 class AdvanceAssign(RequestModel):
