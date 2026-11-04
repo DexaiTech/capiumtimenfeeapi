@@ -278,14 +278,14 @@ class WipAtomRepository:
         )
         return {row[0]: row[1] for row in (await self.session.execute(stmt)).all()}
 
-    async def service_vat_rates(
+    async def disbursement_vat_rates(
         self, organization_id: uuid.UUID, ids: Collection[uuid.UUID]
     ) -> dict[uuid.UUID, uuid.UUID | None]:
-        """Service id -> its VAT code (null when it has none)."""
+        """Disbursement id -> its own VAT code (null when it has none)."""
         if not ids:
             return {}
-        stmt = select(Service.id, Service.vat_rate_id).where(
-            Service.organization_id == organization_id, Service.id.in_(list(ids))
+        stmt = select(Disbursement.id, Disbursement.vat_rate_id).where(
+            Disbursement.organization_id == organization_id, Disbursement.id.in_(list(ids))
         )
         return {row[0]: row[1] for row in (await self.session.execute(stmt)).all()}
 
