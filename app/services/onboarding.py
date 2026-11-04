@@ -27,11 +27,14 @@ from app.schemas.onboarding import (
     StepState,
 )
 from app.services.common import record_audit
+from app.services.integration_connections import INFO
 from app.services.policy import OrgContext
 from app.services.practice_defaults import DEFAULT_INVOICE_TEMPLATE
 from app.services.sequences import DEFAULT_SEQUENCES
 
 NUMBERED_KINDS = ("invoice", "credit_note", "estimate")
+# The integrations a practice has to switch on: switching one on finishes the Integrations step.
+OFF_BY_DEFAULT = tuple(key for key, info in INFO.items() if not info.default_enabled)
 
 
 @dataclass(frozen=True, slots=True)
@@ -133,8 +136,10 @@ def _period_lock(_: Organization, facts: OnboardingFacts) -> Check:
 
 
 def _integrations(_: Organization, facts: OnboardingFacts) -> Check:
-    linked = _count(facts.linked_clients, "client")
-    return Check(facts.linked_clients > 0, f"{linked} linked to the central service")
+    # Capium Central and the others are off until a practice switches them on (APT74); clients
+    # linked before that also say the practice uses Capium Central.
+    done = facts.integration_switched_on or facts.linked_clients > 0
+    return Check(done, None if done else "No integration switched on yet")
 
 
 # The order is the order a new practice should work in. Links are paths below `/:orgSlug`.
@@ -225,7 +230,8 @@ STEPS: tuple[StepDef, ...] = (
     StepDef(
         "integrations",
         "Integrations",
-        "Link clients from the central client service and review the other integrations.",
+        "Switch on the integrations the practice uses, such as Capium Central for the client "
+        "list, or review them and mark this step done.",
         "/settings/integrations",
         _integrations,
     ),
@@ -286,6 +292,7 @@ class OnboardingService:
             default_template_name=DEFAULT_INVOICE_TEMPLATE,
             default_sequences=DEFAULT_SEQUENCES,
             numbered_kinds=NUMBERED_KINDS,
+            off_by_default=OFF_BY_DEFAULT,
         )
         manual = await self.repo.manual_steps(org.id)
         steps = [_compose(step, org, facts, manual.get(step.key)) for step in STEPS]

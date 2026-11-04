@@ -6,6 +6,7 @@ import asyncio
 import pytest
 from sqlalchemy.exc import IntegrityError
 
+from tests.central_helpers import central_on
 from tests.clients_helpers import scalar, sql
 from tests.domain_factories import make_client, make_job, make_time_entry, practice, staff
 from tests.factories import audit_entries, create_user_with_org, error
@@ -109,6 +110,17 @@ async def _a_linked_client(client, owner, org):
     await make_client(org, central_client_id="CC-1", central_sync_state="synced")
 
 
+async def _capium_central_on(client, owner, org):
+    await central_on(client, owner, org)
+
+
+async def _bookkeeping_on(client, owner, org):
+    response = await client.patch(
+        org_url(org, "/integrations/bookkeeping"), headers=owner.headers, json={"enabled": True}
+    )
+    assert response.status_code == 200, response.text
+
+
 # step key -> something that makes the practice's data say the step is finished
 SETUPS = [
     ("practice_details", _address),
@@ -126,6 +138,8 @@ SETUPS = [
     ("first_time_entry", _a_time_entry),
     ("period_lock", _a_lock),
     ("integrations", _a_linked_client),
+    ("integrations", _capium_central_on),
+    ("integrations", _bookkeeping_on),
 ]
 
 
@@ -200,7 +214,31 @@ async def test_the_details_count_what_was_found(client):
     assert by_key["staff_added"]["detail"] == "2 active staff members"
     assert by_key["grades_rates"]["detail"] == "1 grade with a default charge-out rate"
     assert by_key["clients_added"]["detail"] == "2 clients"
-    assert by_key["integrations"]["detail"] == "1 client linked to the central service"
+    assert by_key["integrations"]["detail"] is None
+
+
+async def test_integrations_are_done_once_one_is_switched_on_not_by_the_central_user_default(
+    client,
+):
+    owner, org = await practice(client)
+    step = steps(await checklist(client, owner, org))["integrations"]
+    assert step["detail"] == "No integration switched on yet"
+    assert "Capium Central" in step["description"]
+    # Central User is on by default: switching it off and on again is not switching one on.
+    for enabled in (False, True):
+        response = await client.patch(
+            org_url(org, "/integrations/central_user"),
+            headers=owner.headers,
+            json={"enabled": enabled},
+        )
+        assert response.status_code == 200, response.text
+    assert steps(await checklist(client, owner, org))["integrations"]["state"] == "todo"
+    await central_on(client, owner, org)
+    step = steps(await checklist(client, owner, org))["integrations"]
+    assert (step["state"], step["source"], step["detail"]) == ("done", "auto", None)
+    # Switched off again, the step goes back to to do.
+    await central_on(client, owner, org, on=False)
+    assert steps(await checklist(client, owner, org))["integrations"]["state"] == "todo"
 
 
 async def test_a_step_that_the_data_no_longer_supports_goes_back_to_todo(client):
