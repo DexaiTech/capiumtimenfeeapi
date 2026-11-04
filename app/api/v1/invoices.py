@@ -19,6 +19,7 @@ from app.schemas.invoices import (
     InvoiceBulkAction,
     InvoiceCreate,
     InvoiceIssue,
+    InvoiceLinesSave,
     InvoiceListSummary,
     InvoiceRead,
     InvoiceReject,
@@ -265,6 +266,31 @@ async def add_line(
     ctx: ContextDep,
 ) -> ApiResponse[InvoiceRead]:
     return ok(await service.add_line(org, invoice_id, body, ctx), "Line added")
+
+
+@router.put(
+    "/invoices/{invoice_id}/lines",
+    summary="Save a draft's lines",
+    description=(
+        "Saves every change to a draft's lines in one go, all or nothing: the saved lines "
+        "listed in `lines` change as `PATCH /invoices/{id}/lines/{line_id}` changes one (only "
+        "the fields given), a saved line not listed is removed (the WIP it billed returns to "
+        "`unbilled`), and `new_lines` are added after them as `POST /invoices/{id}/lines` adds "
+        "one. The total is checked once, after every change: it may not go below zero (422 "
+        "`INVOICE_TOTAL_NEGATIVE`), and a refused save changes nothing. A line id not on the "
+        "draft is 404. Audited per line (`invoice.line_removed`, `invoice.line_updated`, "
+        "`invoice.line_added`). Drafts only. Requires `invoice.create`."
+    ),
+    responses=error_responses(403, 404, 409),
+)
+async def save_lines(
+    invoice_id: uuid.UUID,
+    body: InvoiceLinesSave,
+    org: Drafter,
+    service: InvoiceServiceDep,
+    ctx: ContextDep,
+) -> ApiResponse[InvoiceRead]:
+    return ok(await service.save_lines(org, invoice_id, body, ctx), "Lines saved")
 
 
 @router.patch(

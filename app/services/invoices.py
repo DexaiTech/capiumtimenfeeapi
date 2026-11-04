@@ -49,6 +49,7 @@ from app.schemas.invoices import (
     InvoiceBulkAction,
     InvoiceCreate,
     InvoiceIssue,
+    InvoiceLinesSave,
     InvoiceListSummary,
     InvoicePaymentRead,
     InvoiceRead,
@@ -719,50 +720,12 @@ class InvoiceService:
         data: LineUpdate,
         rctx: RequestContext,
     ) -> InvoiceRead:
-        fields = data.model_fields_set
         async with unit_of_work(self.session):
             invoice = await self._locked_draft(ctx, invoice_id)
             line = await self._line(ctx, invoice, line_id)
             client = await get_client_or_404(self.refs, ctx.organization_id, invoice.client_id)
             before = _line_meta(line)
-            old_net = line.net_amount
-            if "description" in fields and data.description:
-                line.description = data.description
-            if "position" in fields and data.position:
-                line.position = data.position
-            sizing = False
-            if "quantity" in fields and data.quantity is not None:
-                line.quantity = data.quantity
-                sizing = True
-            if "unit_amount" in fields and data.unit_amount is not None:
-                line.unit_amount = data.unit_amount
-                sizing = True
-            if "net_amount" in fields and data.net_amount is not None:
-                line.net_amount = data.net_amount
-                if "unit_amount" not in fields:
-                    line.unit_amount = _unit_for(data.net_amount, line.quantity)
-            elif sizing:
-                line.net_amount = line_net(line.quantity, line.unit_amount)
-            if line.kind != "manual" and line.net_amount < 0:
-                raise invalid(
-                    "NEGATIVE_WIP_LINE",
-                    "net_amount",
-                    "A line that bills WIP cannot be negative; add a discount line instead.",
-                )
-            if line.is_advance and line.net_amount <= 0:
-                raise invalid("ADVANCE_NOT_POSITIVE", "net_amount", ADVANCE_NOT_POSITIVE)
-            if "vat_rate_id" in fields:
-                line.vat_rate_id, line.vat_rate_bp = await VatResolver(
-                    self.refs, ctx.organization
-                ).resolve(
-                    client=client,
-                    line_rate_id=data.vat_rate_id,
-                    service_id=line.service_id,
-                    validate_line_rate=data.vat_rate_id is not None,
-                )
-            line.vat_amount = vat_on(line.net_amount, line.vat_rate_bp)
-            if line.net_amount != old_net:
-                await self._reapportion(ctx, line)
+            await self._change_line(ctx, client, line, data)
             await self.session.flush()
             await self._recompute(invoice)
             await record(
@@ -774,6 +737,57 @@ class InvoiceService:
                 target_id=invoice.id,
                 meta={**_meta(invoice, client), "old": before, "new": _line_meta(line)},
             )
+            detail = await self._detail(ctx, invoice)
+        return detail
+
+    async def save_lines(
+        self, ctx: OrgContext, invoice_id: uuid.UUID, data: InvoiceLinesSave, rctx: RequestContext
+    ) -> InvoiceRead:
+        """Saves a draft's lines in one go: the listed lines changed, the others removed (their
+        WIP unbilled again), the new ones added. The totals are checked once, at the end, so a
+        change only valid as a whole is saved, and a refused one changes nothing."""
+        async with unit_of_work(self.session):
+            invoice = await self._locked_draft(ctx, invoice_id)
+            client = await get_client_or_404(self.refs, ctx.organization_id, invoice.client_id)
+            saved = {
+                line.id: line for line in await self.invoices.lines(ctx.organization_id, invoice.id)
+            }
+            kept = {change.id for change in data.lines}
+            if not kept <= saved.keys():
+                raise NotFoundError("Invoice line not found.")
+            entries: list[tuple[str, dict[str, Any]]] = []
+            removed = [line for line in saved.values() if line.id not in kept]
+            allocations: list[WipAllocation] = []
+            for line in removed:
+                allocations += await self.wip.allocations_for_line(ctx.organization_id, line.id)
+            if allocations:
+                await self._release(ctx, allocations)
+            for line in removed:
+                entries.append(("invoice.line_removed", {"line": _line_meta(line)}))
+                await self.invoices.delete_line(line)
+            for change in data.lines:
+                if not change.model_fields_set - {"id"}:
+                    continue
+                line = saved[change.id]
+                before = _line_meta(line)
+                await self._change_line(ctx, client, line, change)
+                entries.append(("invoice.line_updated", {"old": before, "new": _line_meta(line)}))
+            await self.session.flush()
+            for spec in data.new_lines:
+                line = await self._manual_line(ctx, invoice, client, spec)
+                await self.invoices.add_lines([line])
+                entries.append(("invoice.line_added", {"line": _line_meta(line)}))
+            await self._recompute(invoice)
+            for action, meta in entries:
+                await record(
+                    self.session,
+                    ctx,
+                    rctx,
+                    action,
+                    target_type="invoice",
+                    target_id=invoice.id,
+                    meta={**_meta(invoice, client), **meta},
+                )
             detail = await self._detail(ctx, invoice)
         return detail
 
@@ -1387,6 +1401,50 @@ class InvoiceService:
             vat_amount=vat_on(net, rate_bp),
             is_advance=data.is_advance,
         )
+
+    async def _change_line(
+        self, ctx: OrgContext, client: Client, line: InvoiceLine, data: LineUpdate
+    ) -> None:
+        """Applies the fields given to a saved draft line; the WIP it bills is re-apportioned."""
+        fields = data.model_fields_set
+        old_net = line.net_amount
+        if "description" in fields and data.description:
+            line.description = data.description
+        if "position" in fields and data.position:
+            line.position = data.position
+        sizing = False
+        if "quantity" in fields and data.quantity is not None:
+            line.quantity = data.quantity
+            sizing = True
+        if "unit_amount" in fields and data.unit_amount is not None:
+            line.unit_amount = data.unit_amount
+            sizing = True
+        if "net_amount" in fields and data.net_amount is not None:
+            line.net_amount = data.net_amount
+            if "unit_amount" not in fields:
+                line.unit_amount = _unit_for(data.net_amount, line.quantity)
+        elif sizing:
+            line.net_amount = line_net(line.quantity, line.unit_amount)
+        if line.kind != "manual" and line.net_amount < 0:
+            raise invalid(
+                "NEGATIVE_WIP_LINE",
+                "net_amount",
+                "A line that bills WIP cannot be negative; add a discount line instead.",
+            )
+        if line.is_advance and line.net_amount <= 0:
+            raise invalid("ADVANCE_NOT_POSITIVE", "net_amount", ADVANCE_NOT_POSITIVE)
+        if "vat_rate_id" in fields:
+            line.vat_rate_id, line.vat_rate_bp = await VatResolver(
+                self.refs, ctx.organization
+            ).resolve(
+                client=client,
+                line_rate_id=data.vat_rate_id,
+                service_id=line.service_id,
+                validate_line_rate=data.vat_rate_id is not None,
+            )
+        line.vat_amount = vat_on(line.net_amount, line.vat_rate_bp)
+        if line.net_amount != old_net:
+            await self._reapportion(ctx, line)
 
     def _allocations(
         self, ctx: OrgContext, invoice: Invoice, line_id: uuid.UUID, line: _PlannedLine

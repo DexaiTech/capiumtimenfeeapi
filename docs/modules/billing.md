@@ -54,6 +54,7 @@ unless marked bounded.
 | POST | `/invoices/{id}/lines` | `invoice.create` | Manual line `{description, quantity=1, unit_amount, net_amount?, vat_rate_id?, service_id?, job_id?, position?}`. 201. |
 | PATCH | `/invoices/{id}/lines/{line_id}` | `invoice.create` | `{description, quantity, unit_amount, net_amount, vat_rate_id (null = default resolution), position}`. |
 | DELETE | `/invoices/{id}/lines/{line_id}` | `invoice.create` | Remove a line; its WIP returns to `unbilled`. |
+| PUT | `/invoices/{id}/lines` | `invoice.create` | Save a draft's lines in one go, all or nothing (APT75): `{lines: [{id, ...the PATCH fields}], new_lines: [...the POST body]}`. A listed line changes (only the fields given); a saved line not listed is removed (its WIP returns to `unbilled`); `new_lines` are added after them. The total is checked once, at the end (422 `INVOICE_TOTAL_NEGATIVE`), and a refused save changes nothing. Audited per line as the single-line routes are. |
 | POST | `/invoices/{id}/wip` | `invoice.create` | Add WIP `{time_entry_ids, disbursement_ids, group_by, overrides}` to a draft. |
 | POST | `/invoices/{id}/issue` | `invoice.issue` | Optional `{issue_date, due_date}`. Numbers it, WIP → `billed`. |
 | POST | `/invoices/{id}/void` | `invoice.issue` | `{reason, notify_client=false}`. Reverses the WIP allocations; `notify_client` (needs `invoice.send`) emails the client. |
