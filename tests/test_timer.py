@@ -10,7 +10,12 @@ from app.db.models import Job, Timer
 from app.db.session import get_sessionmaker
 from tests.domain_factories import make_client, make_job, make_staff_rate, practice, staff
 from tests.factories import audit_entries
-from tests.time_helpers import age_timer, err, ok_data, org_url, set_practice
+from tests.time_helpers import age_timer, err, ok_data, org_url, set_practice, time_job
+
+
+async def internal_body(org: dict) -> dict:
+    """A timer body on the internal client's non-billable job (a timer needs a client and job)."""
+    return {"job_id": str(await time_job(org))}
 
 
 async def test_start_pause_resume_stop(client: AsyncClient) -> None:
@@ -64,7 +69,8 @@ async def test_stop_rounds_to_increment_with_minimum(client: AsyncClient) -> Non
     _, org = await practice(client)
     await set_practice(org, time_increment_minutes=15)
     person = await staff(org)
-    await client.post(org_url(org, "/timer/start"), headers=person.headers, json={})
+    body = await internal_body(org)
+    await client.post(org_url(org, "/timer/start"), headers=person.headers, json=body)
     entry = ok_data(
         await client.post(
             org_url(org, "/timer/stop"), headers=person.headers, json={"description": "Admin"}
@@ -72,9 +78,9 @@ async def test_stop_rounds_to_increment_with_minimum(client: AsyncClient) -> Non
         201,
     )
     assert entry["minutes"] == 15 and entry["description"] == "Admin"
-    assert entry["is_billable"] is False  # no client
+    assert entry["is_billable"] is False  # the internal job is non-billable
 
-    await client.post(org_url(org, "/timer/start"), headers=person.headers, json={})
+    await client.post(org_url(org, "/timer/start"), headers=person.headers, json=body)
     await age_timer(org, person, 16 * 60 + 1)
     entry = ok_data(await client.post(org_url(org, "/timer/stop"), headers=person.headers), 201)
     assert entry["minutes"] == 30
@@ -87,18 +93,24 @@ async def test_one_timer_per_person_and_replace(client: AsyncClient) -> None:
     acme = await make_client(org)
     other = await staff(org)
     url = org_url(org, "/timer/start")
+    body = await internal_body(org)
     first = ok_data(
-        await client.post(url, headers=person.headers, json={"client_id": str(acme.id)}), 201
+        await client.post(
+            url,
+            headers=person.headers,
+            json={"client_id": str(acme.id), "job_id": str(await time_job(org, acme.id))},
+        ),
+        201,
     )
-    error = err(await client.post(url, headers=person.headers, json={}), 409)
+    error = err(await client.post(url, headers=person.headers, json=body), 409)
     assert error["code"] == "TIMER_RUNNING"
     # Somebody else has their own.
-    ok_data(await client.post(url, headers=other.headers, json={}), 201)
+    ok_data(await client.post(url, headers=other.headers, json=body), 201)
 
     await age_timer(org, person, 125)
     second = ok_data(
         await client.post(
-            url, headers=person.headers, json={"replace": True, "description": "Next"}
+            url, headers=person.headers, json={**body, "replace": True, "description": "Next"}
         ),
         201,
     )
@@ -111,9 +123,10 @@ async def test_one_timer_per_person_and_replace(client: AsyncClient) -> None:
 async def test_parallel_starts_leave_one_timer(client: AsyncClient) -> None:
     _, org = await practice(client)
     person = await staff(org)
+    body = await internal_body(org)
     responses = await asyncio.gather(
         *(
-            client.post(org_url(org, "/timer/start"), headers=person.headers, json={})
+            client.post(org_url(org, "/timer/start"), headers=person.headers, json=body)
             for _ in range(5)
         )
     )
@@ -127,7 +140,9 @@ async def test_parallel_starts_leave_one_timer(client: AsyncClient) -> None:
 async def test_parallel_stops_write_one_entry(client: AsyncClient) -> None:
     _, org = await practice(client)
     person = await staff(org)
-    await client.post(org_url(org, "/timer/start"), headers=person.headers, json={})
+    await client.post(
+        org_url(org, "/timer/start"), headers=person.headers, json=await internal_body(org)
+    )
     responses = await asyncio.gather(
         *(client.post(org_url(org, "/timer/stop"), headers=person.headers) for _ in range(3))
     )
@@ -139,7 +154,9 @@ async def test_parallel_stops_write_one_entry(client: AsyncClient) -> None:
 async def test_discard(client: AsyncClient) -> None:
     _, org = await practice(client)
     person = await staff(org)
-    await client.post(org_url(org, "/timer/start"), headers=person.headers, json={})
+    await client.post(
+        org_url(org, "/timer/start"), headers=person.headers, json=await internal_body(org)
+    )
     assert (await client.delete(org_url(org, "/timer"), headers=person.headers)).status_code == 200
     assert ok_data(await client.get(org_url(org, "/timer"), headers=person.headers)) is None
     assert ok_data(await client.get(org_url(org, "/time-entries"), headers=person.headers)) == []
@@ -151,6 +168,7 @@ async def test_start_rules(client: AsyncClient) -> None:
     _, other = await practice(client, "Other & Co")
     person = await staff(org)
     archived = await make_client(org, status="archived")
+    archived_job = await make_job(org, archived)
     acme = await make_client(org)
     closed = await make_job(org, acme, status="cancelled")
     internal = await make_job(org, acme, billing_basis="non_billable")
@@ -158,7 +176,7 @@ async def test_start_rules(client: AsyncClient) -> None:
     url = org_url(org, "/timer/start")
     assert (
         err(
-            await client.post(url, headers=person.headers, json={"client_id": str(archived.id)}),
+            await client.post(url, headers=person.headers, json={"job_id": str(archived_job.id)}),
             409,
         )["code"]
         == "CLIENT_INACTIVE"
@@ -173,7 +191,9 @@ async def test_start_rules(client: AsyncClient) -> None:
         await client.post(url, headers=person.headers, json={"client_id": str(theirs.id)})
     ).status_code == 404
     assert (
-        await client.post(url, headers=person.headers, json={"is_billable": True})
+        await client.post(
+            url, headers=person.headers, json={"job_id": str(internal.id), "is_billable": True}
+        )
     ).status_code == 422
     assert (await client.post(url, headers=person.headers, json={"bogus": 1})).status_code == 422
     timer = ok_data(
@@ -185,7 +205,9 @@ async def test_start_rules(client: AsyncClient) -> None:
 async def test_stop_respects_time_rules(client: AsyncClient) -> None:
     _, org = await practice(client)
     person = await staff(org)
-    await client.post(org_url(org, "/timer/start"), headers=person.headers, json={})
+    await client.post(
+        org_url(org, "/timer/start"), headers=person.headers, json=await internal_body(org)
+    )
     timer = ok_data(await client.get(org_url(org, "/timer"), headers=person.headers))
     # Lock this week's sheet: the entry cannot be written and the timer is kept.
     from tests.time_helpers import log_time, set_sheet
@@ -267,6 +289,46 @@ async def test_permissions_and_isolation(client: AsyncClient) -> None:
         )
         assert response.status_code == 403, path
     other_owner, other = await practice(client, "Other & Co")
-    await client.post(org_url(other, "/timer/start"), headers=other_owner.headers, json={})
+    await client.post(
+        org_url(other, "/timer/start"), headers=other_owner.headers, json=await internal_body(other)
+    )
     response = await client.get(org_url(org, "/timer"), headers=other_owner.headers)
     assert response.status_code == 404
+
+
+async def test_a_timer_needs_a_client_and_a_job(client: AsyncClient) -> None:
+    """APT64: billable or not, a timer starts on a client and a job."""
+    _, org = await practice(client)
+    person = await staff(org)
+    acme = await make_client(org)
+    url = org_url(org, "/timer/start")
+    for body, fields in (
+        ({}, {"client_id", "job_id"}),
+        ({"is_billable": False}, {"client_id", "job_id"}),
+        ({"client_id": str(acme.id)}, {"job_id"}),
+        ({"client_id": str(acme.id), "is_billable": False}, {"job_id"}),
+    ):
+        error = err(await client.post(url, headers=person.headers, json=body), 422)
+        assert {d["field"] for d in error["details"]} == fields, body
+        assert {d["code"] for d in error["details"]} == {"required"}
+    assert ok_data(await client.get(org_url(org, "/timer"), headers=person.headers)) is None
+
+
+async def test_an_older_timer_without_a_job_is_kept_when_stopping_fails(
+    client: AsyncClient,
+) -> None:
+    """A timer started before the rule, with no client or job, cannot become an entry."""
+    _, org = await practice(client)
+    person = await staff(org)
+    await client.post(
+        org_url(org, "/timer/start"), headers=person.headers, json=await internal_body(org)
+    )
+    async with get_sessionmaker()() as session:
+        await session.execute(
+            update(Timer).where(Timer.user_id == person.id).values(client_id=None, job_id=None)
+        )
+        await session.commit()
+    error = err(await client.post(org_url(org, "/timer/stop"), headers=person.headers), 422)
+    assert {d["field"] for d in error["details"]} == {"client_id", "job_id"}
+    assert ok_data(await client.get(org_url(org, "/timer"), headers=person.headers)) is not None
+    assert ok_data(await client.get(org_url(org, "/time-entries"), headers=person.headers)) == []
