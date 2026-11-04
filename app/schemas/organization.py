@@ -228,6 +228,12 @@ class OrganizationContextRead(BaseModel):
     organization: OrganizationRead
     role: RoleSummary
     permissions: list[str]
+    central_client_enabled: bool = Field(
+        description=(
+            "Whether the practice has the Capium Central client integration switched on "
+            "(Settings, Integrations); off (the default), the UI hides everything about Central"
+        )
+    )
 
     @classmethod
     def build(
@@ -235,6 +241,8 @@ class OrganizationContextRead(BaseModel):
         organization: Organization,
         role: Role,
         permissions: Iterable[str] | None = None,
+        *,
+        central_client_enabled: bool,
     ) -> "OrganizationContextRead":
         """``role.permissions`` must be loaded. ``permissions`` are the person's own (their role's
         with what was granted or denied them); the role's when left out."""
@@ -243,6 +251,7 @@ class OrganizationContextRead(BaseModel):
             organization=OrganizationRead.from_model(organization),
             role=RoleSummary.from_model(role),
             permissions=sorted(codes),
+            central_client_enabled=central_client_enabled,
         )
 
 

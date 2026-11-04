@@ -145,8 +145,8 @@ async def list_integrations(
     "/integrations/{key}",
     summary="Switch an integration on or off, or change its settings",
     description=(
-        "`enabled` switches the integration on or off (the central client service is part of the "
-        "client flow: 409 `INTEGRATION_ALWAYS_ON`); `config` changes settings, and those left "
+        "`enabled` switches the integration on or off (the central client service is off until "
+        "a practice switches it on); `config` changes settings, and those left "
         "out keep their value. Practice management: `sync_statuses`. Bookkeeping: "
         "`send_invoices`, `send_credit_notes` and `send_from` (only documents issued on or after "
         "that date are sent). 422 for an unknown or invalid setting. Every change is audited with "
