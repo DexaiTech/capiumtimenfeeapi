@@ -226,6 +226,37 @@ class LineUpdate(RequestModel):
         return self
 
 
+class LineChange(LineUpdate):
+    """A saved line of the draft that stays on it: only the fields given change."""
+
+    id: uuid.UUID
+
+
+class InvoiceLinesSave(RequestModel):
+    lines: list[LineChange] = Field(
+        max_length=10000,
+        description=(
+            "The saved lines to keep, each with its changes as `PATCH /invoices/{id}/lines/"
+            "{line_id}` takes them. A saved line not listed is removed: the WIP it billed returns "
+            "to `unbilled`"
+        ),
+    )
+    new_lines: list[LineCreate] = Field(
+        default_factory=list,
+        max_length=200,
+        description=(
+            "Lines that bill no WIP, added after the others in this order, each as "
+            "`POST /invoices/{id}/lines` adds one"
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _each_line_once(self) -> Self:
+        if len({line.id for line in self.lines}) != len(self.lines):
+            raise ValueError("lines: A line can be listed only once")
+        return self
+
+
 class InvoiceIssue(RequestModel):
     issue_date: date | None = Field(default=None, description="Default: the draft's, else today")
     due_date: date | None = Field(default=None, description="Default: issue date + terms")
