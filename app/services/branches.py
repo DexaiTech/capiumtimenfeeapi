@@ -7,6 +7,8 @@ With ``organizations.branches_enabled`` on, creating or editing a client needs a
 * The name is unique per practice, ignoring case: 409 ``BRANCH_NAME_TAKEN``.
 * A branch that clients have is deactivated, not deleted; a deactivated branch is no longer
   offered for clients, those that have it keep it.
+* While branches are on, the last active branch cannot be deactivated or deleted (409
+  ``LAST_ACTIVE_BRANCH``): every new client needs one. Switching branches on needs one too.
 * Reading is open to every member (the client form offers the list); writing needs
   ``settings.manage``.
 """
@@ -16,10 +18,11 @@ import uuid
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.context import RequestContext
-from app.core.exceptions import NotFoundError
+from app.core.exceptions import ConflictError, NotFoundError
 from app.db.models import Branch
 from app.db.session import unit_of_work
 from app.repositories.branches import BranchRepository
+from app.repositories.organizations import OrganizationRepository
 from app.schemas.branches import BranchCreate, BranchRead, BranchUpdate
 from app.schemas.settings import DeleteOutcome
 from app.services.common import apply_changes, duplicate_error, record_audit
@@ -78,6 +81,8 @@ class BranchService:
                 raise NotFoundError("Branch not found.")
             if "name" in values:
                 await self._ensure_unique(org_id, values["name"], exclude_id=branch.id)
+            if values.get("is_active") is False:
+                await self._ensure_not_last_active(org_id, branch)
             changes = apply_changes(branch, values)
             branch = await self.branches.save(branch)
             if changes:
@@ -103,6 +108,7 @@ class BranchService:
             branch = await self.branches.get(org_id, branch_id, lock=True)
             if branch is None:
                 raise NotFoundError("Branch not found.")
+            await self._ensure_not_last_active(org_id, branch)
             meta = {"name": branch.name}
             if await self.branches.any_client(org_id, branch.id):
                 if branch.is_active:
@@ -117,6 +123,21 @@ class BranchService:
         return DeleteOutcome(outcome="deleted", id=branch_id)
 
     # --- Internals ------------------------------------------------------------------------
+
+    async def _ensure_not_last_active(self, org_id: uuid.UUID, branch: Branch) -> None:
+        """409 ``LAST_ACTIVE_BRANCH`` for taking away the practice's last active branch while it
+        uses branches. The organization row lock serialises this with the switch."""
+        if not branch.is_active:
+            return
+        organization = await OrganizationRepository(self.session).lock(org_id)
+        if organization is None or not organization.branches_enabled:
+            return
+        if not await self.branches.any_active(org_id, exclude_id=branch.id):
+            raise ConflictError(
+                "This is the last active branch, and every new client needs one. Add another "
+                "branch, or switch branches off, first.",
+                code="LAST_ACTIVE_BRANCH",
+            )
 
     async def _ensure_unique(
         self, org_id: uuid.UUID, name: str, *, exclude_id: uuid.UUID | None

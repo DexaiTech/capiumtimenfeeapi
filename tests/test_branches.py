@@ -211,6 +211,7 @@ async def test_branches_are_off_by_default(client):
 
 async def test_switching_branches_on_is_saved_and_audited(client):
     owner, org = await practice(client)
+    await create_branch(client, owner, org, name="London")
     url = f"{API}/organizations/{org['id']}"
     response = await client.patch(url, headers=owner.headers, json={"branches_enabled": True})
     assert response.status_code == 200, response.text
@@ -219,6 +220,50 @@ async def test_switching_branches_on_is_saved_and_audited(client):
     assert entry["metadata"]["changes"] == {"branches_enabled": [False, True]}
     back = await client.patch(url, headers=owner.headers, json={"branches_enabled": False})
     assert back.json()["data"]["branches_enabled"] is False
+
+
+async def test_branches_cannot_be_switched_on_without_an_active_branch(client):
+    owner, org = await practice(client)
+    url = f"{API}/organizations/{org['id']}"
+    await create_branch(client, owner, org, name="Closed", is_active=False)
+    refused = await client.patch(url, headers=owner.headers, json={"branches_enabled": True})
+    assert refused.status_code == 422, refused.text
+    problem = error(refused)
+    assert problem["code"] == "NO_ACTIVE_BRANCH"
+    assert problem["details"][0]["field"] == "branches_enabled"
+    assert problem["details"][0]["message"] == "Add an active branch before switching branches on."
+    fresh = ok_data(await client.get(url, headers=owner.headers))
+    assert fresh["organization"]["branches_enabled"] is False
+    assert await audit_entries(org["id"], "organization.updated") == []
+    await create_branch(client, owner, org, name="London")
+    await use_branches(client, owner, org)
+
+
+async def test_the_last_active_branch_stays_while_branches_are_on(client):
+    owner, org = await practice(client)
+    london = await create_branch(client, owner, org, name="London")
+    used = await create_branch(client, owner, org, name="Used")
+    await create_client(client, owner, org, "Acme", branch_id=used["id"])
+    await use_branches(client, owner, org)
+    # Used goes (deactivated, it has a client); London is then the last active branch.
+    kept = await client.delete(org_url(org, f"/branches/{used['id']}"), headers=owner.headers)
+    assert ok_data(kept)["outcome"] == "deactivated"
+    url = org_url(org, f"/branches/{london['id']}")
+    refusals = [
+        await client.post(f"{url}/deactivate", headers=owner.headers),
+        await client.patch(url, headers=owner.headers, json={"is_active": False}),
+        await client.delete(url, headers=owner.headers),
+    ]
+    for refused in refusals:
+        assert refused.status_code == 409, refused.text
+        assert error(refused)["code"] == "LAST_ACTIVE_BRANCH"
+    assert ok_data(await client.get(url, headers=owner.headers))["is_active"] is True
+    # Another active branch, or branches switched off, lets it go.
+    await client.post(org_url(org, f"/branches/{used['id']}/activate"), headers=owner.headers)
+    assert (await client.post(f"{url}/deactivate", headers=owner.headers)).status_code == 200
+    await use_branches(client, owner, org, enabled=False)
+    used_url = org_url(org, f"/branches/{used['id']}")
+    assert (await client.post(f"{used_url}/deactivate", headers=owner.headers)).status_code == 200
 
 
 async def test_the_switch_needs_organization_update_and_a_boolean(client):
@@ -286,6 +331,7 @@ async def test_the_branch_must_be_an_active_branch_of_the_practice(client):
     theirs = await create_branch(client, other_owner, other, name="Theirs")
     closed = await create_branch(client, owner, org, name="Closed", is_active=False)
     london = await create_branch(client, owner, org, name="London")
+    await create_branch(client, owner, org, name="Leeds")
     await use_branches(client, owner, org)
 
     foreign = await post_client(client, owner, org, branch_id=theirs["id"])
@@ -463,6 +509,7 @@ async def test_bulk_set_branch_refuses_foreign_unknown_and_inactive_branches(cli
     other_owner, other = await practice(client, "Other")
     theirs = await create_branch(client, other_owner, other, name="Theirs")
     closed = await create_branch(client, owner, org, name="Closed", is_active=False)
+    await create_branch(client, owner, org, name="London")
     ids = [(await make_client(org, "Acme Ltd")).id]
     await use_branches(client, owner, org)
 

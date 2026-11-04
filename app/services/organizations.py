@@ -15,6 +15,7 @@ from app.core.exceptions import ConflictError, NotFoundError, ValidationError
 from app.core.permissions import OWNER_KEY, SYSTEM_ROLES, effective_permissions
 from app.db.models import Organization, OrganizationMember, Role, User
 from app.db.session import unit_of_work
+from app.repositories.branches import BranchRepository
 from app.repositories.members import MemberRepository
 from app.repositories.organizations import OrganizationRepository
 from app.repositories.roles import RoleRepository
@@ -200,6 +201,24 @@ class OrganizationService:
         async with unit_of_work(self.session):
             ctx = await lock_and_refresh(self.session, ctx, "organization.update")
             organization = ctx.organization
+            if (
+                data.branches_enabled
+                and not organization.branches_enabled
+                and not await BranchRepository(self.session).any_active(organization.id)
+            ):
+                # Every new client would need a branch, and there would be none to give it.
+                message = "Add an active branch before switching branches on."
+                raise ValidationError(
+                    message,
+                    code="NO_ACTIVE_BRANCH",
+                    details=[
+                        {
+                            "field": "branches_enabled",
+                            "code": "no_active_branch",
+                            "message": message,
+                        }
+                    ],
+                )
             changes: dict[str, list[Any]] = {}
             for field, value in data.model_dump(exclude_unset=True).items():
                 old = getattr(organization, field)

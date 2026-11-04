@@ -530,7 +530,8 @@ class OrganizationUpdate(RequestModel):
         default=None,
         description=(
             "Whether the practice uses branches. On, creating or editing a client needs a branch "
-            "(422 `BRANCH_REQUIRED`); off hides them in the UI and leaves the column out of the "
+            "(422 `BRANCH_REQUIRED`), so switching it on needs an active branch (422 "
+            "`NO_ACTIVE_BRANCH`); off hides them in the UI and leaves the column out of the "
             "client export. Nothing is deleted either way"
         ),
     )
