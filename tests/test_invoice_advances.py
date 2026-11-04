@@ -501,3 +501,129 @@ async def test_an_advance_line_bills_a_service_with_its_vat_code(client):
         await count_rows("SELECT count(*) FROM invoices WHERE client_id = :c", c=str(p.client.id))
         == 1
     )
+
+
+async def test_wip_and_manual_lines_are_drafted_together(client):
+    """Tickets APT69 and APT75: Create invoice drafts the chosen WIP and the lines typed in the
+    same grid, in one request."""
+    p = await new_practice(client)
+    zero = await vat_rate_id(p.org, "zero")
+    entry = await make_time_entry(p.org, p.owner, client=p.client)  # 1 hour at 120.00
+    made = await draft(
+        client,
+        p.owner,
+        p.org,
+        p.client.id,
+        time=[entry],
+        manual_lines=[
+            {"description": "Companies House filing", "quantity": "2", "unit_amount": 1_700},
+            {
+                "description": "Software licence\nTwelve months",
+                "unit_amount": 3_000,
+                "vat_rate_id": str(zero),
+            },
+        ],
+    )
+    lines = made["lines"]
+    assert [(x["position"], x["kind"], x["is_advance"]) for x in lines] == [
+        (1, "time", False),
+        (2, "manual", False),
+        (3, "manual", False),
+    ]
+    assert lines[0]["net_amount"] == 12_000
+    assert [
+        (x["description"], x["quantity"], x["net_amount"], x["vat_rate_bp"], x["vat_amount"])
+        for x in lines[1:]
+    ] == [
+        ("Companies House filing", "2.00", 3_400, 2000, 680),
+        ("Software licence\nTwelve months", "1.00", 3_000, 0, 0),
+    ]
+    assert made["net_total"] == sum(x["net_amount"] for x in lines) == 18_400
+    assert made["vat_total"] == sum(x["vat_amount"] for x in lines)
+    assert made["gross_total"] == made["net_total"] + made["vat_total"]
+    assert (await billing_status("time_entries", [entry.id]))[entry.id] == "in_draft"
+    [created] = await audit_entries(p.id, "invoice.draft_created")
+    assert "advance" not in created["metadata"]
+
+    # The time is on this draft: no second invoice bills it, with or without manual lines.
+    again = await draft(
+        client,
+        p.owner,
+        p.org,
+        p.client.id,
+        time=[entry],
+        expect=409,
+        manual_lines=[{"description": "Advice", "unit_amount": 5_000}],
+    )
+    assert again["code"] == "WIP_NOT_AVAILABLE"
+    # A refused manual line makes no draft and holds no WIP.
+    other = await make_time_entry(p.org, p.owner, client=p.client, entry_date=date(2026, 9, 8))
+    refused = await draft(
+        client,
+        p.owner,
+        p.org,
+        p.client.id,
+        time=[other],
+        expect=422,
+        manual_lines=[{"description": "Fees", "unit_amount": -100, "is_advance": True}],
+    )
+    assert refused["code"] == "ADVANCE_NOT_POSITIVE"
+    assert (await billing_status("time_entries", [other.id]))[other.id] == "unbilled"
+    assert (
+        await count_rows("SELECT count(*) FROM invoices WHERE client_id = :c", c=str(p.client.id))
+        == 1
+    )
+
+
+async def test_manual_advance_lines_without_wip_take_time_later(client):
+    """Ticket APT69: with no time to bill, the lines typed are fees in advance; time is assigned
+    to them once the invoice is issued, and only once."""
+    p = await new_practice(client)
+    job = await hourly_job(p)
+    made = await draft(
+        client,
+        p.owner,
+        p.org,
+        p.client.id,
+        manual_lines=[
+            {"description": "Accounts 2026/27", "unit_amount": 100_000, "is_advance": True},
+            {
+                "description": "Payroll 2026/27",
+                "quantity": "12",
+                "unit_amount": 2_500,
+                "is_advance": True,
+            },
+        ],
+    )
+    assert [(x["position"], x["is_advance"], x["net_amount"]) for x in made["lines"]] == [
+        (1, True, 100_000),
+        (2, True, 30_000),
+    ]
+    assert (made["net_total"], made["vat_total"]) == (130_000, 26_000)
+    [created] = await audit_entries(p.id, "invoice.draft_created")
+    assert created["metadata"]["advance"] == 130_000
+
+    invoice = await issued(client, p.owner, p.org, made["id"], issue_date="2026-04-01")
+    first_id, second_id = (x["id"] for x in invoice["lines"])
+    # 10 hours at 120.00: the advance of 1,000.00 covers 1,000.00 of the 1,200.00.
+    early = await make_time_entry(
+        p.org, p.owner, client=p.client, job=job, entry_date=date(2026, 5, 4), minutes=300
+    )
+    late = await make_time_entry(
+        p.org, p.owner, client=p.client, job=job, entry_date=date(2026, 6, 8), minutes=300
+    )
+    response = await assign(client, p.owner, p.org, invoice["id"], first_id, time=[early, late])
+    assert response.status_code == 200, response.text
+    lines = {x["id"]: x for x in response.json()["data"]["lines"]}
+    advance = lines[first_id]["advance"]
+    assert (advance["used"], advance["remaining"], advance["written_off"]) == (100_000, 0, 20_000)
+    assert [i["billed_value"] for i in advance["items"]] == [60_000, 40_000]
+    assert lines[second_id]["advance"]["remaining"] == 30_000
+
+    # The same time cannot be assigned twice, to this line or another one.
+    for line_id in (first_id, second_id):
+        twice = await assign(client, p.owner, p.org, invoice["id"], line_id, time=[early])
+        assert twice.status_code == 409 and error(twice)["code"] == "WIP_NOT_AVAILABLE"
+    after = await get_invoice(client, p.owner, p.org, invoice["id"])
+    assert [x["advance"]["used"] for x in after["lines"]] == [100_000, 0]
+    assert len(await audit_entries(p.id, "invoice.time_assigned")) == 1
