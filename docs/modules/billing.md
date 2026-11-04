@@ -33,7 +33,7 @@ unless marked bounded.
 | Method | Path | Permission | Purpose |
 |---|---|---|---|
 | GET | `/wip` | `wip.read` | One row per client with WIP, by client name: `minutes`, `hours`, `time_value`, `disbursement_value`, `total`, `oldest_date`, `ages{days_0_30, days_31_60, days_61_90, days_91_plus}`, `item_count`. Filters `client_id`, `partner_user_id`, `manager_user_id` (the client's), `job_id`. |
-| GET | `/clients/{client_id}/wip?job_id=` | `wip.read` | Bounded: every WIP item (`kind` time/disbursement, `date`, `job`, `person`, `minutes`, `hours`, `rate`, `value`, `service_id` and `service_vat_rate_id` (the job's service and its VAT code, so the prepare screen estimates the VAT the draft charges), …) in date order, plus `totals`. |
+| GET | `/clients/{client_id}/wip?job_id=` | `wip.read` | Bounded: every WIP item (`kind` time/disbursement, `date`, `job`, `person`, `minutes`, `hours`, `rate`, `value`, `service_id` (the job's service), `default_vat` `{vat_rate_id, rate_bp, source}` (time, fixed fee, disbursement: the VAT code the drafted line gets when none is chosen, resolved by the draft's own rule; `source` `line`, `client`, `service`, `practice` or null), …) in date order, plus `totals` and `default_vat` of a line with no service (one line for all the time of several services). |
 | GET | `/clients/{client_id}/billing-summary` | `wip.read` | Per job: terms, hours, value by source, what each billing basis would bill, cost against budget and agreed price, and `recovery`: the time ready to bill at the recovery rate (the practice's `recovery_rate_order` of the client job, task and staff rates; `rate_order`), the staff charge-out rates, cost and cost plus the job's, else the client's, else the practice's mark-up (`markup_bp`: the client's or the practice's), which the invoicing screen compares with the invoice being raised. |
 | GET | `/clients/{client_id}/recovery` | `wip.read` | The client's Invoices & Recovery: per job with billable time (all dates) the invoice value (issued less allocated credit notes, plus drafts) against the recovery rate, staff rates and cost plus, revenue left on the table and recovery on each basis, the WIP not invoiced yet apart, plus totals and `credit_on_account` (payments not allocated to an invoice). See [reports.md](reports.md#recovery-analysis-apt52). |
 | POST | `/wip/write-offs` | `wip.write_off` | `{client_id, items:[{time_entry_id}|{disbursement_id}] | job_id, reason, written_off_on?}`. 201. |
@@ -213,8 +213,9 @@ allocations from both sides.
 * **WIP line VAT** (time and fixed-fee lines): the chosen rate (an override's `vat_rate_id`),
   else the client's default, else the job's service's code, else the practice default — a
   client's own code beats the service's (APT63). With `group_by = single` the service counts
-  only when all the time shares one. The prepare screen estimates each line with the same order,
-  taking the service's code from `service_vat_rate_id` of `GET /clients/{id}/wip`.
+  only when all the time shares one. The prepare screen does not re-apply the order: it shows
+  the `default_vat` that `GET /clients/{id}/wip` resolves with the same `VatResolver` (APT63),
+  so the code on screen is the code the draft charges.
 * **Disbursement VAT**: the disbursement's `vat_rate_id` is the line's chosen rate; without it
   the general order applies (client default, then practice default — the job's service is not
   used for disbursements).
