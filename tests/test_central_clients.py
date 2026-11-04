@@ -21,6 +21,7 @@ from tests.central_helpers import (
     BOOKKEEPER,
     JOINERY,
     PLUMBING,
+    central_on,
     client_row,
     enable,
     enabled,
@@ -167,6 +168,7 @@ async def test_search_with_nothing_cached_while_central_is_down_is_503(client, c
     assert response.headers["retry-after"] == "30"
     # Another practice's cache is not this one's.
     other_owner, other_org = await create_user_with_org(client, "Other Practice")
+    await central_on(client, other_owner, other_org)
     central_gateway.set_available(True)
     await search(client, other_owner, other_org, q="northgate")
     central_gateway.set_available(False)
@@ -355,6 +357,7 @@ async def test_enable_needs_client_create_and_a_practice_you_belong_to(client):
 async def test_the_same_central_client_can_be_enabled_by_every_practice(client):
     first = await new_team(client)
     owner, org = await create_user_with_org(client, "Second Practice")
+    await central_on(client, owner, org)
     one = await enabled(client, first.owner, first.org, BAKERY)
     two = await enabled(client, owner, org, BAKERY)
     assert one["client"]["id"] != two["client"]["id"]

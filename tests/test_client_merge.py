@@ -19,6 +19,7 @@ from tests.central_helpers import (
     KESTREL,
     PLUMBING,
     Team,
+    central_on,
     client_row,
     enable,
     enabled,
@@ -798,6 +799,7 @@ async def test_merges_in_opposite_directions_at_once_apply_exactly_one(client):
 async def test_a_merge_does_not_touch_another_practice(client):
     team = await new_team(client)
     owner, org = await create_user_with_org(client, "Second Practice")
+    await central_on(client, owner, org)
     _, mine = await two_clients(client, team)
     theirs_source = (await enabled(client, owner, org, BAKERY))["client"]
     theirs_target = (await enabled(client, owner, org, PLUMBING))["client"]
