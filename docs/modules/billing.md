@@ -553,7 +553,7 @@ like any other. Code: `app/services/invoice_advances.py`; tests `tests/test_invo
 
 | Method | Path | Permission | Purpose |
 |---|---|---|---|
-| POST | `/invoices` | `invoice.create` | `advance: {description, net_amount > 0, vat_rate_id?, service_id?, job_id?}` adds the advance line; or `advance_lines: [{description, quantity = 1, unit_amount > 0, vat_rate_id?, service_id?}]` (1-200, APT75) adds one advance line each, net = `round(quantity x unit_amount)` like any manual line. Not both (422). The draft may bill no WIP. |
+| POST | `/invoices` | `invoice.create` | `advance: {description, net_amount > 0, vat_rate_id?, service_id?, job_id?}` adds the advance line; or `advance_lines: [{description, quantity = 1, unit_amount > 0, vat_rate_id?, service_id?}]` (1-200, APT75) adds one advance line each, net = `round(quantity x unit_amount)` like any manual line. Not both (422). `manual_lines: [{description, quantity = 1, unit_amount, vat_rate_id?, service_id?, job_id?, is_advance = false}]` (0-200) adds those lines after the WIP and advance lines, in that order, each exactly as `POST /invoices/{id}/lines` adds one (an `is_advance` one must be more than zero). The draft may bill no WIP. |
 | POST | `/invoices/{id}/lines` | `invoice.create` | `is_advance: true` marks a manual line of a draft as an advance (net > 0, else 422 `ADVANCE_NOT_POSITIVE`; also on `PATCH`). |
 | POST | `/invoices/{id}/lines/{line_id}/assign` | `invoice.create` | `{time_entry_ids, disbursement_ids}` (at least one): bill that WIP against the advance line. Returns the invoice detail. |
 | POST | `/invoices/{id}/lines/{line_id}/unassign` | `invoice.create` | Same body: take items off the advance line, back to WIP. Returns the invoice detail. |
@@ -564,9 +564,9 @@ added to a draft (`ADVANCE_NOT_POSITIVE` when a line rounds to nothing; the draf
 `service_id` must be one of the practice's services (422 on `service_id`); it is stored on the line and its VAT code
 applies when the line has none and the client has none (line, client, service, practice default). The audit entry
 `invoice.draft_created` keeps the total net as `advance`. Each line is its own advance: time is assigned to one line
-and uses only that line's amount. The UI's "Bill fees in advance" panel is a grid of these lines (service, description,
-qty, unit price, VAT code; choosing a service fills the description and its default fee; VAT and net shown per line,
-with the totals) and always sends `advance_lines`.
+and uses only that line's amount. The UI's Create invoice drafts the chosen WIP and the lines typed in its
+line grid in one request: the typed lines go in `manual_lines`, marked `is_advance` when "Fees in advance" is ticked
+(the default when no WIP is chosen, so a client with nothing to bill gets an advance invoice).
 
 Every line of the detail has `is_advance`; an advance line also has `advance: {amount, used, remaining, wip_value,
 written_off, items[]{kind, id, date, person, description, minutes, hours, wip_value, billed_value, assigned_on}}`.
