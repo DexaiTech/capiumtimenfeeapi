@@ -18,7 +18,7 @@ async def test_downgrading_turns_staff_only_into_staff_first(client):
     assert patched.status_code == 200, patched.text
 
     try:
-        down = await migrate("downgrade", "077")
+        down = await migrate("downgrade", "078")
         assert down.returncode == 0, down.stderr
         assert await sql("SELECT rate_mode FROM organizations WHERE id = :o", o=org["id"]) == [
             {"rate_mode": "staff_first"}
