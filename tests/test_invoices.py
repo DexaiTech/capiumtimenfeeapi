@@ -467,40 +467,174 @@ async def test_vat_rate_resolution_order(client):
     assert reset.json()["data"]["lines"][0]["vat_rate_bp"] == 2000
 
 
-async def test_client_wip_gives_the_service_vat_code_the_draft_charges(client):
-    """APT63: the prepare screen estimates each line's VAT from the client's WIP. A client's
-    own code comes before the job's service code; without one the service's code applies, so
-    the WIP says it, and the draft charges exactly what the screen shows."""
-    p = await new_practice(client)
+async def wip_vat(client, p, client_id) -> tuple[dict, dict[str, dict]]:
+    """The client WIP's ``default_vat``: of a line with no service, and of each item's line."""
+    wip = await client.get(org_url(p.org, f"/clients/{client_id}/wip"), headers=p.owner.headers)
+    assert wip.status_code == 200, wip.text
+    data = wip.json()["data"]
+    return data["default_vat"], {item["id"]: item["default_vat"] for item in data["items"]}
+
+
+def vat(rate_id, rate_bp: int, source: str | None) -> dict:
+    return {"vat_rate_id": str(rate_id) if rate_id else None, "rate_bp": rate_bp, "source": source}
+
+
+async def low_default_and_standard_services(client, p) -> tuple:
+    """APT63's practice: a low default code (the live one is 7.5%) and services at 20%."""
     standard = await vat_rate_id(p.org, "standard")
     reduced = await vat_rate_id(p.org, "reduced")
-    books = await service_id(p.org, "BOOKS")
-    reduced_client = await make_client(p.org, "Reduced Ltd", default_vat_rate_id=reduced)
-    service_job = await make_job(p.org, reduced_client, "Books", service_id=books)
-    plain_job = await make_job(p.org, reduced_client, "Ad hoc")
-    on_service = await make_time_entry(p.org, p.owner, client=reduced_client, job=service_job)
-    on_client = await make_time_entry(p.org, p.owner, client=reduced_client, job=plain_job)
-
-    wip = await client.get(
-        org_url(p.org, f"/clients/{reduced_client.id}/wip"), headers=p.owner.headers
+    made = await client.patch(
+        org_url(p.org, f"/vat-rates/{reduced}"), headers=p.owner.headers, json={"is_default": True}
     )
-    assert wip.status_code == 200, wip.text
-    items = {item["id"]: item for item in wip.json()["data"]["items"]}
-    assert items[str(on_service.id)]["service_id"] == str(books)
-    assert items[str(on_service.id)]["service_vat_rate_id"] == str(standard)
-    assert items[str(on_client.id)]["service_id"] is None
-    assert items[str(on_client.id)]["service_vat_rate_id"] is None
+    assert made.status_code == 200, made.text
+    books = await service_id(p.org, "BOOKS")
+    accounts = await service_id(p.org, "ACCS")
+    async with get_sessionmaker()() as session:
+        await session.execute(
+            text("UPDATE services SET vat_rate_id = :rate WHERE id = ANY(:ids)"),
+            {"rate": str(standard), "ids": [str(books), str(accounts)]},
+        )
+        await session.commit()
+    return standard, reduced, books, accounts
 
-    invoice = await draft(client, p.owner, p.org, reduced_client.id, time=[on_service, on_client])
-    rates = {line["description"].split(" (")[0]: line["vat_rate_id"] for line in invoice["lines"]}
-    # The client's 5% beats the service's 20%.
-    assert rates == {"Books": str(reduced), "Ad hoc": str(reduced)}
 
-    # A client without a default: the service's 20%.
-    books_job = await make_job(p.org, p.client, "Books", service_id=books)
-    on_books = await make_time_entry(p.org, p.owner, client=p.client, job=books_job)
-    serviced = await draft(client, p.owner, p.org, p.client.id, time=[on_books])
-    assert serviced["lines"][0]["vat_rate_id"] == str(standard)
+async def test_client_wip_gives_each_line_the_vat_code_the_draft_charges(client):
+    """APT63 (reopened): the prepare screen shows the VAT code the client's WIP gives each
+    line; it is the code the draft charges, for every kind of line and grouping."""
+    p = await new_practice(client)
+    standard, reduced, books, accounts = await low_default_and_standard_services(client, p)
+    zero = await vat_rate_id(p.org, "zero")
+    books_job = await hourly_job(p, name="Books", service_id=books)
+    plain_job = await hourly_job(p, name="Ad hoc")
+    fixed_job = await make_job(
+        p.org, p.client, "Accounts", billing_basis="fixed", fixed_fee=50_000, service_id=accounts
+    )
+    on_service = await make_time_entry(p.org, p.owner, client=p.client, job=books_job)
+    no_service = await make_time_entry(p.org, p.owner, client=p.client, job=plain_job)
+    no_job = await make_time_entry(p.org, p.owner, client=p.client)
+    fixed = await make_time_entry(p.org, p.owner, client=p.client, job=fixed_job)
+    own_code = await make_disbursement(
+        p.org, p.client, 1_000, description="Search fee", vat_rate_id=zero
+    )
+    no_code = await make_disbursement(p.org, p.client, 2_000, description="Courier", job=books_job)
+
+    no_service_line, items = await wip_vat(client, p, p.client.id)
+    service_vat = vat(standard, 2000, "service")
+    practice_vat = vat(reduced, 500, "practice")
+    assert no_service_line == practice_vat
+    assert items[str(on_service.id)] == service_vat
+    assert items[str(no_service.id)] == practice_vat
+    assert items[str(no_job.id)] == practice_vat
+    assert items[str(fixed.id)] == service_vat
+    assert items[str(own_code.id)] == vat(zero, 0, "line")
+    # A disbursement does not take its job's service code.
+    assert items[str(no_code.id)] == practice_vat
+
+    everything = [on_service, no_service, no_job, fixed]
+    by_job = await draft(
+        client, p.owner, p.org, p.client.id, time=everything, disbursements=[own_code, no_code]
+    )
+    charged = {line["description"].split(" (")[0]: line["vat_rate_id"] for line in by_job["lines"]}
+    assert charged == {
+        "Accounts": items[str(fixed.id)]["vat_rate_id"],
+        "Books": items[str(on_service.id)]["vat_rate_id"],
+        "Ad hoc": items[str(no_service.id)]["vat_rate_id"],
+        "Professional services": items[str(no_job.id)]["vat_rate_id"],
+        "Search fee": items[str(own_code.id)]["vat_rate_id"],
+        "Courier": items[str(no_code.id)]["vat_rate_id"],
+    }
+    await client.delete(org_url(p.org, f"/invoices/{by_job['id']}"), headers=p.owner.headers)
+
+    by_entry = await draft(client, p.owner, p.org, p.client.id, time=everything, group_by="entry")
+    assert sorted(line["vat_rate_id"] for line in by_entry["lines"]) == sorted(
+        items[str(entry.id)]["vat_rate_id"] for entry in everything
+    )
+    await client.delete(org_url(p.org, f"/invoices/{by_entry['id']}"), headers=p.owner.headers)
+
+    # One line for all the time: one service gives its code, several give the no-service one.
+    one_service = await draft(
+        client, p.owner, p.org, p.client.id, time=[on_service], group_by="single"
+    )
+    assert one_service["lines"][0]["vat_rate_id"] == items[str(on_service.id)]["vat_rate_id"]
+    await client.delete(org_url(p.org, f"/invoices/{one_service['id']}"), headers=p.owner.headers)
+    mixed = await draft(
+        client, p.owner, p.org, p.client.id, time=[on_service, no_service], group_by="single"
+    )
+    assert mixed["lines"][0]["vat_rate_id"] == no_service_line["vat_rate_id"]
+
+
+async def test_client_wip_vat_code_follows_the_clients_own_code(client):
+    p = await new_practice(client)
+    standard, _, books, _ = await low_default_and_standard_services(client, p)
+    zero = await vat_rate_id(p.org, "zero")
+    zero_client = await make_client(p.org, "Zero Ltd", default_vat_rate_id=zero)
+    books_job = await make_job(p.org, zero_client, "Books", service_id=books)
+    entry = await make_time_entry(p.org, p.owner, client=zero_client, job=books_job)
+    fee = await make_disbursement(p.org, zero_client, 1_000, vat_rate_id=standard)
+
+    no_service_line, items = await wip_vat(client, p, zero_client.id)
+    # The client's own code beats the service's; a disbursement's own code beats the client's.
+    assert no_service_line == vat(zero, 0, "client")
+    assert items[str(entry.id)] == vat(zero, 0, "client")
+    assert items[str(fee.id)] == vat(standard, 2000, "line")
+    invoice = await draft(client, p.owner, p.org, zero_client.id, time=[entry], disbursements=[fee])
+    assert [line["vat_rate_id"] for line in invoice["lines"]] == [str(zero), str(standard)]
+
+
+async def test_a_chosen_vat_code_stays_through_edits_and_approval(client):
+    """APT63: a code picked for a line (even the practice default) is kept as picked, and a
+    defaulted line keeps the code it was drafted with, through editing, submitting and
+    approving the draft."""
+    p = await new_practice(client)
+    standard, reduced, books, _ = await low_default_and_standard_services(client, p)
+    books_job = await hourly_job(p, name="Books", service_id=books)
+    payroll_job = await hourly_job(p, name="Payroll", service_id=books)
+    picked = await make_time_entry(p.org, p.owner, client=p.client, job=books_job)
+    defaulted = await make_time_entry(p.org, p.owner, client=p.client, job=payroll_job)
+    invoice = await draft(
+        client,
+        p.owner,
+        p.org,
+        p.client.id,
+        time=[picked, defaulted],
+        overrides=[{"job_id": str(books_job.id), "vat_rate_id": str(reduced)}],
+    )
+
+    def codes(data: dict) -> dict[str, str]:
+        return {line["description"].split(" (")[0]: line["vat_rate_id"] for line in data["lines"]}
+
+    expected = {"Books": str(reduced), "Payroll": str(standard)}
+    assert codes(invoice) == expected
+    url = org_url(p.org, f"/invoices/{invoice['id']}")
+    for line in invoice["lines"]:
+        for change in ({"description": f"{line['description']} (edited)"}, {"net_amount": 9_000}):
+            edited = await client.patch(
+                f"{url}/lines/{line['id']}", headers=p.owner.headers, json=change
+            )
+            assert edited.status_code == 200, edited.text
+    added = await client.post(
+        f"{url}/lines",
+        headers=p.owner.headers,
+        json={"description": "Extra", "unit_amount": 1_000, "vat_rate_id": str(reduced)},
+    )
+    assert added.status_code == 201, added.text
+    expected["Extra"] = str(reduced)
+    assert codes(added.json()["data"]) == expected
+
+    switched = await client.patch(
+        org_url(p.org, ""), headers=p.owner.headers, json={"invoice_approval_required": True}
+    )
+    assert switched.status_code == 200, switched.text
+    submitted = await client.post(f"{url}/submit", headers=p.owner.headers, json={})
+    assert submitted.status_code == 200, submitted.text
+    assert codes(submitted.json()["data"]) == expected
+    approved = await client.post(f"{url}/approve", headers=p.owner.headers, json={})
+    assert approved.status_code == 200, approved.text
+    assert approved.json()["data"]["status"] == "approved"
+    assert codes(approved.json()["data"]) == expected
+    detail = (await client.get(url, headers=p.owner.headers)).json()["data"]
+    assert codes(detail) == expected
+    assert detail["vat_total"] == sum(line["vat_amount"] for line in detail["lines"])
 
 
 async def test_vat_is_rounded_per_line_half_up(client):
@@ -533,6 +667,9 @@ async def test_non_vat_registered_practice_charges_no_vat(client):
     standard = await vat_rate_id(p.org, "standard")
     entry = await make_time_entry(p.org, p.owner, client=p.client)
     fee = await make_disbursement(p.org, p.client, 1_300, vat_rate_id=standard)
+    # The prepare screen is told the same: no VAT, whatever the codes.
+    no_service_line, items = await wip_vat(client, p, p.client.id)
+    assert no_service_line == items[str(entry.id)] == items[str(fee.id)] == vat(None, 0, None)
     invoice = await draft(client, p.owner, p.org, p.client.id, time=[entry], disbursements=[fee])
     assert {(line["vat_rate_bp"], line["vat_amount"]) for line in invoice["lines"]} == {(0, 0)}
     assert invoice["gross_total"] == invoice["net_total"] == 13_300
