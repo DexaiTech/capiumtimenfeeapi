@@ -92,6 +92,7 @@ def item_read(
     as_at: date,
     names: dict[uuid.UUID, str],
     default_vat: dict[uuid.UUID, DefaultVatRead] | None = None,
+    service_vat: dict[uuid.UUID, uuid.UUID | None] | None = None,
 ) -> WipItemRead:
     is_time = atom.kind == "time"
     person = (
@@ -115,6 +116,7 @@ def item_read(
         supplier=atom.supplier,
         client=ClientRef(id=atom.client_id, code=atom.client_code, name=atom.client_name),
         service_id=atom.service_id,
+        service_vat_rate_id=(service_vat or {}).get(atom.service_id) if atom.service_id else None,
         default_vat=(default_vat or {}).get(atom.id),
         age_days=age_days(atom.item_date, as_at),
         component=atom.component,
@@ -227,11 +229,15 @@ class WipViewService:
         )
         names = await self.refs.member_names(ctx.organization_id, [a.person_user_id for a in atoms])
         no_service, default_vat = await self._default_vat(ctx, client, atoms)
+        # Deprecated (APT63), kept for a UI older than the API: the job's service's code.
+        service_vat = await self.atoms.service_vat_rates(
+            ctx.organization_id, {a.service_id for a in atoms if a.service_id}
+        )
         atoms.sort(key=lambda a: (a.item_date, a.kind != "time"))
         total = sum_groups(list(aggregate(atoms, "client", today).values()))
         return ClientWipRead(
             client=ClientRef.from_model(client),
-            items=[item_read(a, today, names, default_vat) for a in atoms],
+            items=[item_read(a, today, names, default_vat, service_vat) for a in atoms],
             totals=WipTotals(
                 minutes=total.minutes,
                 hours=hours_of(total.minutes),

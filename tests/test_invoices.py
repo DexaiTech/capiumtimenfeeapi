@@ -581,6 +581,28 @@ async def test_client_wip_vat_code_follows_the_clients_own_code(client):
     assert [line["vat_rate_id"] for line in invoice["lines"]] == [str(zero), str(standard)]
 
 
+async def test_client_wip_still_names_the_services_vat_code(client):
+    """An API deployed ahead of the UI keeps the screens it serves working: each item still
+    carries ``service_vat_rate_id`` (the job's service's code, as before APT63), deprecated in
+    favour of ``default_vat``."""
+    p = await new_practice(client)
+    standard, _, books, _ = await low_default_and_standard_services(client, p)
+    on_service = await make_time_entry(
+        p.org, p.owner, client=p.client, job=await hourly_job(p, name="Books", service_id=books)
+    )
+    no_service = await make_time_entry(
+        p.org, p.owner, client=p.client, job=await hourly_job(p, name="Ad hoc")
+    )
+    wip = await client.get(org_url(p.org, f"/clients/{p.client.id}/wip"), headers=p.owner.headers)
+    assert wip.status_code == 200, wip.text
+    items = {item["id"]: item for item in wip.json()["data"]["items"]}
+    assert items[str(on_service.id)]["service_vat_rate_id"] == str(standard)
+    assert items[str(no_service.id)]["service_vat_rate_id"] is None
+    assert items[str(on_service.id)]["default_vat"]["vat_rate_id"] == str(standard)
+    schema = (await client.get("/openapi.json")).json()["components"]["schemas"]
+    assert schema["WipItemRead"]["properties"]["service_vat_rate_id"]["deprecated"] is True
+
+
 async def test_a_chosen_vat_code_stays_through_edits_and_approval(client):
     """APT63: a code picked for a line (even the practice default) is kept as picked, and a
     defaulted line keeps the code it was drafted with, through editing, submitting and

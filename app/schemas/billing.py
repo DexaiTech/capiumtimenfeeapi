@@ -208,6 +208,12 @@ class WipItemRead(BaseModel):
     supplier: str | None = None
     client: ClientRef | None = None
     service_id: uuid.UUID | None = Field(default=None, description="The job's service")
+    service_vat_rate_id: uuid.UUID | None = Field(
+        default=None,
+        deprecated="Read default_vat: the VAT code the drafted line gets",
+        description="Client WIP: the VAT code of the job's service. Deprecated: read "
+        "`default_vat`, the code the drafted line actually gets",
+    )
     default_vat: DefaultVatRead | None = Field(
         default=None,
         description="Client WIP (time, fixed fee, disbursement): the VAT code a drafted line "
