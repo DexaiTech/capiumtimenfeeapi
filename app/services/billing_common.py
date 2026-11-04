@@ -14,6 +14,7 @@ from app.db.models import Client, Organization
 from app.repositories.billing_common import BillingReferenceRepository
 from app.schemas.billing import VatSource
 from app.services import audit
+from app.services.clients import ensure_ordinary_client
 from app.services.policy import OrgContext
 
 
@@ -48,9 +49,12 @@ def invalid(code: str, field: str, message: str) -> ValidationError:
 async def get_client_or_404(
     refs: BillingReferenceRepository, organization_id: uuid.UUID, client_id: uuid.UUID
 ) -> Client:
+    """A live client to bill or to show the billing of; the built-in Internal client (APT64) is
+    never billed: 409 ``CLIENT_INTERNAL``."""
     client = await refs.get_client(organization_id, client_id)
     if client is None:
         raise NotFoundError("Client not found.")
+    ensure_ordinary_client(client)
     return client
 
 

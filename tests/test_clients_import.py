@@ -24,7 +24,8 @@ async def upload(client, actor, org, content: bytes, *, dry_run: bool = False, *
 
 async def client_count(org: dict) -> int:
     return await scalar(
-        "SELECT count(*) FROM clients WHERE organization_id = :o AND deleted_at IS NULL",
+        "SELECT count(*) FROM clients WHERE organization_id = :o AND deleted_at IS NULL "
+        "AND NOT is_internal",
         o=org["id"],
     )
 
@@ -169,7 +170,10 @@ async def test_raw_csv_body_and_windows_1252_are_accepted(client):
     )
     assert response.status_code == 200, response.text
     assert (
-        await scalar("SELECT city FROM clients WHERE organization_id = :o", o=org["id"]) == "Zürich"
+        await scalar(
+            "SELECT city FROM clients WHERE organization_id = :o AND NOT is_internal", o=org["id"]
+        )
+        == "Zürich"
     )
 
 

@@ -45,6 +45,7 @@ from app.db.models import (
     User,
     VatRate,
 )
+from app.db.models.clients import ordinary_clients
 from app.schemas.clients import ClientFilters
 
 OPEN_JOB_STATUSES = ("planned", "in_progress", "on_hold")
@@ -300,6 +301,8 @@ class ClientRepository:
         stmt = select(Client, activity.label("last_activity_at")).where(
             Client.organization_id == organization_id, Client.deleted_at.is_(None)
         )
+        if not filters.include_internal:
+            stmt = stmt.where(ordinary_clients())
         if filters.statuses:
             stmt = stmt.where(Client.status.in_(filters.statuses))
         else:
@@ -498,7 +501,11 @@ class ClientRepository:
     # --- Summary ----------------------------------------------------------------------
 
     async def summary(self, organization_id: uuid.UUID, *, today: date) -> SummaryCounts:
-        live = and_(Client.organization_id == organization_id, Client.deleted_at.is_(None))
+        live = and_(
+            Client.organization_id == organization_id,
+            Client.deleted_at.is_(None),
+            ordinary_clients(),
+        )
         visible = and_(live, Client.status != "archived")
         counts = SummaryCounts()
         by_status = select(Client.status, func.count()).where(live).group_by(Client.status)

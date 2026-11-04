@@ -5,7 +5,7 @@ from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from httpx import AsyncClient, Response
-from sqlalchemy import select, text, update
+from sqlalchemy import and_, select, text, update
 
 from app.db.models import (
     Client,
@@ -22,6 +22,7 @@ from app.db.models import (
     WipWriteOff,
 )
 from app.db.session import get_sessionmaker
+from app.services.practice_defaults import internal_job_number
 from tests.factories import API, Actor
 
 # A Monday well in the past, so "this week" never interferes.
@@ -132,37 +133,32 @@ async def age_timer(org: dict, user: Actor, seconds: int) -> None:
         await session.commit()
 
 
-INTERNAL_CLIENT_CODE = "TINTERNAL"
-
-
 async def time_job(org: dict, client_id: str | uuid.UUID | None = None) -> uuid.UUID | None:
     """A job to put time on when a test does not mind which (every entry needs a client and a
-    job): an hourly job of the given client, or without one the non-billable job of an
-    internal client, which keeps the time non-billable. Made once and reused. None for a
-    client that is not one of the practice's (the API answers 404 for it)."""
+    job): an hourly job of the given client (made once and reused), or without one the
+    practice administration job of the practice's built-in Internal client, which keeps the
+    time non-billable. None for a client that is not one of the practice's (the API answers 404
+    for it)."""
     org_id = uuid.UUID(org["id"])
     async with get_sessionmaker()() as session:
         if client_id is None:
-            found = await session.scalar(
-                select(Client.id).where(
-                    Client.organization_id == org_id, Client.code == INTERNAL_CLIENT_CODE
+            internal = await session.scalar(
+                select(Job.id)
+                .join(Client, and_(Client.organization_id == org_id, Client.id == Job.client_id))
+                .where(
+                    Job.organization_id == org_id,
+                    Client.is_internal.is_(True),
+                    Job.number == internal_job_number("ADM"),
                 )
             )
-            if found is None:
-                internal = Client(
-                    organization_id=org_id, code=INTERNAL_CLIENT_CODE, name="Internal time"
-                )
-                session.add(internal)
-                await session.flush()
-                found = internal.id
-            owner, basis = found, "non_billable"
-        else:
-            owner, basis = uuid.UUID(str(client_id)), "hourly"
-            known = await session.scalar(
-                select(Client.id).where(Client.organization_id == org_id, Client.id == owner)
-            )
-            if known is None:
-                return None
+            assert internal is not None, "the practice has no Internal client"
+            return internal
+        owner = uuid.UUID(str(client_id))
+        known = await session.scalar(
+            select(Client.id).where(Client.organization_id == org_id, Client.id == owner)
+        )
+        if known is None:
+            return None
         job_id = await session.scalar(
             select(Job.id).where(
                 Job.organization_id == org_id,
@@ -177,7 +173,7 @@ async def time_job(org: dict, client_id: str | uuid.UUID | None = None) -> uuid.
                 client_id=owner,
                 number=f"TT{uuid.uuid4().hex[:8].upper()}",
                 name="Time",
-                billing_basis=basis,
+                billing_basis="hourly",
                 status="in_progress",
             )
             session.add(job)
@@ -191,7 +187,7 @@ async def log_time(
     client: AsyncClient, actor: Actor, org: dict, *, status: int = 201, **body: Any
 ) -> Any:
     """``POST /time-entries``. Without ``job_id`` the time goes on ``time_job`` (of the
-    ``client_id`` given, else internal); pass ``job_id=None`` to send no job."""
+    ``client_id`` given, else the Internal client's); pass ``job_id=None`` to send no job."""
     body.setdefault("entry_date", MONDAY.isoformat())
     body.setdefault("minutes", 60)
     if "job_id" not in body:

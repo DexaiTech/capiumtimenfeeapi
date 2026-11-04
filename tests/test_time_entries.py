@@ -559,7 +559,7 @@ async def test_week_grid(client: AsyncClient) -> None:
     assert first["client_name"] == "Acme Ltd" and first["activity_code"] == "ACC"
     assert first["minutes"] == [90, 0, 45, 0, 0, 0, 0] and first["total_minutes"] == 135
     assert len(first["entry_ids"]) == 3
-    assert second["client_name"] == "Internal time"
+    assert second["client_name"] == "Internal"
     assert second["minutes"] == [0, 120, 0, 0, 0, 0, 0]
     assert grid["day_totals"] == [90, 120, 45, 0, 0, 0, 0]
     assert grid["total_minutes"] == 255

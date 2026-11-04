@@ -39,6 +39,7 @@ from app.db.models import (
     WipAllocation,
     WipWriteOff,
 )
+from app.db.models.clients import ordinary_clients
 from app.repositories.billing_common import paginate_by_date
 from app.repositories.expense_lines import wip_expense_conditions
 from app.utils.pagination import Page, PageParams, decode_cursor, encode_cursor
@@ -184,7 +185,7 @@ class WipRepository:
         stmt = (
             select(Client, grouped, sort_key.label("sort_key"))
             .join(grouped, grouped.c.client_id == Client.id)
-            .where(Client.organization_id == organization_id)
+            .where(Client.organization_id == organization_id, ordinary_clients())
         )
         if filters.partner_user_id is not None:
             stmt = stmt.where(Client.partner_user_id == filters.partner_user_id)

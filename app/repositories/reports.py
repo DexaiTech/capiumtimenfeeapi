@@ -54,6 +54,7 @@ from app.db.models import (
     WipAllocation,
     WipWriteOff,
 )
+from app.db.models.clients import ordinary_clients
 from app.db.models.organization import GONE_STATUSES
 from app.repositories.staff import person_name
 
@@ -944,6 +945,7 @@ class ReportRepository:
             .where(
                 Job.organization_id == organization_id,
                 Job.deleted_at.is_(None),
+                ordinary_clients(),
                 or_(time_q.c.job_id.is_not(None), billing_q.c.job_id.is_not(None)),
                 *item_conditions(
                     f, client_col=Job.client_id, job_col=Job.id, user_col=None, activity_col=None

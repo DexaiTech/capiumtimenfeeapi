@@ -91,6 +91,8 @@ class ClientFilters:
     without_branch: bool = False
     # ``linked``: enabled from the central client service; ``local``: created here.
     central: CentralFilter | None = None
+    # The built-in Internal client too (the time pickers); the export never has it.
+    include_internal: bool = False
 
 
 def initials_of(name: str) -> str:
@@ -543,6 +545,12 @@ class ClientRead(BaseModel):
     merged_into_client_id: uuid.UUID | None = Field(
         description="Set on a client that was merged away: the client that now holds its work"
     )
+    is_internal: bool = Field(
+        description=(
+            "The practice's built-in Internal client, for internal time only: never billed, "
+            "and it cannot be edited, archived or deleted"
+        )
+    )
     created_at: datetime
     updated_at: datetime
 
@@ -587,6 +595,7 @@ class ClientRead(BaseModel):
             "central_sync_state": client.central_sync_state,
             "central_synced_at": client.central_synced_at,
             "merged_into_client_id": client.merged_into_client_id,
+            "is_internal": client.is_internal,
             "created_at": client.created_at,
             "updated_at": client.updated_at,
         }

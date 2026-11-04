@@ -12,6 +12,9 @@ Rules (docs/domain.md, "Clients"):
   transaction, under the client row lock.
 * While the practice uses branches (APT74), creating a client, or clearing its branch, without a
   branch answers 422 ``BRANCH_REQUIRED``.
+* The practice's built-in Internal client (APT64) only holds internal time: it is left out of the
+  list, the counts and the export, and editing, archiving, deleting it or giving it engagements
+  answers 409 ``CLIENT_INTERNAL``.
 """
 
 import csv
@@ -82,6 +85,20 @@ INACTIVE_STATUSES = frozenset({"inactive", "archived"})
 ANNUAL_MULTIPLIER = {"monthly": 12, "quarterly": 4, "annually": 1}
 EXPORT_BATCH = 1000
 _CSV_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+
+
+class InternalClientError(ConflictError):
+    code = "CLIENT_INTERNAL"
+    message = (
+        "The Internal client is built in for internal time: it cannot be changed, deleted, "
+        "billed or linked."
+    )
+
+
+def ensure_ordinary_client(client: Client) -> None:
+    """409 ``CLIENT_INTERNAL`` for the practice's built-in Internal client."""
+    if client.is_internal:
+        raise InternalClientError(details={"client_id": str(client.id)})
 
 
 async def ensure_client_accepts_work(
@@ -704,6 +721,7 @@ class ClientsService:
         async with unit_of_work(self.session):
             lock = "update" if "status" in values else "no_key_update"
             client = await self._client(ctx, client_id, lock=lock)
+            ensure_ordinary_client(client)
             if "status" in values:
                 self._check_archive_permission(ctx, client.status, values["status"])
             if "code" in values and values["code"] != client.code:
@@ -756,6 +774,7 @@ class ClientsService:
     async def delete(self, ctx: OrgContext, client_id: uuid.UUID, rctx: RequestContext) -> None:
         async with unit_of_work(self.session):
             client = await self._client(ctx, client_id, lock="update")
+            ensure_ordinary_client(client)
             usage = await self.clients.usage(ctx.organization_id, client.id)
             if usage.in_use:
                 raise ConflictError(
@@ -801,6 +820,8 @@ class ClientsService:
                     "Some of the clients were not found.",
                     details={"client_ids": [str(i) for i in ids if i not in found]},
                 )
+            for client in clients:
+                ensure_ordinary_client(client)
             rows: list[audit.AuditRow]
             match data.action:
                 case "delete":
@@ -1023,6 +1044,7 @@ class ClientsService:
         org_id = ctx.organization_id
         async with unit_of_work(self.session):
             client = await self._client(ctx, client_id, lock="no_key_update")
+            ensure_ordinary_client(client)
             service = await self.services.get(org_id, data.service_id)
             if service is None or not service.is_active:
                 raise ValidationError.for_field(

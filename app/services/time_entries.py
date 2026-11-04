@@ -714,7 +714,8 @@ class TimeEntryService:
     @staticmethod
     def ensure_client_and_job(client: Client | None, job: Job | None, prefix: str) -> None:
         """Every time entry is on a client and one of its jobs, billable or not (internal time
-        goes on an internal client and job). A job brings its client, so only a job is needed."""
+        goes on the built-in Internal client's jobs). A job brings its client, so only a job is
+        needed."""
         missing = []
         if client is None:
             missing.append(
@@ -792,6 +793,13 @@ class TimeEntryService:
         client: Client | None,
         prefix: str,
     ) -> bool:
+        # Time on the built-in Internal client is never billable, whatever the activity.
+        if client is not None and client.is_internal:
+            if requested:
+                raise ValidationError.for_field(
+                    _f(prefix, "is_billable"), "Time on the Internal client cannot be billable."
+                )
+            return False
         if requested is None:
             return default_billable(job, activity, client is not None)
         if requested and client is None:

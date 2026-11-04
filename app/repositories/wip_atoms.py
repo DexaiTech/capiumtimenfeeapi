@@ -32,6 +32,7 @@ from app.db.models import (
     WipMovement,
     WipWriteOff,
 )
+from app.db.models.clients import ordinary_clients
 from app.repositories.expense_lines import wip_expense_conditions
 from app.repositories.wip import approved_timesheet
 from app.utils.money import percentage_bp
@@ -190,8 +191,9 @@ async def _survivor_clients(
 
 
 def _filter_conditions(f: WipFilters, client_col: Any, job_col: Any) -> list[ColumnElement[bool]]:
-    """Filters on a query that has ``Client`` joined and ``Job`` outer-joined."""
-    conditions: list[ColumnElement[bool]] = []
+    """Filters on a query that has ``Client`` joined and ``Job`` outer-joined. The built-in
+    Internal client (APT64) never has WIP."""
+    conditions: list[ColumnElement[bool]] = [ordinary_clients()]
     if f.client_id is not None:
         conditions.append(client_col == f.client_id)
     if f.job_id is not None:

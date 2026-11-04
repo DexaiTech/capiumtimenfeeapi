@@ -241,7 +241,12 @@ async def test_enable_again_answers_with_the_existing_client(client):
     data = again.json()["data"]
     assert data["result"] == "already_enabled" and data["from_cache"] is False
     assert data["client"]["id"] == first["client"]["id"]
-    assert await scalar("SELECT count(*) FROM clients WHERE organization_id = :o", o=team.id) == 1
+    assert (
+        await scalar(
+            "SELECT count(*) FROM clients WHERE organization_id = :o AND NOT is_internal", o=team.id
+        )
+        == 1
+    )
     assert len(await audit_entries(team.id, "client.central_enabled")) == 1
 
 
@@ -275,7 +280,12 @@ async def test_enable_adopts_a_local_client_with_the_same_company_number(client)
     )
     assert (adopted["postcode"], adopted["email"]) == ("LS1 4AB", "hello@northgate.example")
     assert (adopted["central_client_id"], adopted["central_sync_state"]) == (BAKERY, "synced")
-    assert await scalar("SELECT count(*) FROM clients WHERE organization_id = :o", o=team.id) == 1
+    assert (
+        await scalar(
+            "SELECT count(*) FROM clients WHERE organization_id = :o AND NOT is_internal", o=team.id
+        )
+        == 1
+    )
     [entry] = await audit_entries(team.id, "client.central_enabled")
     assert entry["metadata"]["result"] == "linked_existing"
     assert entry["metadata"]["changes"] == {
@@ -317,7 +327,12 @@ async def test_enable_unknown_archived_and_malformed_ids(client):
     assert archived.status_code == 409 and error(archived)["code"] == "CENTRAL_CLIENT_ARCHIVED"
     for bad in ("CC 0001", "-x", "a" * 65):
         assert (await enable(client, team.owner, team.org, bad)).status_code == 422, bad
-    assert await scalar("SELECT count(*) FROM clients WHERE organization_id = :o", o=team.id) == 0
+    assert (
+        await scalar(
+            "SELECT count(*) FROM clients WHERE organization_id = :o AND NOT is_internal", o=team.id
+        )
+        == 0
+    )
 
 
 async def test_enable_works_from_the_cache_while_central_is_down(client, central_gateway):
@@ -348,7 +363,12 @@ async def test_enable_needs_client_create_and_a_practice_you_belong_to(client):
     team = await new_team(client)
     for role in ("staff", "viewer", "billing"):
         assert (await enable(client, await team.member(role), team.org, BAKERY)).status_code == 403
-    assert await scalar("SELECT count(*) FROM clients WHERE organization_id = :o", o=team.id) == 0
+    assert (
+        await scalar(
+            "SELECT count(*) FROM clients WHERE organization_id = :o AND NOT is_internal", o=team.id
+        )
+        == 0
+    )
     assert (await enable(client, await team.member("manager"), team.org, BAKERY)).status_code == 201
     outsider, _ = await create_user_with_org(client, "Elsewhere")
     assert (await enable(client, outsider, team.org, PLUMBING)).status_code == 404
@@ -375,7 +395,12 @@ async def test_parallel_enables_create_one_client(client):
     }
     results = sorted(r.json()["data"]["result"] for r in responses)
     assert results == ["already_enabled"] * 5 + ["created"]
-    assert await scalar("SELECT count(*) FROM clients WHERE organization_id = :o", o=team.id) == 1
+    assert (
+        await scalar(
+            "SELECT count(*) FROM clients WHERE organization_id = :o AND NOT is_internal", o=team.id
+        )
+        == 1
+    )
     assert len(await audit_entries(team.id, "client.central_enabled")) == 1
 
 
@@ -396,7 +421,12 @@ async def test_parallel_enables_adopt_the_local_client_once(client):
         "linked_existing",
     ]
     assert {r.json()["data"]["client"]["id"] for r in responses} == {local["id"]}
-    assert await scalar("SELECT count(*) FROM clients WHERE organization_id = :o", o=team.id) == 1
+    assert (
+        await scalar(
+            "SELECT count(*) FROM clients WHERE organization_id = :o AND NOT is_internal", o=team.id
+        )
+        == 1
+    )
 
 
 async def test_parallel_enables_of_different_clients_get_distinct_codes(client):
@@ -618,7 +648,12 @@ async def test_the_import_does_not_duplicate_an_enabled_central_client(client):
     [problem] = error(refused)["details"]
     assert (problem["row"], problem["code"]) == (2, "CENTRAL_CLIENT_ALREADY_ENABLED")
     # The file is all-or-nothing: the good row was not imported either.
-    assert await scalar("SELECT count(*) FROM clients WHERE organization_id = :o", o=team.id) == 1
+    assert (
+        await scalar(
+            "SELECT count(*) FROM clients WHERE organization_id = :o AND NOT is_internal", o=team.id
+        )
+        == 1
+    )
     fine = csv_of("Client Name,Reg No", "Fresh Start Ltd,01234567", "No Number Ltd,")
     done = await upload(client, team.owner, team.org, fine, dry_run=False)
     assert done.status_code == 200, done.text

@@ -386,7 +386,8 @@ async def test_the_import_takes_a_branch_and_needs_one_while_branches_are_on(cli
     done = await upload(b"Client Name,Branch\r\nAcme Ltd,london\r\n", dry_run=False)
     assert done.status_code == 200, done.text
     assert await sql(
-        "SELECT branch_id::text AS b FROM clients WHERE organization_id = :o", o=org["id"]
+        "SELECT branch_id::text AS b FROM clients WHERE organization_id = :o AND NOT is_internal",
+        o=org["id"],
     ) == [{"b": london["id"]}]
 
 

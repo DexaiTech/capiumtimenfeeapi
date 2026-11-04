@@ -278,7 +278,9 @@ async def test_a_lead_converts_once(client):
     assert again.status_code == 409
     assert error(again)["code"] == "LEAD_ALREADY_CONVERTED"
     assert error(again)["details"] == {"client_id": first["converted_client_id"]}
-    clients = await scalar("SELECT count(*) FROM clients WHERE organization_id = :o", o=org["id"])
+    clients = await scalar(
+        "SELECT count(*) FROM clients WHERE organization_id = :o AND NOT is_internal", o=org["id"]
+    )
     assert clients == 1
 
 
@@ -289,7 +291,9 @@ async def test_two_clicks_at_once_make_one_client(client):
         act(client, owner, org, lead, "convert"), act(client, owner, org, lead, "convert")
     )
     assert sorted(r.status_code for r in responses) == [200, 409]
-    clients = await scalar("SELECT count(*) FROM clients WHERE organization_id = :o", o=org["id"])
+    clients = await scalar(
+        "SELECT count(*) FROM clients WHERE organization_id = :o AND NOT is_internal", o=org["id"]
+    )
     assert clients == 1
 
 

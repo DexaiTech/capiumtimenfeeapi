@@ -27,6 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.context import RequestContext
 from app.core.exceptions import FileUploadError, ValidationError
 from app.db.models import ActivityCode, Client, Job, Organization, TimeEntry, Timesheet
+from app.db.models.clients import ordinary_clients
 from app.db.session import unit_of_work
 from app.repositories.clients import ClientRepository
 from app.schemas.opening_balances import (
@@ -348,8 +349,9 @@ class OpeningBalanceImportService:
     ) -> dict[str, Client]:
         if not codes:
             return {}
+        # Opening balances are billing: never the built-in Internal client (APT64).
         stmt = select(Client).where(
-            Client.organization_id == organization_id, Client.code.in_(codes)
+            Client.organization_id == organization_id, Client.code.in_(codes), ordinary_clients()
         )
         return {c.code: c for c in (await self.session.execute(stmt)).scalars()}
 

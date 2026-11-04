@@ -834,4 +834,9 @@ async def test_a_merge_from_the_change_feed_goes_through_the_same_handler(client
     again = await enable(client, team.owner, team.org, BAKERY)
     assert again.status_code == 200 and again.json()["data"]["result"] == "already_enabled"
     assert again.json()["data"]["client"]["id"] == source["id"]
-    assert await scalar("SELECT count(*) FROM clients WHERE organization_id = :o", o=team.id) == 2
+    assert (
+        await scalar(
+            "SELECT count(*) FROM clients WHERE organization_id = :o AND NOT is_internal", o=team.id
+        )
+        == 2
+    )

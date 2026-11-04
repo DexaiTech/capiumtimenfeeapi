@@ -147,7 +147,8 @@ email), `status` (repeatable; default every status except `archived`), `segment`
 (repeatable), `se, `central` (`linked`: enabled from the central client service; `local`: created
 in this practice)rvice_id` (active engagement of that service), `manager_user_id`,
 `partner_user_id`, `branch_id` (repeatable) and `without_branch=true` (clients with none; with
-`branch_id`, either matches; APT74); `sort` = `name` (default, case-insensitive) | `code` | `segment` |
+`branch_id`, either matches; APT74), `include_internal=true` (the built-in Internal client too,
+for the time pickers; see "The Internal client"); `sort` = `name` (default, case-insensitive) | `code` | `segment` |
 `health_score` | `aml_status` | `created_at` | `last_activity_at`; `order` = `asc` | `desc`;
 `limit` (1–100, default 25), `cursor`.
 
@@ -176,6 +177,7 @@ active engagements, deadline counts) regardless of page size (tested).
 | `CLIENT_IN_USE` | 409 | Delete of a client with jobs/time/disbursements/invoices/credit notes/payments (`details` has counts; for a bulk delete `details` is a list with one entry per such client: `client_id`, `code`, `name`, `reason`, `usage` counts). |
 | `CLIENT_INACTIVE` | 409 | Raised by `ensure_client_accepts_work` for inactive/archived clients. |
 | `CLIENT_SERVICE_EXISTS` | 409 | The client already takes that service. |
+| `CLIENT_INTERNAL` | 409 | Editing, archiving, deleting (also in bulk) or adding a service to the built-in Internal client; billing it (an invoice, its WIP or billing summary, a payment, a statement, ...) or linking it to the central client service. |
 | `BRANCH_REQUIRED` | 422 | The practice uses branches and a client is created (or a lead converted) without `branch_id`, or `branch_id` is set to null (`details[0].field` = `branch_id`); also an import row error. |
 | `BRANCH_NAME_TAKEN` | 409 | Duplicate branch name (case-insensitive). |
 | `CLIENT_FIELD_MANAGED_CENTRALLY` | 409 | Changing the name or address of a client linked to the central client service (`details`: one entry per field). |
@@ -370,6 +372,39 @@ required:
 A client merge leaves `branch_id` alone: the merged-away client keeps its branch and the survivor
 its own (`branches` names no client, so the merge registry is not concerned). Migration `077`.
 Tests: `tests/test_branches.py`.
+
+## The Internal client
+
+Ticket APT64. Every time entry needs a client and a job, so internal time (admin, training,
+business development, holiday) goes on a client every practice has built in: **Internal**
+(`clients.is_internal`, at most one per practice; code `INTERNAL`, type `other`, active). It has
+one non-billable job per non-chargeable activity code, numbered `INT-<code>` and named after the
+code (`INT-ADM` Practice administration, `INT-TRN` Training and CPD, `INT-BDV` Business
+development, `INT-HOL` Holiday and absence for a new practice). A new practice gets it when it is
+created (`app/services/practice_defaults.py`); migration `078` gives it to every existing practice
+(from its active non-chargeable codes; a practice with a live client coded `INTERNAL` already gets
+`INTERNAL-` and eight random characters, and a job number already taken gets six after a `-`).
+
+* **Recording time**: staff pick it like any client: `GET /clients?include_internal=true` lists it
+  (`is_internal: true` on every client read), `GET /clients/{id}` reads it and
+  `GET /jobs?client_id=<it>` lists its jobs. Time on it is never billable, whatever the activity
+  (asking for `is_billable: true` is 422 on `is_billable`).
+* **Left out of**: the client list, its counts (`/clients/summary`) and the export
+  (`ordinary_clients()` in `app/db/models/clients.py` is the one filter), the jobs list unless
+  filtered to it, WIP (every WIP query, `app/repositories/wip_atoms.py`), the job profitability
+  report, the opening-balance import, the onboarding checklist's client and job counts and the
+  central client service (never linked, synced or merged). Billing it answers 409 `CLIENT_INTERNAL` (`get_client_or_404` of the billing services:
+  invoices, estimates, payments, recurring invoices, WIP views, write-offs, adjustments,
+  statements, debtors, recovery, billing summary). Recovery and debtors never see it anyway: it
+  has no billable time and no invoices.
+* **Cannot be changed**: `PATCH`, archive, delete, the bulk actions and adding a service answer
+  409 `CLIENT_INTERNAL`, so it is never renamed, archived, deleted or given a branch, and the
+  branch requirement (`BRANCH_REQUIRED`, APT74) never applies to it.
+
+Downgrading `078` removes the Internal client and its jobs only where nothing refers to them; one
+with time (or anything else) on it is left as an ordinary client, and upgrading again gives that
+practice a new Internal client beside it. Tests: `tests/test_internal_client.py`,
+`tests/test_internal_client_migration.py`.
 
 ## Clients 360
 
