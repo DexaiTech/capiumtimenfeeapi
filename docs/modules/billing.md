@@ -33,7 +33,7 @@ unless marked bounded.
 | Method | Path | Permission | Purpose |
 |---|---|---|---|
 | GET | `/wip` | `wip.read` | One row per client with WIP, by client name: `minutes`, `hours`, `time_value`, `disbursement_value`, `total`, `oldest_date`, `ages{days_0_30, days_31_60, days_61_90, days_91_plus}`, `item_count`. Filters `client_id`, `partner_user_id`, `manager_user_id` (the client's), `job_id`. |
-| GET | `/clients/{client_id}/wip?job_id=` | `wip.read` | Bounded: every WIP item (`kind` time/disbursement, `date`, `job`, `person`, `minutes`, `hours`, `rate`, `value`, `service_id` and `service_vat_rate_id` (the job's service and its VAT code, so the prepare screen estimates the VAT the draft charges), …) in date order, plus `totals`. |
+| GET | `/clients/{client_id}/wip?job_id=` | `wip.read` | Bounded: every WIP item (`kind` time/disbursement, `date`, `job`, `person`, `minutes`, `hours`, `rate`, `value`, `service_id` (the job's service), `default_vat` `{vat_rate_id, rate_bp, source}` (time, fixed fee, disbursement: the VAT code the drafted line gets when none is chosen, resolved by the draft's own rule; `source` `line`, `client`, `service`, `practice` or null), …) in date order, plus `totals` and `default_vat` of a line with no service (one line for all the time of several services). |
 | GET | `/clients/{client_id}/billing-summary` | `wip.read` | Per job: terms, hours, value by source, what each billing basis would bill, cost against budget and agreed price, and `recovery`: the time ready to bill at the recovery rate (the practice's `recovery_rate_order` of the client job, task and staff rates; `rate_order`), the staff charge-out rates, cost and cost plus the job's, else the client's, else the practice's mark-up (`markup_bp`: the client's or the practice's), which the invoicing screen compares with the invoice being raised. |
 | GET | `/clients/{client_id}/recovery` | `wip.read` | The client's Invoices & Recovery: per job with billable time (all dates) the invoice value (issued less allocated credit notes, plus drafts) against the recovery rate, staff rates and cost plus, revenue left on the table and recovery on each basis, the WIP not invoiced yet apart, plus totals and `credit_on_account` (payments not allocated to an invoice). See [reports.md](reports.md#recovery-analysis-apt52). |
 | POST | `/wip/write-offs` | `wip.write_off` | `{client_id, items:[{time_entry_id}|{disbursement_id}] | job_id, reason, written_off_on?}`. 201. |
@@ -213,8 +213,9 @@ allocations from both sides.
 * **WIP line VAT** (time and fixed-fee lines): the chosen rate (an override's `vat_rate_id`),
   else the client's default, else the job's service's code, else the practice default — a
   client's own code beats the service's (APT63). With `group_by = single` the service counts
-  only when all the time shares one. The prepare screen estimates each line with the same order,
-  taking the service's code from `service_vat_rate_id` of `GET /clients/{id}/wip`.
+  only when all the time shares one. The prepare screen does not re-apply the order: it shows
+  the `default_vat` that `GET /clients/{id}/wip` resolves with the same `VatResolver` (APT63),
+  so the code on screen is the code the draft charges.
 * **Disbursement VAT**: the disbursement's `vat_rate_id` is the line's chosen rate; without it
   the general order applies (client default, then practice default — the job's service is not
   used for disbursements).
@@ -552,7 +553,7 @@ like any other. Code: `app/services/invoice_advances.py`; tests `tests/test_invo
 
 | Method | Path | Permission | Purpose |
 |---|---|---|---|
-| POST | `/invoices` | `invoice.create` | `advance: {description, net_amount > 0, vat_rate_id?, service_id?, job_id?}` adds the advance line; or `advance_lines: [{description, quantity = 1, unit_amount > 0, vat_rate_id?, service_id?}]` (1-200, APT75) adds one advance line each, net = `round(quantity x unit_amount)` like any manual line. Not both (422). The draft may bill no WIP. |
+| POST | `/invoices` | `invoice.create` | `advance: {description, net_amount > 0, vat_rate_id?, service_id?, job_id?}` adds the advance line; or `advance_lines: [{description, quantity = 1, unit_amount > 0, vat_rate_id?, service_id?}]` (1-200, APT75) adds one advance line each, net = `round(quantity x unit_amount)` like any manual line. Not both (422). `manual_lines: [{description, quantity = 1, unit_amount, vat_rate_id?, service_id?, job_id?, is_advance = false}]` (0-200) adds those lines after the WIP and advance lines, in that order, each exactly as `POST /invoices/{id}/lines` adds one (an `is_advance` one must be more than zero). The draft may bill no WIP. |
 | POST | `/invoices/{id}/lines` | `invoice.create` | `is_advance: true` marks a manual line of a draft as an advance (net > 0, else 422 `ADVANCE_NOT_POSITIVE`; also on `PATCH`). |
 | POST | `/invoices/{id}/lines/{line_id}/assign` | `invoice.create` | `{time_entry_ids, disbursement_ids}` (at least one): bill that WIP against the advance line. Returns the invoice detail. |
 | POST | `/invoices/{id}/lines/{line_id}/unassign` | `invoice.create` | Same body: take items off the advance line, back to WIP. Returns the invoice detail. |
@@ -563,9 +564,9 @@ added to a draft (`ADVANCE_NOT_POSITIVE` when a line rounds to nothing; the draf
 `service_id` must be one of the practice's services (422 on `service_id`); it is stored on the line and its VAT code
 applies when the line has none and the client has none (line, client, service, practice default). The audit entry
 `invoice.draft_created` keeps the total net as `advance`. Each line is its own advance: time is assigned to one line
-and uses only that line's amount. The UI's "Bill fees in advance" panel is a grid of these lines (service, description,
-qty, unit price, VAT code; choosing a service fills the description and its default fee; VAT and net shown per line,
-with the totals) and always sends `advance_lines`.
+and uses only that line's amount. The UI's Create invoice drafts the chosen WIP and the lines typed in its
+line grid in one request: the typed lines go in `manual_lines`, marked `is_advance` when "Fees in advance" is ticked
+(the default when no WIP is chosen, so a client with nothing to bill gets an advance invoice).
 
 Every line of the detail has `is_advance`; an advance line also has `advance: {amount, used, remaining, wip_value,
 written_off, items[]{kind, id, date, person, description, minutes, hours, wip_value, billed_value, assigned_on}}`.

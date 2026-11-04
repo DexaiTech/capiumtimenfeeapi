@@ -1,13 +1,14 @@
 """The integration cards of a practice: what each integration is, whether it is on, how it last did
 and what it has queued, and the changes a person can make (switch it on or off, its settings).
 
-The central client service is part of the client flow and cannot be switched off; the central user
-service is on until it is switched off; practice management and bookkeeping are off until a
-practice turns them on. Every change is audited. ``record_run`` is how the runners note an outcome
-on the practice's connection.
+The central user service is on until it is switched off; the central client service (Capium
+Central, ticket APT74), practice management and bookkeeping are off until a practice turns them on.
+Every change is audited. ``record_run`` is how the runners note an outcome on the practice's
+connection.
 """
 
 import uuid
+from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Protocol, cast
@@ -67,8 +68,8 @@ INFO: dict[str, IntegrationInfo] = {
             "The Capium group's master list of clients: names and addresses follow it, and "
             "renamed, archived, restored and merged clients are applied.",
             None,
-            True,
             False,
+            True,
         ),
         IntegrationInfo(
             CENTRAL_USER,
@@ -189,6 +190,14 @@ class ConnectionService:
     async def is_enabled(self, organization_id: uuid.UUID, key: str) -> bool:
         connection = await self.connections.get(organization_id, key)
         return connection.enabled if connection else INFO[key].default_enabled
+
+    async def enabled_among(
+        self, organization_ids: Collection[uuid.UUID], key: str
+    ) -> set[uuid.UUID]:
+        """The practices among ``organization_ids`` that have the integration switched on."""
+        switches = await self.connections.switches(organization_ids, key)
+        default = INFO[key].default_enabled
+        return {org_id for org_id in organization_ids if switches.get(org_id, default)}
 
     async def ensure_enabled(self, organization_id: uuid.UUID, key: str) -> None:
         """409 ``INTEGRATION_DISABLED`` while the practice has the integration switched off."""

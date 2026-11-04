@@ -46,8 +46,9 @@ async def _read_body(request: Request) -> bytes:
     description=(
         "Upload a CSV (multipart/form-data field `file`, or a `text/csv` body) of historic "
         "unbilled time from a client's previous system: columns `client` (client code), "
-        "`staff` (email), `date` (ISO `YYYY-MM-DD`), `hours` (decimal), and optionally "
-        "`activity` (activity code), `job` (job number) and `billable` (Y/N, default Y). "
+        "`staff` (email), `date` (ISO `YYYY-MM-DD`), `hours` (decimal), `job` (job number of "
+        "that client: every time entry is on a job), and optionally `activity` (activity "
+        "code) and `billable` (Y/N, default Y). "
         "Resolved and validated like an ordinary time entry, then created the same way "
         "(`POST /time-entries/bulk`), so rates, timesheets and period locks behave "
         "identically; every row created is tagged so it can be shown apart from newly "

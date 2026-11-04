@@ -12,6 +12,7 @@ from app.core.context import RequestContext
 from app.core.exceptions import ConflictError, NotFoundError, ValidationError
 from app.db.models import Client, Organization
 from app.repositories.billing_common import BillingReferenceRepository
+from app.schemas.billing import VatSource
 from app.services import audit
 from app.services.policy import OrgContext
 
@@ -101,23 +102,42 @@ class VatResolver:
         service_id: uuid.UUID | None = None,
         validate_line_rate: bool = False,
     ) -> tuple[uuid.UUID | None, int]:
+        rate_id, rate_bp, _ = await self.resolve_with_source(
+            client=client,
+            line_rate_id=line_rate_id,
+            service_id=service_id,
+            validate_line_rate=validate_line_rate,
+        )
+        return rate_id, rate_bp
+
+    async def resolve_with_source(
+        self,
+        *,
+        client: Client,
+        line_rate_id: uuid.UUID | None = None,
+        service_id: uuid.UUID | None = None,
+        validate_line_rate: bool = False,
+    ) -> tuple[uuid.UUID | None, int, VatSource | None]:
+        """``resolve`` and which step of the order gave the rate (null: no VAT code)."""
         if not self.organization.vat_registered:
-            return None, 0
+            return None, 0, None
         if line_rate_id is not None:
             if validate_line_rate:
-                return await self.chosen(line_rate_id)
+                rate_id, rate_bp = await self.chosen(line_rate_id)
+                return rate_id, rate_bp, "line"
             found = await self._rate(line_rate_id)
             if found:
-                return found
+                return found[0], found[1], "line"
         if client.default_vat_rate_id is not None and (
             found := await self._rate(client.default_vat_rate_id)
         ):
-            return found
+            return found[0], found[1], "client"
         if service_id is not None:
             service_rate = await self._service_rate(service_id)
             if service_rate is not None and (found := await self._rate(service_rate)):
-                return found
-        return await self.default()
+                return found[0], found[1], "service"
+        default_id, default_bp = await self.default()
+        return default_id, default_bp, "practice" if default_id is not None else None
 
 
 async def record(

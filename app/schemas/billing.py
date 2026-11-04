@@ -178,6 +178,20 @@ class WipClientSummary(BaseModel):
 
 DateType = date
 
+# Where a line's VAT code comes from when none is chosen for it (``VatResolver``).
+VatSource = Literal["line", "client", "service", "practice"]
+
+
+class DefaultVatRead(BaseModel):
+    vat_rate_id: uuid.UUID | None = Field(
+        description="The VAT code; null: no VAT (not VAT-registered, or no default code)"
+    )
+    rate_bp: int = Field(description="Its rate in basis points (2000 = 20%)")
+    source: VatSource | None = Field(
+        description="`line`: the disbursement's own code; `client`: the client's own code; "
+        "`service`: the job's service's code; `practice`: the practice default; null: no code"
+    )
+
 
 class WipItemRead(BaseModel):
     kind: Literal["time", "disbursement", "expense", "fixed_fee", "adjustment"]
@@ -194,10 +208,10 @@ class WipItemRead(BaseModel):
     supplier: str | None = None
     client: ClientRef | None = None
     service_id: uuid.UUID | None = Field(default=None, description="The job's service")
-    service_vat_rate_id: uuid.UUID | None = Field(
+    default_vat: DefaultVatRead | None = Field(
         default=None,
-        description="Client WIP: the VAT code of the job's service, which a drafted time or "
-        "fixed-fee line takes when no code is chosen and the client has no default",
+        description="Client WIP (time, fixed fee, disbursement): the VAT code a drafted line "
+        "of the item gets when no code is chosen, exactly as `POST /invoices` charges it",
     )
     age_days: int | None = Field(default=None, description="Days since the item date")
     component: Literal["time", "fixed_fee", "expense"] | None = Field(
@@ -230,6 +244,12 @@ class ClientWipRead(BaseModel):
     items: list[WipItemRead]
     totals: WipTotals
     composition: WipComposition | None = None
+    default_vat: DefaultVatRead | None = Field(
+        default=None,
+        description="The VAT code of a drafted line with no service and no code of its own "
+        "(the client's code, else the practice default): one line for all the time of "
+        "several services",
+    )
 
 
 class WipItemRef(RequestModel):

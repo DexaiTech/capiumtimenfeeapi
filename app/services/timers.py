@@ -84,6 +84,8 @@ class TimerService:
             client = self.time.client_ref(
                 await self.refs.get_clients(org_id, client_ids), data.client_id, job, ""
             )
+            # Its client and job cannot change once it runs, and stopping it writes an entry.
+            self.time.ensure_client_and_job(client, job, "")
             activity = self.time.activity_ref(
                 await self.refs.get_activity_codes(
                     org_id, {data.activity_code_id} if data.activity_code_id else set()

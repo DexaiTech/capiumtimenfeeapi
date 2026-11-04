@@ -16,6 +16,7 @@ from tests.time_helpers import (
     org_url,
     set_entry,
     set_practice,
+    time_job,
 )
 
 
@@ -225,6 +226,7 @@ async def test_overtime_cannot_be_marked_while_it_is_off(client, path):
         "entry_date": "2026-09-07",
         "minutes": 60,
         "client_id": str(acme.id),
+        "job_id": str(await time_job(org, acme.id)),
         "is_overtime": True,
     }
     body = {"entries": [item]} if path.endswith("bulk") else item

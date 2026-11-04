@@ -165,7 +165,9 @@ class TimeEntryCreate(RequestModel):
     entry_date: EntryDate
     minutes: EntryMinutes = Field(description="Rounded up to the practice time increment")
     client_id: uuid.UUID | None = Field(default=None, description="Default: the job's client")
-    job_id: uuid.UUID | None = None
+    job_id: uuid.UUID | None = Field(
+        default=None, description="Required (422 `required`): every entry is on a job"
+    )
     task_id: uuid.UUID | None = Field(
         default=None, description="A task of the job (needs job_id); 422 for another job's task"
     )
@@ -175,8 +177,7 @@ class TimeEntryCreate(RequestModel):
     is_billable: bool | None = Field(
         default=None,
         description=(
-            "Default false for non_billable jobs, non-chargeable activity codes and entries "
-            "with no client; true otherwise"
+            "Default false for non_billable jobs and non-chargeable activity codes; true otherwise"
         ),
     )
     is_overtime: bool | None = Field(

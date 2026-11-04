@@ -288,6 +288,7 @@ async def test_a_correction_checks_its_references(client: AsyncClient) -> None:
     entry = await approved_entry(client, org, person, approver, client_id=acme.id, minutes=60)
     done = await make_job(org, acme, "Done job", status="completed")
     quiet = await make_client(org, "Quiet Ltd", status="inactive")
+    quiet_job = await make_job(org, quiet)
     other_client = await make_client(org, "Other Ltd")
     their_job = await make_job(org, other_client)
     internal = await make_job(org, acme, "Internal", billing_basis="non_billable")
@@ -303,25 +304,49 @@ async def test_a_correction_checks_its_references(client: AsyncClient) -> None:
         return error
 
     assert (await refused(409, job_id=done.id))["code"] == "JOB_CLOSED"
-    assert (await refused(409, client_id=quiet.id))["code"] == "CLIENT_INACTIVE"
+    assert (await refused(409, job_id=quiet_job.id))["code"] == "CLIENT_INACTIVE"
     mismatch = await refused(422, client_id=acme.id, job_id=their_job.id)
     assert mismatch["details"][0]["field"] == "job_id"
     for body in (
-        {"client_id": foreign_client.id},
+        {"client_id": foreign_client.id, "job_id": None},
         {"activity_code_id": foreign_code},
         {"job_id": uuid.uuid4()},
-        {"client_id": uuid.uuid4()},
+        {"client_id": uuid.uuid4(), "job_id": None},
     ):
         assert (await refused(404, **body))["code"] == "RESOURCE_NOT_FOUND"
     forced = await refused(422, job_id=internal.id, billable=True)
     assert forced["details"][0]["field"] == "is_billable"
-    no_client = await refused(422, client_id=None, billable=True)
-    assert no_client["details"][0]["field"] == "is_billable"
+    # A correction keeps a client and a job (APT64).
+    no_job = await refused(422, job_id=None)
+    assert [(d["field"], d["code"]) for d in no_job["details"]] == [("job_id", "required")]
+    neither = await refused(422, client_id=None, job_id=None)
+    assert {d["field"] for d in neither["details"]} == {"client_id", "job_id"}
     assert (await get_entry(client, approver, org, entry["id"]))["minutes"] == 60
 
-    # Without a client the time is not billable; the correction says so.
-    internal_time = await correct(client, approver, org, entry["id"], reason="Fix", client_id=None)
-    assert internal_time["client_id"] is None and internal_time["is_billable"] is False
+    # On a non-billable job the time is not billable; the correction says so.
+    internal_time = await correct(
+        client, approver, org, entry["id"], reason="Fix", job_id=internal.id
+    )
+    assert internal_time["client_id"] == str(acme.id) and internal_time["is_billable"] is False
+
+
+async def test_a_correction_of_older_time_without_a_client_or_job_must_add_them(
+    client: AsyncClient,
+) -> None:
+    """APT64: approved time recorded before the rule is corrected onto a client and job."""
+    _, org, person, approver, acme = await team(client)
+    job = await make_job(org, acme)
+    entry = await approved_entry(client, org, person, approver, minutes=60)
+    await sql(
+        "UPDATE time_entries SET client_id = NULL, job_id = NULL, is_billable = false "
+        "WHERE id = :i",
+        i=entry["id"],
+    )
+    error = await correct(client, approver, org, entry["id"], status=422, reason="Fix", minutes=30)
+    assert {d["field"] for d in error["details"]} == {"client_id", "job_id"}
+    assert await history_rows(org, entry["id"]) == []
+    fixed = await correct(client, approver, org, entry["id"], reason="Fix", job_id=job.id)
+    assert fixed["client_id"] == str(acme.id) and fixed["job_id"] == str(job.id)
 
 
 async def test_a_description_can_be_corrected_on_time_of_a_closed_job(client: AsyncClient) -> None:

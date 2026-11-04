@@ -577,11 +577,12 @@ class InvoiceService:
                 for a in data.advance_lines or []
             ]
             advance_total = 0
-            for spec in advances:
+            for spec in [*advances, *data.manual_lines]:
                 # One at a time: each new line takes the position after the last one saved.
                 line = await self._manual_line(ctx, invoice, client, spec)
                 await self.invoices.add_lines([line])
-                advance_total += line.net_amount
+                if line.is_advance:
+                    advance_total += line.net_amount
             set_items_status(items, "in_draft")
             await self._recompute(invoice)
             await record(
@@ -597,7 +598,7 @@ class InvoiceService:
                     wip_value=items.wip_value,
                     item_count=items.count,
                     **({"valuation_basis": data.valuation_basis} if data.valuation_basis else {}),
-                    **({"advance": advance_total} if advances else {}),
+                    **({"advance": advance_total} if advance_total else {}),
                 ),
             )
             detail = await self._detail(ctx, invoice)

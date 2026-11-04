@@ -13,7 +13,7 @@ from decimal import Decimal
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import NotFoundError
-from app.db.models import Organization
+from app.db.models import Client, Organization
 from app.repositories.billing_common import BillingReferenceRepository
 from app.repositories.wip import WipSummaryFilters
 from app.repositories.wip_atoms import WipAtom, WipAtomRepository, WipFilters
@@ -21,6 +21,7 @@ from app.schemas.billing import (
     AgeBuckets,
     ClientRef,
     ClientWipRead,
+    DefaultVatRead,
     FixedFeeRead,
     JobRef,
     PersonRef,
@@ -31,7 +32,7 @@ from app.schemas.billing import (
     hours_of,
 )
 from app.schemas.wip import WipAges, WipGroupBy, WipGroupRow, WipGroupTotals, WipSummaryRead
-from app.services.billing_common import get_client_or_404
+from app.services.billing_common import VatResolver, get_client_or_404
 from app.services.policy import OrgContext
 from app.services.reports import practice_today
 from app.services.wip_engine import (
@@ -90,7 +91,7 @@ def item_read(
     atom: WipAtom,
     as_at: date,
     names: dict[uuid.UUID, str],
-    service_vat: dict[uuid.UUID, uuid.UUID | None] | None = None,
+    default_vat: dict[uuid.UUID, DefaultVatRead] | None = None,
 ) -> WipItemRead:
     is_time = atom.kind == "time"
     person = (
@@ -114,7 +115,7 @@ def item_read(
         supplier=atom.supplier,
         client=ClientRef(id=atom.client_id, code=atom.client_code, name=atom.client_name),
         service_id=atom.service_id,
-        service_vat_rate_id=(service_vat or {}).get(atom.service_id) if atom.service_id else None,
+        default_vat=(default_vat or {}).get(atom.id),
         age_days=age_days(atom.item_date, as_at),
         component=atom.component,
         charge_value=atom.charge_value,
@@ -225,15 +226,12 @@ class WipViewService:
             ctx.organization, WipFilters(client_id=client.id, job_id=job_id)
         )
         names = await self.refs.member_names(ctx.organization_id, [a.person_user_id for a in atoms])
-        # The prepare screen estimates VAT from these: a job's service code comes first.
-        service_vat = await self.atoms.service_vat_rates(
-            ctx.organization_id, {a.service_id for a in atoms if a.service_id}
-        )
+        no_service, default_vat = await self._default_vat(ctx, client, atoms)
         atoms.sort(key=lambda a: (a.item_date, a.kind != "time"))
         total = sum_groups(list(aggregate(atoms, "client", today).values()))
         return ClientWipRead(
             client=ClientRef.from_model(client),
-            items=[item_read(a, today, names, service_vat) for a in atoms],
+            items=[item_read(a, today, names, default_vat) for a in atoms],
             totals=WipTotals(
                 minutes=total.minutes,
                 hours=hours_of(total.minutes),
@@ -242,7 +240,35 @@ class WipViewService:
                 total=total.total,
             ),
             composition=composition_of(total),
+            default_vat=no_service,
         )
+
+    async def _default_vat(
+        self, ctx: OrgContext, client: Client, atoms: list[WipAtom]
+    ) -> tuple[DefaultVatRead, dict[uuid.UUID, DefaultVatRead]]:
+        """The VAT code a drafted line gets when none is chosen, by the rule the draft itself
+        uses (``VatResolver``, APT63): for a line with no service, and for each item's line
+        (time and fixed fees by the job's service, a disbursement by its own code)."""
+        resolver = VatResolver(self.refs, ctx.organization)
+        own = await self.atoms.disbursement_vat_rates(
+            ctx.organization_id, [a.id for a in atoms if a.kind == "disbursement"]
+        )
+
+        async def read(
+            service_id: uuid.UUID | None = None, line_rate_id: uuid.UUID | None = None
+        ) -> DefaultVatRead:
+            rate_id, rate_bp, source = await resolver.resolve_with_source(
+                client=client, service_id=service_id, line_rate_id=line_rate_id
+            )
+            return DefaultVatRead(vat_rate_id=rate_id, rate_bp=rate_bp, source=source)
+
+        by_item: dict[uuid.UUID, DefaultVatRead] = {}
+        for atom in atoms:
+            if atom.kind in ("time", "fixed_fee"):
+                by_item[atom.id] = await read(service_id=atom.service_id)
+            elif atom.kind == "disbursement":
+                by_item[atom.id] = await read(line_rate_id=own.get(atom.id))
+        return await read(), by_item
 
     async def _check_scope(self, ctx: OrgContext, f: WipFilters) -> None:
         """A client or job the filter names must be the practice's: another practice's is 404."""
