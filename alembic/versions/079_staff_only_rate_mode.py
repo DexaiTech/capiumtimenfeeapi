@@ -1,7 +1,7 @@
 """staff only rate mode
 
 Revision ID: 079
-Revises: 077
+Revises: 078
 
 Ticket APT79: a practice whose staff rates differ from the grade rates can price time by staff
 rates only (``organizations.rate_mode = 'staff_only'``): the grade rates are skipped and a person
@@ -14,7 +14,7 @@ from collections.abc import Sequence
 from alembic import op
 
 revision: str = "079"
-down_revision: str | None = "077"
+down_revision: str | None = "078"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
