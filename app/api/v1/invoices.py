@@ -300,7 +300,10 @@ async def save_lines(
         "Changes a draft line. A new `net_amount` on a line that bills WIP is re-apportioned "
         "over its items (it cannot be negative: 422 `NEGATIVE_WIP_LINE`); changing quantity "
         "or unit amount alone recomputes the net. `vat_rate_id: null` re-applies the default "
-        "rate. Requires `invoice.create`."
+        "rate. `is_advance` makes a line typed in fees billed in advance, or an ordinary line "
+        "again (422 `ADVANCE_NOT_MANUAL` for a line of work, `ADVANCE_NOT_POSITIVE` unless its "
+        "net is more than zero; 409 `ADVANCE_HAS_TIME` once time is on it). Requires "
+        "`invoice.create`."
     ),
     responses=error_responses(403, 404, 409),
 )
