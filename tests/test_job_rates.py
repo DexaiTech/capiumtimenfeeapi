@@ -8,7 +8,7 @@ from httpx import AsyncClient
 
 from tests.domain_factories import make_client, make_job, practice, staff
 from tests.team_helpers import grade_id, new_rate, set_grade
-from tests.time_helpers import err, log_time, ok_data, org_url
+from tests.time_helpers import err, log_time, ok_data, org_url, set_practice
 
 
 async def _service(client: AsyncClient, owner, org: dict, code: str = "ANN") -> dict:
@@ -153,3 +153,44 @@ async def test_rule_rates_need_rate_read_and_the_client_must_exist(client):
         org_url(org, f"/clients/{uuid.uuid4()}/job-rates"), headers=owner.headers
     )
     assert err(missing, 404)["code"] == "RESOURCE_NOT_FOUND"
+
+
+async def test_staff_rates_only_leaves_out_the_grade_rates_for_the_service(client):
+    """APT79: in the staff rates only mode a grade's rate for the service never prices time, so
+    the Jobs page does not offer it as the task rate; a person's own rate for the service is."""
+    owner, org = await practice(client)
+    service = await _service(client, owner, org)
+    await set_grade(org, owner, "SNR")
+    await new_rate(
+        client,
+        owner,
+        org,
+        kind="charge",
+        service_id=service["id"],
+        grade_id=await grade_id(org, "SNR"),
+        rate=10_000,
+        effective_from="2026-01-01",
+    )
+    anker = await make_client(org, "Anker Technologies")
+    accounts = await make_job(org, anker, "Annual Accounts", service_id=uuid.UUID(service["id"]))
+    assert _job(await _rates(client, owner, org, anker.id), accounts.id)["source"] == "task"
+
+    await set_practice(org, rate_mode="staff_only")
+    row = _job(await _rates(client, owner, org, anker.id), accounts.id)
+    assert row["source"] == "staff" and row["task_rate"] is None
+
+    await new_rate(
+        client,
+        owner,
+        org,
+        kind="charge",
+        service_id=service["id"],
+        user_id=owner.id,
+        rate=11_000,
+        effective_from="2026-01-01",
+    )
+    row = _job(await _rates(client, owner, org, anker.id), accounts.id)
+    assert row["source"] == "task"
+    assert row["task_rate"] == {"low": 11_000, "high": 11_000, "rules": 1}
+    # It is what the time is billed at.
+    assert (await log_time(client, owner, org, job_id=accounts.id))["charge_rate"] == 11_000

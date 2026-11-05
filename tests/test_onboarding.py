@@ -13,10 +13,11 @@ from tests.factories import audit_entries, create_user_with_org, error
 from tests.foundation_helpers import add_custom_role
 from tests.onboarding_helpers import STEP_KEYS, checklist, mark, steps
 from tests.period_lock_helpers import lock_period, today
-from tests.team_helpers import new_staff, set_grade_rates
-from tests.time_helpers import org_url
+from tests.team_helpers import grade_id, new_rate, new_staff, set_grade_rates
+from tests.time_helpers import org_url, set_practice
 
 PREFIX = "/api/v1/organizations/{organization_id}"
+FROM = "2026-01-01"
 
 
 async def _address(client, owner, org):
@@ -547,3 +548,35 @@ async def test_the_routes_are_documented(client):
         assert prop.get("description") or any(
             o.get("description") for o in prop.get("anyOf", [])
         ), field
+
+
+async def test_grade_rates_do_not_set_up_the_rates_of_a_staff_rates_only_practice(client):
+    """APT79: in the staff rates only mode a grade's default charge-out rate prices nothing."""
+    owner, org = await practice(client)
+    await _grade_rate(client, owner, org)
+    assert steps(await checklist(client, owner, org))["grades_rates"]["state"] == "done"
+
+    await set_practice(org, rate_mode="staff_only")
+    step = steps(await checklist(client, owner, org))["grades_rates"]
+    assert (step["state"], step["detected"]) == ("todo", False)
+    assert step["detail"] == (
+        "1 grade with a default charge-out rate (not used: the practice prices by staff rates only)"
+    )
+    # A practice default rate (or any charge-out rule) still counts.
+    await _practice_default_rate(client, owner, org)
+    assert steps(await checklist(client, owner, org))["grades_rates"]["state"] == "done"
+
+
+async def test_grade_rules_do_not_set_up_the_rates_of_a_staff_rates_only_practice(client):
+    """APT79: in the staff rates only mode a grade's charge-out rule prices nothing either."""
+    owner, org = await practice(client)
+    await set_practice(org, rate_mode="staff_only")
+    snr = await grade_id(org)
+    await new_rate(client, owner, org, kind="charge", grade_id=snr, rate=3_700, effective_from=FROM)
+    assert steps(await checklist(client, owner, org))["grades_rates"]["state"] == "todo"
+
+    # A person's own rate prices time in this mode: the rates are set up.
+    await new_rate(
+        client, owner, org, kind="charge", user_id=owner.id, rate=4_600, effective_from=FROM
+    )
+    assert steps(await checklist(client, owner, org))["grades_rates"]["state"] == "done"

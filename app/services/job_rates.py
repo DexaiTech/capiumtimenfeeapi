@@ -1,7 +1,8 @@
 """The hourly rate of each of a client's jobs and where it comes from (APT54).
 
 A job of a client is billed, by default, at the **task rate**: the rates set against its service
-(service + grade, staff + service), else each person's charge-out rate. The accountant can agree a
+(service + grade, staff + service; not service + grade while the practice prices by staff rates
+only, APT79), else each person's charge-out rate. The accountant can agree a
 custom **client rate** for the job instead: the job's own hourly rate (``jobs.hourly_rate``, level
 4 of the charge-out ladder in ``charge_rates``), set or cleared with ``PATCH /jobs/{id}``. A rate
 agreed with the client for everyone (the client's rate for the job's service, else for any
@@ -16,6 +17,7 @@ import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.models.organization import RateMode
 from app.repositories.billing_common import BillingReferenceRepository
 from app.repositories.job_rates import TASK_LEVELS, ChargeRuleRow, JobRateRepository, JobTermsRow
 from app.schemas.job_rates import (
@@ -40,14 +42,20 @@ def _client_rule(job: JobTermsRow, rules: list[ChargeRuleRow]) -> ChargeRuleRow 
     return next((rule for rule in rules if rule.level == "client"), None)
 
 
-def describe(job: JobTermsRow, rules: list[ChargeRuleRow], show_rates: bool) -> JobRateRead:
+def describe(
+    job: JobTermsRow, rules: list[ChargeRuleRow], show_rates: bool, rate_mode: RateMode
+) -> JobRateRead:
     client_rule = _client_rule(job, rules)
+    # Staff rates only: a grade's rate for the service never prices time, as in ``charge_rates``.
+    levels = (
+        tuple(level for level in TASK_LEVELS if level != "service_grade")
+        if rate_mode == "staff_only"
+        else TASK_LEVELS
+    )
     task = [
         rule.rate
         for rule in rules
-        if rule.level in TASK_LEVELS
-        and job.service_id is not None
-        and rule.service_id == job.service_id
+        if rule.level in levels and job.service_id is not None and rule.service_id == job.service_id
     ]
     person_rules = sum(
         1
@@ -109,5 +117,5 @@ class JobRateService:
             client_id=client.id,
             as_of=today,
             show_rates=show_rates,
-            jobs=[describe(job, rules, show_rates) for job in jobs],
+            jobs=[describe(job, rules, show_rates, org.rate_mode) for job in jobs],
         )
