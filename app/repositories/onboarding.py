@@ -43,6 +43,9 @@ class OnboardingFacts:
     active_staff: int
     grades_with_rate: int
     charge_rules: int
+    # The charge rules that are not a grade's rate (``grade``, ``service_grade``): the only ones
+    # that price time in the ``staff_only`` rate mode (APT79).
+    charge_rules_without_grade: int
     services: int
     activity_types: int
     clients: int
@@ -117,6 +120,11 @@ class OnboardingRepository:
                 "grades_with_rate"
             ),
             capped(RateRule, RateRule.kind == "charge").label("charge_rules"),
+            capped(
+                RateRule,
+                RateRule.kind == "charge",
+                RateRule.level.not_in(("grade", "service_grade")),
+            ).label("charge_rules_without_grade"),
             capped(Service, Service.is_active.is_(True)).label("services"),
             capped(ActivityCode, ActivityCode.is_active.is_(True)).label("activity_types"),
             # The built-in Internal client and its jobs (APT64) are not the practice's own.

@@ -15,7 +15,7 @@ from tests.domain_factories import make_job, make_staff_rate, make_time_entry, p
 from tests.factories import error
 from tests.report_helpers import download
 from tests.reports_helpers import fetch, report
-from tests.team_helpers import new_rate
+from tests.team_helpers import new_rate, set_grade, set_grade_rates
 
 MONDAY = date(2026, 9, 7)
 NAME = "recovery-analysis"
@@ -164,6 +164,39 @@ async def test_two_people_are_valued_at_their_own_charge_out_rates(client):
     assert row_named(by_person, "Pat Partner")["staff_value"] == 150_000
     assert by_person["totals"]["staff_value"] == 200_000
     assert by_person["totals"]["minutes"] == 1_200
+
+
+async def test_staff_rates_only_values_people_without_their_grade_rate(client):
+    """APT79: in the staff rates only mode the staff charge-out rate of the recovery analysis is
+    a person's own rate, never their grade's; without one it is the practice default."""
+    p = await new_practice(client, default_charge_rate=2_000)
+    senior = await staff(p.org, "staff", full_name="Sam Semi-Senior")
+    partner = await staff(p.org, "partner", full_name="Pat Partner")
+    await make_staff_rate(p.org, senior, 5_000, 2_000)
+    # The partner has no rate of their own, only their grade's £150.
+    await set_grade(p.org, partner, "PTR")
+    await set_grade_rates(p.org, "PTR", charge=15_000)
+    job = await make_job(p.org, p.client, "Accounts")
+    for person in (senior, partner):
+        for day in range(2):
+            await make_time_entry(
+                p.org,
+                person,
+                client=p.client,
+                job=job,
+                entry_date=MONDAY + timedelta(days=day),
+                minutes=300,
+                billing_status="written_off",
+            )
+
+    by_person = await report(client, p.owner, p.org, NAME, group_by="person")
+    assert row_named(by_person, "Pat Partner")["staff_value"] == 150_000
+
+    await set_org(p.org, rate_mode="staff_only")
+    by_person = await report(client, p.owner, p.org, NAME, group_by="person")
+    assert row_named(by_person, "Sam Semi-Senior")["staff_value"] == 50_000
+    # Ten hours at the practice default £20, not the grade's £150.
+    assert row_named(by_person, "Pat Partner")["staff_value"] == 20_000
 
 
 async def test_cost_plus_adds_the_mark_up_of_the_job_else_the_client_else_the_practice(client):
