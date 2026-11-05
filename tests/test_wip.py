@@ -236,6 +236,43 @@ async def test_items_search_matches_job_number_and_client_code(client):
         assert [i["id"] for i in response.json()["data"]] == [str(wanted.id)], q
 
 
+async def test_items_search_matches_every_text_column(client):
+    # APT58 reopened: "search is working only on first column, it should work on all columns of
+    # the grid". The Person, the Supplier and the item's kind are shown in WIP Details too.
+    p = await new_practice(client)
+    priya = await staff(p.org, "staff", full_name="Priya Shah")
+    time = await make_time_entry(p.org, priya, client=p.client, description="Bookkeeping")
+    fee = await make_disbursement(p.org, p.client, description="Filing", supplier="Companies House")
+
+    async def found(q: str) -> list[str]:
+        response = await client.get(p.url("/wip/items"), headers=p.owner.headers, params={"q": q})
+        assert response.status_code == 200, response.text
+        return [i["id"] for i in response.json()["data"]]
+
+    for q in ("Priya", "priya shah", "SHAH"):
+        assert await found(q) == [str(time.id)], q
+    for q in ("Companies House", "companies", "Disbursement", "disburse"):
+        assert await found(q) == [str(fee.id)], q
+    assert await found("Time") == [str(time.id)]
+    assert await found("zzzz") == []
+
+
+async def test_summary_by_job_search_matches_the_client_code(client):
+    # APT58: the By job view shows the client's code under its name; searching it found nothing.
+    p = await new_practice(client)
+    other = await make_client(p.org, "Alpha Ltd", code="C0005")
+    job = await hourly_job(p, other, name="Payroll", number="J00031")
+    await make_time_entry(p.org, p.owner, client=other, job=job)
+    await make_time_entry(p.org, p.owner, client=p.client, job=await hourly_job(p, number="J00032"))
+
+    for q in ("C0005", "c0005", "0005"):
+        response = await client.get(
+            p.url("/wip/summary"), headers=p.owner.headers, params={"group_by": "job", "q": q}
+        )
+        assert response.status_code == 200, response.text
+        assert [r["code"] for r in response.json()["data"]["rows"]] == ["J00031"], q
+
+
 async def test_permissions(client):
     p = await new_practice(client)
     entry = await make_time_entry(p.org, p.owner, client=p.client)

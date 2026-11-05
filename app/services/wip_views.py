@@ -48,6 +48,14 @@ from app.utils.pagination import Page, PageParams
 from app.utils.wip_rules import age_days
 
 ITEM_SORTS = ("date", "value", "client")
+# The item kinds as WIP Details shows them (the UI's ITEM_KIND_META), so they can be searched.
+KIND_LABELS = {
+    "time": "Time",
+    "disbursement": "Disbursement",
+    "expense": "Expense",
+    "fixed_fee": "Fixed fee",
+    "adjustment": "Adjustment",
+}
 
 
 def composition_of(group: Group) -> WipComposition:
@@ -305,6 +313,7 @@ class WipViewService:
                 if needle in g.name.lower()
                 or needle in (g.code or "").lower()
                 or needle in (g.client_name or "").lower()
+                or needle in (g.client_code or "").lower()
             ]
         ordered = sort_groups(groups, SortSpec(q.sort, q.descending))
         page = page_of(ordered, params)
@@ -368,6 +377,8 @@ class WipViewService:
         atoms, today = await self._live(ctx.organization, f)
         if min_age_days is not None:
             atoms = [a for a in atoms if age_days(a.item_date, today) >= min_age_days]
+        # Names before the search: the Person column is searched too.
+        names = await self.refs.member_names(ctx.organization_id, [a.person_user_id for a in atoms])
         if q:
             needle = q.lower()
             atoms = [
@@ -378,6 +389,12 @@ class WipViewService:
                 or needle in a.client_code.lower()
                 or needle in (a.job_number or "").lower()
                 or needle in (a.job_name or "").lower()
+                or needle in (a.supplier or "").lower()
+                or needle in KIND_LABELS.get(a.kind, a.kind).lower()
+                or (
+                    a.person_user_id is not None
+                    and needle in names.get(a.person_user_id, "").lower()
+                )
             ]
         if sort == "value":
             atoms.sort(key=lambda a: a.value, reverse=descending)
@@ -386,9 +403,6 @@ class WipViewService:
         else:
             atoms.sort(key=lambda a: (a.item_date, str(a.id)), reverse=descending)
         page = page_of(atoms, params)
-        names = await self.refs.member_names(
-            ctx.organization_id, [a.person_user_id for a in page.items]
-        )
         return Page(
             items=[item_read(a, today, names) for a in page.items], next_cursor=page.next_cursor
         )
