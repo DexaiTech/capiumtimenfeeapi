@@ -81,7 +81,11 @@ async def wip_summary(
         int | None, Query(ge=0, le=36_500, description="Only items at least this many days old")
     ] = None,
     q: Annotated[
-        str | None, Query(max_length=100, description="Name or code contains this text")
+        str | None,
+        Query(
+            max_length=100,
+            description="Name or code contains this text (by job: also the client's name or code)",
+        ),
     ] = None,
     sort: Annotated[SummarySort, Query(description="Column to sort by")] = "name",
     order: Annotated[Order, Query(description="Sort direction")] = "asc",
@@ -137,7 +141,13 @@ async def wip_items(
     min_age_days: Annotated[
         int | None, Query(ge=0, le=36_500, description="Only items at least this many days old")
     ] = None,
-    q: Annotated[str | None, Query(max_length=100, description="Text search")] = None,
+    q: Annotated[
+        str | None,
+        Query(
+            max_length=100,
+            description="Description, client, job, supplier, person or kind contains this text",
+        ),
+    ] = None,
     sort: Annotated[ItemSort, Query(description="Sort column")] = "date",
     order: Annotated[Order, Query(description="Sort direction")] = "asc",
 ) -> ApiResponse[list[WipItemRead]]:
