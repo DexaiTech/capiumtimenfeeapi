@@ -1,6 +1,6 @@
 """Reports: debtors, utilisation, recoverability, billing, profitability, expenses, payments,
-missing timesheets, the recovery analysis and Cost to Business. HTTP only. (The WIP report is in
-``wip_reports``.)
+missing timesheets, the recovery analysis, Cost to Business and Staff Cost. HTTP only. (The WIP
+report is in ``wip_reports``.)
 
 Every report answers ``{rows, totals, filters}`` in the envelope (the others with a ``page``), or a
 file with ``?format=csv|xlsx|pdf``. The rules live in ``ReportService``.
@@ -46,11 +46,18 @@ from app.schemas.reports_ext import (
     PaymentsQuery,
     PaymentsReport,
 )
+from app.schemas.staff_cost import (
+    StaffCostJobsQuery,
+    StaffCostJobsReport,
+    StaffCostQuery,
+    StaffCostReport,
+)
 from app.services import report_csv
 from app.services.policy import OrgContext
 from app.services.report_export import ReportExporter
 from app.services.reports import ReportService
 from app.services.reports_ext import ExtendedReportService
+from app.services.staff_cost import StaffCostService
 from app.services.xlsx_export import XLSX_MEDIA_TYPE
 
 router = APIRouter(prefix="/organizations/{organization_id}", tags=["Reports"])
@@ -68,11 +75,17 @@ def get_report_exporter(session: SessionDep) -> ReportExporter:
     return ReportExporter(session)
 
 
+def get_staff_cost_service(session: SessionDep) -> StaffCostService:
+    return StaffCostService(session)
+
+
 ReportServiceDep = Annotated[ReportService, Depends(get_report_service)]
 ExtendedServiceDep = Annotated[ExtendedReportService, Depends(get_extended_report_service)]
 ExporterDep = Annotated[ReportExporter, Depends(get_report_exporter)]
 ReadDep = Annotated[OrgContext, Depends(require("report.read"))]
 FinancialDep = Annotated[OrgContext, Depends(require("report.financial"))]
+StaffCostDep = Annotated[OrgContext, Depends(require("report.staff_cost"))]
+StaffCostServiceDep = Annotated[StaffCostService, Depends(get_staff_cost_service)]
 
 _COST_NOTE = " Cost and margin figures are null without `rate.read`."
 _PAGING_NOTE = (
@@ -431,3 +444,73 @@ async def cost_to_business_report(
     exporter.ensure_allowed(org, query.format)
     report = await service.cost_to_business(org, query)
     return await _deliver("cost-to-business", report, query.format, org, ctx, exporter)
+
+
+_STAFF_COST_FILTERS = (
+    " Filters: `from` and `to` (default: this month to today), `user_id`, `grade_id` (the "
+    "person's current grade), `job_id`, `client_id`, `status` (`pending`, `approved`, "
+    "`rejected`; repeat it) and `overtime_type` (`allocated` | `unallocated`)."
+)
+
+
+@router.get(
+    "/reports/staff-cost",
+    summary="Staff Cost",
+    description=(
+        "The only place overtime cost is shown. One row per staff member and overtime period "
+        "(the week, Monday to Sunday, or the calendar month of their working hours; days without "
+        "working hours by week, all standard), cut to the range: `standard_minutes` and "
+        "`standard_cost` (at each entry's standard cost rate; rejected overtime counts here, "
+        "only its premium is removed), `overtime_minutes_allocated` / `overtime_cost_allocated` "
+        "(overtime on client jobs) and `overtime_minutes_unallocated` / "
+        "`overtime_cost_unallocated` (on the Internal client's jobs), pending and approved, at "
+        "the overtime rate applied; `total_cost` and `pending_overtime_cost` (unapproved). With "
+        "`status` or `overtime_type` only the matching overtime is counted and rows without any "
+        "are left out. Charge-out, WIP, invoices and job profitability never include overtime "
+        "cost."
+        + _STAFF_COST_FILTERS
+        + " Requires `report.staff_cost`."
+        + _PAGING_NOTE
+        + _EXPORT_NOTE
+    ),
+    response_model=ApiResponse[StaffCostReport],
+    responses=_FILE_RESPONSES,
+)
+async def staff_cost_report(
+    org: StaffCostDep,
+    service: StaffCostServiceDep,
+    exporter: ExporterDep,
+    ctx: ContextDep,
+    query: Annotated[StaffCostQuery, Query()],
+) -> Any:
+    exporter.ensure_allowed(org, query.format)
+    report = await service.report(org, query)
+    return await _deliver("staff-cost", report, query.format, org, ctx, exporter)
+
+
+@router.get(
+    "/reports/staff-cost/jobs",
+    summary="Staff Cost: jobs worked in overtime",
+    description=(
+        "The drill-down of the Staff Cost report: the jobs each person worked in overtime (the "
+        "Overtime flag), one row per person, job, overtime rate and status, with the overtime "
+        "minutes, the rate applied (pence per hour), the cost and the number of entries; "
+        "`allocated` false for the Internal client's jobs. Totals leave rejected overtime out."
+        + _STAFF_COST_FILTERS
+        + " Requires `report.staff_cost`."
+        + _PAGING_NOTE
+        + _EXPORT_NOTE
+    ),
+    response_model=ApiResponse[StaffCostJobsReport],
+    responses=_FILE_RESPONSES,
+)
+async def staff_cost_jobs_report(
+    org: StaffCostDep,
+    service: StaffCostServiceDep,
+    exporter: ExporterDep,
+    ctx: ContextDep,
+    query: Annotated[StaffCostJobsQuery, Query()],
+) -> Any:
+    exporter.ensure_allowed(org, query.format)
+    report = await service.jobs(org, query)
+    return await _deliver("staff-cost-jobs", report, query.format, org, ctx, exporter)

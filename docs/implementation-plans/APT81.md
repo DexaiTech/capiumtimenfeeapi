@@ -283,3 +283,16 @@ warnings); the 061 multipliers (practice and per staff) are retired — overtime
   (practice and Edit staff) are removed (overtime rates replace them).
 - Reports → **Staff Cost** report (config-driven `ReportScreen`): filters as above, per-staff rows,
   drill-down to flagged jobs, downloads, gated by `report.staff_cost`.
+
+### Clarifications agreed during Phases B-D (2026-11-06, coordinator)
+
+- Reports take `date_from` / `date_to` like every other report (not `from` / `to`); the standard report
+  envelope `{rows, totals, filters, page}`; `totals` of `/reports/staff-cost` = the amount fields of a row.
+- `/reports/staff-cost/jobs` rows: `{job {id, number, name}, client {id, name}, overtime_minutes,
+  overtime_rate, overtime_cost, status}`, one row per job and status; CSV/XLSX/PDF on both endpoints.
+- `GET /overtime`: cursor list envelope; items `{id, time_entry_id, user {id, full_name}, entry_date,
+  overtime_minutes, allocated, job {id, number, name}, client {id, name}, overtime_rate, overtime_cost,
+  premium_cost, status, confirmed_by, confirmed_at, decided_by, decided_at, decision_note}`; filters
+  `user_id`, `status`, `date_from`/`date_to` (also `from`/`to`), `allocated`.
+- Deciding on one's own overtime follows the existing timesheet rule (`_ensure_not_self`): refused
+  (403 `SELF_APPROVAL_FORBIDDEN`) unless the caller holds `organization.update`.

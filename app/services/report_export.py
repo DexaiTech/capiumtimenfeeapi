@@ -25,6 +25,7 @@ from app.db.models import (
     ActivityCode,
     Client,
     ExpenseType,
+    Grade,
     Job,
     OrganizationMember,
     Service,
@@ -54,6 +55,8 @@ TITLES = {
     "missing-timesheets": "Missing Timesheets",
     "recovery-analysis": "Recovery Analysis",
     "cost-to-business": "Cost to Business",
+    "staff-cost": "Staff Cost",
+    "staff-cost-jobs": "Staff Cost - Overtime Jobs",
 }
 _EXTENSIONS: dict[str, str] = {"csv": "csv", "xlsx": "xlsx", "pdf": "pdf"}
 _MEDIA_TYPES: dict[str, str] = {
@@ -71,6 +74,7 @@ _NAMED_FILTERS = (
     ("service_id", "Service"),
     ("activity_code_id", "Activity"),
     ("expense_type_id", "Expense type"),
+    ("grade_id", "Grade"),
 )
 _LIST_FILTERS = (("status", "Status"), ("billing_status", "Billing status"))
 _MARGIN = 12
@@ -369,6 +373,9 @@ class ReportExporter:
             values = getattr(filters, field, None)
             if values:
                 lines.append(f"{label}: {', '.join(str(v).replace('_', ' ') for v in values)}")
+        overtime_type = getattr(filters, "overtime_type", None)
+        if overtime_type:
+            lines.append(f"Overtime: {overtime_type}")
         method = getattr(filters, "method", None)
         if method:
             lines.append(f"Method: {str(method).replace('_', ' ')}")
@@ -407,6 +414,10 @@ class ReportExporter:
             case "expense_type_id":
                 stmt = select(ExpenseType.name, ExpenseType.code).where(
                     ExpenseType.organization_id == organization_id, ExpenseType.id == value
+                )
+            case "grade_id":
+                stmt = select(Grade.name, Grade.code).where(
+                    Grade.organization_id == organization_id, Grade.id == value
                 )
             case _:
                 stmt = (

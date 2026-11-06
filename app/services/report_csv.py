@@ -270,6 +270,32 @@ _MISSING = (
     Column("last_reminded_at", "Last reminded", "date"),
 )
 
+_STAFF_COST = (
+    Column("name", "Person", "text"),
+    Column("staff_code", "Staff code", "text"),
+    Column("grade_name", "Grade", "text"),
+    Column("basis", "Hours basis", "text"),
+    Column("period_start", "Period from", "date"),
+    Column("period_end", "Period to", "date"),
+    Column("standard_minutes", "Standard hours", "hours"),
+    Column("standard_cost", "Standard cost"),
+    Column("overtime_minutes_allocated", "Overtime hours (allocated)", "hours"),
+    Column("overtime_cost_allocated", "Overtime cost (allocated)"),
+    Column("overtime_minutes_unallocated", "Overtime hours (unallocated)", "hours"),
+    Column("overtime_cost_unallocated", "Overtime cost (unallocated)"),
+    Column("total_cost", "Total cost"),
+    Column("pending_overtime_cost", "Pending overtime cost"),
+)
+_STAFF_COST_JOBS = (
+    Column("job_number", "Job number", "text"),
+    Column("job_name", "Job", "text"),
+    Column("client_name", "Client", "text"),
+    Column("overtime_minutes", "Overtime hours", "hours"),
+    Column("overtime_rate", "Overtime rate"),
+    Column("overtime_cost", "Overtime cost"),
+    Column("status", "Status", "text"),
+)
+
 
 def _grouped(group_by: str | None, measures: Sequence[Column], client: bool) -> list[Column]:
     code_header, name_header = _GROUP_HEADERS.get(group_by or "", (None, "Group"))
@@ -324,6 +350,8 @@ _COLUMNS: dict[str, Callable[[str | None], Sequence[Column]]] = {
     "missing-timesheets": lambda _: _MISSING,
     "recovery-analysis": _recovery_analysis_columns,
     "cost-to-business": _cost_to_business_columns,
+    "staff-cost": lambda _: _STAFF_COST,
+    "staff-cost-jobs": lambda _: _STAFF_COST_JOBS,
 }
 
 

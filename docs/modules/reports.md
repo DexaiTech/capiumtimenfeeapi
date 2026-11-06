@@ -32,6 +32,8 @@ Tests: `tests/test_reports_*.py` (the first eight reports) and `tests/test_repor
 | GET | `/reports/missing-timesheets` | `report.read` | Staff with no submitted timesheet, per person and week over a range of weeks: logged against expected, state, reminders |
 | GET | `/reports/recovery-analysis` | `report.financial` | Per job, client or person: the invoiced billable hours and their invoice value (less allocated credit notes) against the recovery rate (the practice's order of the client job, task and staff rates), the staff charge-out rates and cost plus the job's, client's or practice's mark-up: revenue left on the table and recovery on each basis; WIP apart (cost figures need `rate.read`) |
 | GET | `/reports/cost-to-business` | `report.financial` and `rate.read` | Per job, client or person: what all the time cost the practice (cost rates), billable or not, against the invoice value |
+| GET | `/reports/staff-cost` | `report.staff_cost` | Per person and overtime period: standard and overtime hours and cost (APT81) |
+| GET | `/reports/staff-cost/jobs` | `report.staff_cost` | The jobs worked in overtime, per job and status (APT81) |
 | GET | `/dashboard` | any member | The caller's week, timer, unsubmitted weeks, jobs due; approvals waiting; practice figures with `report.financial` |
 
 The ten reports of the spec (Featurte.md 2.17) are: Time Analysis = `time-summary`, Utilisation =
@@ -228,7 +230,7 @@ on the day it was worked, resolved by `RateBook.tiers`:
 | `task` | The **task rate**: the rate set against the job's service (staff + service, else service + grade, which is used only while grade rates are switched on in WIP valuation) | 5 |
 | `staff` | The **staff charge-out rate**: the person's own rate and the grade's, in the order WIP valuation sets and only while switched on (APT84), else the practice default. Always exists | 6, 7, default |
 
-Overtime is priced at the multiplier as everywhere. The rate is resolved from the rules as they
+Overtime never changes these rates (APT81: its cost is only on the Staff Cost report). The rate is resolved from the rules as they
 are now (a rule counts on the days of its period; the job's own rate is undated), not taken from
 the recorded `charge_value`. `staff_value` values the same work at the `staff` tier alone, whatever
 the order.
@@ -294,6 +296,47 @@ as the recovery analysis, but **all** the time, billable or not. Each row and `t
 | `cost_per_hour` | `cost_value` per hour of all the time (null for no time) |
 | `invoice_value` | As in the recovery analysis (issued less allocated credit notes, plus drafts) |
 | `margin_value`, `margin_bp` | `invoice_value − invoiced_cost`, and over `invoice_value` |
+
+## Staff Cost (APT81, phase D)
+
+The only place overtime cost is shown (charge-out, WIP, invoices, job profitability, cost-to-business
+and the recovery analysis use the entries' standard values only). Code: `app/services/staff_cost.py`,
+`app/repositories/staff_cost.py`, `app/schemas/staff_cost.py`; overtime rows come from
+`time_entry_overtime` (`docs/modules/time.md`, "Overtime"). Tests: `tests/test_staff_cost_report.py`
+and the ticket example in `tests/test_overtime_capture.py`.
+
+Permission `report.staff_cost` (Owner, Admin, Partner by default); downloads (`format=csv|xlsx|pdf`)
+need `report.export` too and are audited `report.exported` (`staff-cost`, `staff-cost-jobs`). Filters
+on both: `date_from`, `date_to` (default the first of `date_to`'s month to today), `user_id`, `grade_id`
+(the person's current grade; 404 when unknown), `job_id`, `client_id`, `status` (`pending`, `approved`,
+`rejected`; repeat it), `overtime_type` (`allocated` | `unallocated`), plus `limit`/`offset`. Envelope
+`{rows, totals, filters, page}`.
+
+### GET /reports/staff-cost
+
+One row per person and overtime period (the week, Monday to Sunday, or calendar month of the working
+hours in force; days without working hours by week, all standard), cut to the range, ordered by name
+then period. Row: `user_id`, `name`, `staff_code`, `grade_name`, `basis`, `period_start`, `period_end`,
+`standard_hours_minutes`, and the figures (`totals` has the figures only):
+
+| Field | Meaning |
+|---|---|
+| `standard_minutes`, `standard_cost` | Time within the standard hours, at each entry's standard cost (`cost_value` less the standard cost of its overtime minutes). Rejected overtime counts here: rejecting removes only the premium |
+| `overtime_minutes_allocated`, `overtime_cost_allocated` | Pending and approved overtime on client jobs, at the overtime rate applied |
+| `overtime_minutes_unallocated`, `overtime_cost_unallocated` | The same on the Internal client's jobs |
+| `total_cost` | `standard_cost` + both overtime costs |
+| `pending_overtime_cost` | The unapproved part of the overtime cost |
+
+With `status` or `overtime_type`, only matching overtime is counted in the overtime columns and periods
+without any are left out (the standard figures stay whole).
+
+### GET /reports/staff-cost/jobs
+
+The drill-down (usually with `user_id`): one row per job and status, `{job {id, number, name}, client
+{id, name}, allocated, overtime (always true: the Overtime flag), overtime_minutes, overtime_rate,
+overtime_cost, status, entry_count}`. `overtime_rate` is the rate applied in pence per hour (when the
+minutes were costed at more than one rate, their average). `totals` `{overtime_minutes, overtime_cost}`
+leave rejected overtime out.
 
 ### Settings
 
