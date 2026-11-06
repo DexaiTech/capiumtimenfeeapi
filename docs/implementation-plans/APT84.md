@@ -1,8 +1,7 @@
 # APT84 – WIP costing (WIP valuation sources and order): implementation plan
 
-Status: **Plan ready for review — no code changed. Waiting for approval, and for the client's
-answers to §11 (some answers change the design).** The ticket's own comment (1) has not been seen
-yet; it may answer §11.3.
+Status: **Approved 2026-11-06 — implementation in progress.** Decisions in §15 (the ticket's own
+comment (1) has still not been seen; §15 marks which answers are assumptions to confirm).
 Investigated on `origin/main` of both repositories (API `197f534`, UI `5059d4b`) on 2026-11-06,
 following `CLAUDE.md` → docs → graphify graph → source. Every claim below was checked in code.
 
@@ -144,3 +143,49 @@ source; unpriced entries show "No rate"; at least one source always stays on; th
 **Size (honest): Medium–Large** — about 3–4 API dev-days and 2–3 UI dev-days, plus docs. It
 overlaps APT79 (rate modes) and APT81 (overtime pricing in the same `RateBook`), so it should be
 scheduled after the client answers §11.4–11.5.
+
+## 15. Decisions (2026-11-06) and the agreed contract
+
+Decided by the developer / project lead:
+
+- **Replaces "Rate mode".** Each practice keeps the order it has today (backfill: `staff_first` →
+  client, service, staff, grade; `grade_only` → client, service, grade (staff off); `staff_only` →
+  client, service, staff (grade off)), so no value changes on release. The ticket's default (client,
+  service, grade, staff) is used for new practices.
+- **No enabled source applies**: the practice default rate when it is above £0; otherwise the entry
+  is valued £0 with `rate_source` `none`, shown as **"No rate"**.
+- Delivered before APT81; "role" in APT81 means grade.
+
+Assumed from §11 recommendations (to confirm with the client; easy to change):
+
+- §11.1 the job's own hourly rate (APT54, ladder level 4) belongs to **Client agreed**.
+- §11.2 inside **Service**: `service_grade` applies only while **Grade** is on; `service_staff` and
+  `service` always apply (this reproduces today's three rate modes exactly).
+- §11.6 the order prices **all time** (the stored value is shared by WIP, timesheets, budgets,
+  invoices).
+- §11.7 changing the order re-values **unbilled** time after an impact preview; billed, in-draft,
+  written-off and locked time keep their values.
+- §11.8 the recovery analysis keeps its own "Recovery rate priority".
+- §11.9 the card has its own Save, like the other cards on the tab.
+
+### API contract
+
+- `organizations.wip_valuation_sources text[] NOT NULL`: the **enabled** sources in priority order,
+  values `client`, `service`, `grade`, `staff`, 1–4 distinct (CHECK). Backfilled from `rate_mode` as
+  above; new practices `{client,service,grade,staff}`.
+- `time_entries.rate_source` CHECK gains `none` ("No rate").
+- `GET /organizations/{id}` returns `wip_valuation_sources`. `rate_mode` stays in the response,
+  **derived** from the sources (backward compatible for one release), and `PATCH` still accepts
+  `rate_mode` (mapped to sources) so an older UI keeps working; documented as deprecated.
+- `POST /organizations/{id}/wip-valuation/preview` `{sources}` → `{entries_changed, wip_before,
+  wip_after, skipped: {billed, in_draft, locked, written_off}, too_many}` (nothing saved).
+- `PUT /organizations/{id}/wip-valuation` `{sources, revalue: bool}` → saves the order (422
+  `WIP_VALUATION_SOURCES` "Keep at least one rate switched on." when empty/invalid) and, with
+  `revalue`, re-values unbilled time through the re-rate engine in the same transaction (refused
+  with 422 when above the re-rate cap, pointing to Team → Rates → Change Rates on Past Time). Audit:
+  `organization.updated` (changes `wip_valuation_sources`) + `rate.rerun` when re-valued.
+- `RateBook.charge_steps` follows the configured order; disabled groups come back with
+  `applicable: false` and a reason ("Switched off in WIP valuation."), so Rate Preview explains it;
+  `job_rates.py` uses the same rule; `onboarding.py` no longer reads `rate_mode`.
+- Re-rate treats a change of `rate_source` as a change (fixes stale sources).
+- WIP items return `rate_source` (and `charge_rate`).

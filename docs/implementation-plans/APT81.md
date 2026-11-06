@@ -141,8 +141,7 @@ writes. UI: 1 new page, 1 new report, 1 new card, a shared confirm on 5 write pa
 
 ## 11. Questions for the client (needed before Phase A)
 
-1. **"Role"** = **grade** (Partner/Manager/Senior/Junior — how all rates work today) or permission
-   role (Owner/Admin/Staff…)? We recommend grade.
+1. **"Role"** = **grade** (Partner/Manager/Senior/Junior). *Decided 2026-11-06: grade.*
 2. Standard hours default to each person's current weekly capacity (37.5 h)?
 3. Weekly period = the practice week? Monthly = calendar month? Part weeks, starters and leavers?
 4. Every time entry must have a client and job (APT64). Does **"unallocated"** mean time on the
