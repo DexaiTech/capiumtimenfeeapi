@@ -280,7 +280,7 @@ async def test_hours_go_with_a_staff_record_that_nothing_else_refers_to(
         spare,
         basis="weekly",
         standard_minutes=2250,
-        effective_from="2026-01-05",
+        effective_from="2099-01-05",
     )
     detail = ok_data(await client.get(org_url(org, f"/staff/{spare['id']}"), headers=owner.headers))
     assert detail["can_delete"] is True

@@ -61,7 +61,7 @@ from app.db.models.organization import (
     Role,
     RolePermission,
 )
-from app.db.models.overtime import OvertimeRate, StaffHoursBasis
+from app.db.models.overtime import OvertimeRate, StaffHoursBasis, TimeEntryOvertime
 from app.db.models.period_locks import LockedPeriod, PeriodLock, PeriodLockEvent
 from app.db.models.platform import AuditLog, BackgroundJob, RateLimitCounter
 from app.db.models.practice import (
@@ -189,6 +189,7 @@ __all__ = [
     "TicketTagLink",
     "TimeEntry",
     "TimeEntryHistory",
+    "TimeEntryOvertime",
     "Timer",
     "Timesheet",
     "TimesheetReminder",

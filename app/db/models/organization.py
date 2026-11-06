@@ -265,8 +265,9 @@ class Organization(Base, IdMixin, TimestampMixin, SoftDeleteMixin):
     period_lock_configured: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false")
     )
-    # Overtime: when on, time marked as overtime is priced at its normal rates times the multiplier
-    # (basis points, 15000 = 1.5x) unless the staff member has their own.
+    # Overtime: when on, time beyond each person's standard hours is worked out as overtime and
+    # costed apart (APT81, ``time_entry_overtime``). The multiplier (migration 061) is retired:
+    # kept, never applied.
     overtime_enabled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false")
     )
@@ -523,7 +524,7 @@ class OrganizationMember(Base, IdMixin, TimestampMixin):
     chargeable_target_bp: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default=text("7500")
     )
-    # The person's own overtime multiplier (basis points); null: the practice's.
+    # Retired (APT81): the person's own overtime multiplier of migration 061; never applied.
     overtime_multiplier_bp: Mapped[int | None] = mapped_column(Integer)
     job_title: Mapped[str | None] = mapped_column(Text)
     initials: Mapped[str | None] = mapped_column(Text)

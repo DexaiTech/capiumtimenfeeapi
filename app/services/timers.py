@@ -108,7 +108,7 @@ class TimerService:
             if existing is not None:
                 if not data.replace:
                     raise TimerRunningError(details={"timer_id": str(existing.id)})
-                await self._stop(ctx, existing, None, rctx)
+                await self._stop(ctx, existing, None, rctx, confirm_overtime=data.confirm_overtime)
 
             timer = Timer(
                 id=new_id(),
@@ -163,7 +163,9 @@ class TimerService:
             if peek is not None:
                 await load_tasks(self.session, ctx.organization_id, [peek.task_id])
             timer = await self._lock(ctx)
-            entry = await self._stop(ctx, timer, data, rctx)
+            entry = await self._stop(
+                ctx, timer, data, rctx, confirm_overtime=data.confirm_overtime if data else False
+            )
         return entry
 
     async def discard(self, ctx: OrgContext) -> None:
@@ -172,7 +174,13 @@ class TimerService:
             await self.timers.delete(timer)
 
     async def _stop(
-        self, ctx: OrgContext, timer: Timer, data: TimerStop | None, rctx: RequestContext
+        self,
+        ctx: OrgContext,
+        timer: Timer,
+        data: TimerStop | None,
+        rctx: RequestContext,
+        *,
+        confirm_overtime: bool,
     ) -> TimeEntryRead:
         description = timer.description
         if data is not None and "description" in data.model_fields_set:
@@ -188,6 +196,7 @@ class TimerService:
                 activity_code_id=timer.activity_code_id,
                 description=description,
                 is_billable=timer.is_billable,
+                confirm_overtime=confirm_overtime,
             ),
             rctx,
             source="timer",

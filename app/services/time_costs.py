@@ -73,10 +73,7 @@ async def fill_missing_costs(
     rates = await charge_rates.resolve_many(
         session,
         org,
-        [
-            RateQuery(e.user_id, e.client_id, e.job_id, e.entry_date, overtime=e.is_overtime)
-            for e in open_entries
-        ],
+        [RateQuery(e.user_id, e.client_id, e.job_id, e.entry_date) for e in open_entries],
     )
     filled: list[TimeEntry] = []
     for entry, rate in zip(open_entries, rates, strict=True):

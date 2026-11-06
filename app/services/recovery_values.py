@@ -55,7 +55,6 @@ class Work:
     client_id: uuid.UUID | None
     job_id: uuid.UUID | None
     day: date
-    overtime: bool
     minutes: int
 
 
@@ -74,9 +73,7 @@ async def value_work(
     the person's own charge-out rate, in the order given."""
     if not work:
         return []
-    queries = [
-        RateQuery(w.user_id, w.client_id, w.job_id, w.day, overtime=w.overtime) for w in work
-    ]
+    queries = [RateQuery(w.user_id, w.client_id, w.job_id, w.day) for w in work]
     book = await RateBook.load(session, organization, queries)
     order = list(organization.recovery_rate_order) or list(RATE_TIERS)
     found: list[Valued] = []

@@ -435,13 +435,12 @@ grade rates are on and staff rates off, `staff_only` the other way round, else `
 reads as changes nothing). Its column is kept, in step with the order, for one release only (a later
 migration drops it).
 
-**Overtime.** The practice setting `overtime_enabled` (default false) and `overtime_multiplier_bp` (basis points,
-default 15000 = 1.5x) switch on time marked `is_overtime` (`POST`/`PATCH /time-entries`; 422 while the setting is
-off). A staff member can have their own multiplier (`overtime_multiplier_bp` on `PATCH /staff/{id}`; null: the
-practice's). An overtime entry is priced at the ladder's charge rate **and** cost rate times the multiplier, rounded
-half up, so `charge_rate`, `cost_rate` and the values on the entry already include it; the rate source is unchanged.
-The same resolver serves saving, corrections and re-rating (an entry keeps its mark and its multiplier). Nothing
-changes for time that is not marked, or while the setting is off.
+**Overtime.** Overtime never changes the charge-out or cost rate of time (APT81). The practice setting
+`overtime_enabled` (default false) switches the overtime of `docs/modules/time.md` ("Overtime") on: time beyond
+each person's working hours is costed apart at the overtime rates below and shown only on the Staff Cost report.
+The 061 multipliers (`overtime_multiplier_bp` on the practice and on `PATCH /staff/{id}`) are retired: still
+validated and saved, never applied. Entries saved at the multiplier before APT81 keep their values until they
+are re-priced (edit, correction or re-rate), which prices them at the normal rates.
 
 ## Period rules
 
@@ -697,12 +696,13 @@ hourly_rate, effective_from, effective_to, created_at, updated_at}`.
 
 ---
 
-# Working hours and overtime rates (APT81 Phase A)
+# Working hours and overtime rates (APT81)
 
-Set-up only: **nothing prices time from these tables yet**. Time entries, WIP, invoices, reports, the
-overtime switch and multiplier of migration 061 (`organizations.overtime_enabled` / `overtime_multiplier_bp`,
-`organization_members.overtime_multiplier_bp`, `time_entries.is_overtime`) work exactly as before; the
-threshold split, approval and the Staff Cost report follow in later phases (`docs/implementation-plans/APT81.md`).
+Each person's working hours decide what is overtime, and the overtime rates what it costs (phase B,
+`docs/modules/time.md`, "Overtime"); only the Staff Cost report shows that cost (`docs/modules/reports.md`).
+Charge-out, WIP and invoices never change. New staff get an open-ended weekly row of their weekly capacity
+when they are added (migration 082 gave one to members added since 081 without any). Recorded overtime is
+not re-costed when hours or rates change.
 Code: `app/api/v1/{staff_hours,overtime_rates}.py` → `app/services/{staff_hours,overtime_rates}.py` →
 `app/repositories/overtime.py`; schemas `app/schemas/overtime.py`; models `app/db/models/overtime.py`.
 
@@ -783,8 +783,8 @@ grade or person. Audited `overtime_rate.ended` with `changes.effective_to`.
 
 ## DELETE /overtime-rates/{rate_id}
 
-Permission `rate.manage`. Deletes the rate. Nothing prices time from overtime rates yet, so no rate is in use
-(an in-use check arrives with the pricing in phase B).
+Permission `rate.manage`. Deletes the rate. Overtime already costed at it keeps its rate, cost and
+`rate_source`; its `overtime_rate_id` becomes null (`ON DELETE SET NULL`).
 
 ## GET /overtime-rates/resolve
 

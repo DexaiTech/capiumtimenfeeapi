@@ -17,6 +17,7 @@ from app.db.session import unit_of_work
 from app.schemas.time import TimeEntryCreate, TimeEntryRead
 from app.schemas.time_views import CopyEntryRequest, CopySkipped, CopyWeekRequest, CopyWeekResult
 from app.services import audit
+from app.services.overtime import OvertimeCapture
 from app.services.policy import OrgContext
 from app.services.time_entries import TimeEntryService, show_cost
 from app.services.time_rules import EDITABLE_SHEET_STATUSES, week_start_for
@@ -41,7 +42,9 @@ class TimeCopyService:
             await self.time.ensure_can_view_person(ctx, owner)
 
     @staticmethod
-    def _draft(entry: TimeEntry, day: date, include_notes: bool) -> TimeEntryCreate:
+    def _draft(
+        entry: TimeEntry, day: date, include_notes: bool, confirm_overtime: bool = False
+    ) -> TimeEntryCreate:
         return TimeEntryCreate(
             user_id=entry.user_id,
             entry_date=day,
@@ -53,6 +56,7 @@ class TimeCopyService:
             description=entry.description,
             internal_note=entry.internal_note if include_notes else None,
             is_billable=entry.is_billable,
+            confirm_overtime=confirm_overtime,
         )
 
     async def copy_week(
@@ -123,7 +127,17 @@ class TimeCopyService:
                     )
                 else:
                     made.append((view.entry.id, entry_id))
-            created = await self.time.entries.views(org.id, [new_id for _, new_id in made])
+            new_ids = [new_id for _, new_id in made]
+            if new_ids:
+                # Asked once for the whole copy: added overtime refuses all of it (409).
+                await OvertimeCapture(self.session).recompute(
+                    ctx,
+                    rctx,
+                    {owner: {view.entry.entry_date + offset for view in views}},
+                    confirmed=data.confirm_overtime,
+                    written=new_ids,
+                )
+            created = await self.time.entries.views(org.id, new_ids)
             if made or skipped:
                 await audit.record(
                     self.session,
@@ -168,7 +182,7 @@ class TimeCopyService:
         if source is None:
             raise NotFoundError("Time entry not found.")
         await self._ensure_access(ctx, source.user_id)
-        item = self._draft(source, data.date, data.include_notes)
+        item = self._draft(source, data.date, data.include_notes, data.confirm_overtime)
         async with unit_of_work(self.session):
             created = await self.time.create(ctx, item, rctx, source="copy")
             await audit.record(

@@ -116,7 +116,6 @@ class RecoveryService:
                     rows[i]["client_id"],
                     rows[i]["job_id"],
                     rows[i]["entry_date"],
-                    rows[i]["is_overtime"],
                     int(rows[i]["minutes"]),
                 )
                 for i in compared

@@ -50,8 +50,11 @@ queue** (used by the worker), so the client-work job code lives in `time_jobs.py
 | POST | `/timer/start` | `time.log` | `{client_id?, job_id, activity_code_id?, description?, is_billable?, replace?}` (a job is required; it brings its client) |
 | POST | `/timer/pause` | `time.log` | Pause |
 | POST | `/timer/resume` | `time.log` | Resume |
-| POST | `/timer/stop` | `time.log` | Write the entry (optional body `{description}`), delete the timer, return the entry (201) |
+| POST | `/timer/stop` | `time.log` | Write the entry (optional body `{description, confirm_overtime}`), delete the timer, return the entry (201) |
 | DELETE | `/timer` | `time.log` | Discard without an entry |
+| GET | `/overtime` | any member (own and managed people; everyone with `time.read_all`/`time.manage_all`) | Overtime rows with their entries, cursor-paginated (see "Overtime") |
+| POST | `/overtime/{id}/approve` | the person's approver or `time.manage_all` | Approve overtime `{note?}` |
+| POST | `/overtime/{id}/reject` | the person's approver or `time.manage_all` | Reject overtime `{note}`: only the premium is removed |
 | GET | `/timesheets` | own / `time.read_all` / manager | `user_id` (`me` default, id, `all`), `from`, `to` (bound `week_start`), `status` (multi); newest first |
 | GET | `/timesheets/{id}` | own / `time.read_all` / manager | Sheet with entries, totals, `day_totals` |
 | POST | `/timesheets/{id}/submit` | owner | `open`/`rejected` → `submitted` |
@@ -768,3 +771,87 @@ When the practice does not approve timesheets at all (`require_timesheet_approva
 **every** sheet is exempt in the same way, whoever records it; the approver reminders are skipped and
 switching the setting off approves the sheets already submitted ("Approval switched off"). See
 `docs/modules/foundation.md`, "Approval switches".
+
+## Overtime (APT81, phases B and C)
+
+Code: `app/services/overtime.py` (`OvertimeCapture`, `OvertimeService`), `app/api/v1/overtime.py`,
+`app/repositories/overtime.py` (`TimeOvertimeRepository`); table `time_entry_overtime` (migration 082).
+Tests: `tests/test_overtime_capture.py`, `tests/test_overtime_approval.py`, `tests/test_overtime.py`.
+
+**Switch.** Only while the practice has `overtime_enabled` on. Off: nothing is worked out, nobody is
+asked, and overtime already recorded stays as it is. The 061 multipliers
+(`organizations.overtime_multiplier_bp`, `organization_members.overtime_multiplier_bp`) are retired:
+still saved, never applied. Overtime never changes `charge_rate`, `cost_rate`, `charge_value` or
+`cost_value` of an entry (entries recorded before APT81 keep the values they were saved with until they
+are re-priced). `is_overtime` sent on a create or edit is ignored.
+
+**Detection.** A person's period is the week (Monday to Sunday) or the calendar month of the working hours
+(`staff_hours_bases`, `docs/modules/team-rates.md`) in force on the entry's day; the hours' standard
+minutes are its allowance. Days without working hours have no overtime; when the hours change inside a
+week or month, each set of hours counts only its own days. The period's entries count in order of entry
+date, then the time recorded (`created_at`), then id: minutes beyond the allowance are overtime, and the
+entry that crosses the line is split (only the part beyond it is overtime). `time_entries.is_overtime`
+says whether the entry has an overtime portion. New staff get an open-ended weekly row of their weekly
+capacity when they are added (`MemberRepository.add`).
+
+**Every write re-splits.** Create, bulk create, edit (when the date, minutes, client, job or cost rate
+changed), copy, copy week, timer stop (and timer start with `replace`), correct, remove and delete work
+out the periods they touched (before and after a move) inside their transaction. Writes take the person's
+overtime lock (an advisory lock, `overtime.lock_people`) before any timesheet or entry lock.
+
+**Confirmation.** A write that adds overtime (more overtime minutes across the periods it touched than
+before) without `confirm_overtime: true` is refused, nothing saved:
+
+```json
+409 {"success": false, "error": {"code": "OVERTIME_CONFIRMATION_REQUIRED",
+  "message": "You are adding overtime hours. Are you sure?",
+  "details": {"overtime_minutes": 180, "standard_minutes": 2250,
+              "period_start": "2026-09-07", "period_end": "2026-09-13"}}}
+```
+
+`overtime_minutes` is what the write adds; the period is the first one it adds to. The same request with
+`confirm_overtime: true` is saved and audited `overtime.confirmed` (on the person: `overtime_minutes`,
+`standard_minutes`, `period_start`, `period_end`, `time_entry_ids`); `confirmed_by`/`confirmed_at` are set
+on the rows that grew. Bulk create and copy week ask once for the whole request; a re-split that adds no
+overtime (an edit that moves overtime to a later entry, a delete) is never asked. Days in a locked period
+are never rewritten (their rows keep their minutes; their minutes still count).
+
+**The row.** `time_entry_overtime`: `time_entry_id` (unique; deleted with the entry), `user_id`,
+`overtime_minutes` (> 0), `allocated` (on a job of a client other than the Internal client; false:
+unallocated), `overtime_rate_id` (null when none, or the rate was deleted), `rate_source` (`staff`, `grade`
+or `none`), `overtime_rate` (pence per hour applied: a multiplier of the entry's standard `cost_rate`,
+rounded half up, or the fixed amount; 0 when no rate applies), `overtime_cost` (= minutes at that rate),
+`premium_cost` (overtime cost less the standard cost of the same minutes, never below 0), `status`
+(`pending`, or `approved` straight away when the entry's timesheet needs no approval: person exempt or
+approval off), `confirmed_by`, `confirmed_at`, `decided_by`, `decided_at`, `decision_note`. The rate is
+the person's own overtime rate on the day, else their current grade's, never both. A row whose minutes or
+allocation change goes back to `pending` (or approved when no approval is needed); rows are re-priced only
+when their minutes or allocation change or their own entry was written (changing a rate does not re-cost
+recorded overtime).
+
+### GET /overtime
+
+Any member; whose: everyone's with `time.read_all` or `time.manage_all`, otherwise one's own and the
+people one manages (403 for another `user_id`). Filters `user_id`, `status`, `date_from`/`date_to` (also
+`from`/`to`), `allocated`. Cursor-paginated (`limit`, `cursor`; `meta.next_cursor`), oldest entry first.
+`overtime_rate`, `overtime_cost` and `premium_cost` are null without `report.staff_cost`.
+
+```json
+{"id": "…", "time_entry_id": "…", "user": {"id": "…", "full_name": "Sam Senior"},
+ "entry_date": "2026-09-11", "entry_minutes": 510, "description": null,
+ "job": {"id": "…", "number": "TJ00012", "name": "Job X"}, "client": {"id": "…", "name": "Acme Ltd"},
+ "overtime_minutes": 180, "allocated": true, "rate_source": "grade", "overtime_rate_id": "…",
+ "overtime_rate": 3000, "overtime_cost": 9000, "premium_cost": 3000, "status": "pending",
+ "confirmed_by": "…", "confirmed_at": "…", "decided_by": null, "decided_by_name": null,
+ "decided_at": null, "decision_note": null, "created_at": "…", "updated_at": "…"}
+```
+
+### POST /overtime/{id}/approve, POST /overtime/{id}/reject
+
+Body: approve `{note?}`, reject `{note}` (required, 1-2000; 422 without). Allowed for the person's approver
+(`timesheet.approve` and their manager) or anyone with `time.manage_all`; deciding on one's own overtime
+needs `organization.update` (403 `SELF_APPROVAL_FORBIDDEN`, the timesheet rule). 409
+`INVALID_STATUS_TRANSITION` when it already has that status (a rejected row can be approved and the other
+way round); 409 `PERIOD_LOCKED` in a locked period; 404 for an unknown id. Returns the row as in the list.
+Audited `overtime.approved` / `overtime.rejected` on the time entry (`changes.status`, `note`). Rejecting
+removes only the premium: the hours stay, and the Staff Cost report counts them at their standard cost.

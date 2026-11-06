@@ -23,8 +23,9 @@ from app.schemas.time_views import TimeCorrection, TimeEntryHistoryRead, TimeRem
 from app.services import charge_rates, period_locks
 from app.services.charge_rates import RateQuery
 from app.services.job_budget_alerts import refresh_job_budgets
+from app.services.overtime import OvertimeCapture, lock_people
 from app.services.policy import OrgContext, ensure_any, has_permission
-from app.services.time_entries import BUDGET_FIELDS, TimeEntryService, show_cost
+from app.services.time_entries import BUDGET_FIELDS, OVERTIME_FIELDS, TimeEntryService, show_cost
 from app.services.time_rules import (
     ensure_client_accepts_work,
     ensure_job_open,
@@ -151,6 +152,7 @@ class TimeCorrectionService:
                 raise NotFoundError("Time entry not found.")
             if current.user_id == ctx.user.id and not has_permission(ctx, "organization.update"):
                 raise SelfCorrectionError("You cannot remove your own approved time.")
+            await lock_people(self.session, ctx.organization, [current.user_id])
             [sheet] = await self.sheets.lock_many(org_id, [current.timesheet_id])
             entry = await self.entries.get(org_id, entry_id, for_update=True)
             if entry is None:
@@ -169,11 +171,12 @@ class TimeCorrectionService:
             await self.time._audit(
                 ctx, rctx, "time_entry.deleted", entry, {"reason": reason, "was_approved": True}
             )
-            job_id = entry.job_id
+            job_id, owner, day = entry.job_id, entry.user_id, entry.entry_date
             await self.entries.delete(entry)
             await refresh_job_budgets(
                 self.session, org_id, [job_id], actor_user_id=ctx.user.id, rctx=rctx
             )
+            await OvertimeCapture(self.session).recompute(ctx, rctx, {owner: {day}}, ask=False)
 
     async def correct(
         self, ctx: OrgContext, entry_id: uuid.UUID, data: TimeCorrection, rctx: RequestContext
@@ -190,7 +193,7 @@ class TimeCorrectionService:
                     }
                 ]
             )
-        fields = data.model_fields_set - {"reason"}
+        fields = data.model_fields_set - {"reason", "confirm_overtime"}
         if not fields:
             raise TimeCorrectionEmptyError()
         org = ctx.organization
@@ -201,6 +204,7 @@ class TimeCorrectionService:
                 raise NotFoundError("Time entry not found.")
             if current.user_id == ctx.user.id and not has_permission(ctx, "organization.update"):
                 raise SelfCorrectionError()
+            await lock_people(self.session, org, [current.user_id])
 
             new_date = current.entry_date
             if "entry_date" in fields and data.entry_date is not None:
@@ -315,7 +319,7 @@ class TimeCorrectionService:
                 raise TimeCorrectionEmptyError()
 
             before = snapshot(entry, old_sheet.week_start, _names_of(before_view))
-            old_job_id = entry.job_id
+            old_job_id, old_date = entry.job_id, entry.entry_date
             for name, value in changed.items():
                 setattr(entry, name, value)
             await self.session.flush()
@@ -351,6 +355,14 @@ class TimeCorrectionService:
                     actor_user_id=ctx.user.id,
                     rctx=rctx,
                 )
+            if changed.keys() & OVERTIME_FIELDS:
+                await OvertimeCapture(self.session).recompute(
+                    ctx,
+                    rctx,
+                    {entry.user_id: {old_date, entry.entry_date}},
+                    confirmed=data.confirm_overtime,
+                    written=[entry.id],
+                )
             [view] = await self.entries.views(org_id, [entry.id])
         return TimeEntryRead.from_view(
             view, show_cost=show_cost(ctx), show_note=can_see_note(ctx, view.entry.user_id)
@@ -380,7 +392,6 @@ class TimeCorrectionService:
                         client.id if client else None,
                         job.id if job else None,
                         new_date,
-                        overtime=entry.is_overtime,
                     )
                 ],
             )

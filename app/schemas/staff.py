@@ -98,8 +98,7 @@ class StaffRead(BaseModel):
     weekly_capacity_minutes: int
     chargeable_target_bp: int
     overtime_multiplier_bp: int | None = Field(
-        description="Their own overtime multiplier (basis points, 15000 = 1.5x); null: the "
-        "practice's. Applies only while the practice has overtime on"
+        description="Retired (APT81): kept and stored, never applied; overtime rates replace it"
     )
     start_date: date | None
     leaving_date: date | None
@@ -265,8 +264,8 @@ class StaffUpdate(RequestModel):
         default=None,
         ge=10000,
         le=100000,
-        description="Their own overtime multiplier in basis points (15000 = 1.5x); null clears "
-        "it, so the practice's applies",
+        description="Retired (APT81): kept and stored, never applied; overtime rates replace "
+        "it (10000-100000 or null)",
     )
     start_date: date | None = None
     leaving_date: date | None = None

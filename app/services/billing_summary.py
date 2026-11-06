@@ -256,10 +256,7 @@ class BillingSummaryService:
         values = await value_work(
             self.session,
             org,
-            [
-                Work(p.user_id, client.id, p.job_id, p.entry_date, p.is_overtime, p.minutes)
-                for p in pieces
-            ],
+            [Work(p.user_id, client.id, p.job_id, p.entry_date, p.minutes) for p in pieces],
         )
         fallback = client_markup(client, org)
         found: dict[uuid.UUID | None, Tally] = defaultdict(Tally)

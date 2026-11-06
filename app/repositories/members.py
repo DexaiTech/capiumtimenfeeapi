@@ -10,6 +10,7 @@ from sqlalchemy.orm import contains_eager, selectinload
 from app.core.permissions import OWNER_KEY
 from app.db.models import OrganizationMember, Role, User
 from app.db.models.organization import GONE_STATUSES
+from app.repositories.overtime import StaffHoursRepository
 from app.utils.pagination import Page, PageParams, decode_cursor, encode_cursor
 
 
@@ -18,8 +19,11 @@ class MemberRepository:
         self.session = session
 
     async def add(self, member: OrganizationMember) -> OrganizationMember:
+        """Add a member, with their working hours: an open-ended weekly row of their weekly
+        capacity (APT81: overtime is worked out from it)."""
         self.session.add(member)
         await self.session.flush()
+        await StaffHoursRepository(self.session).add_default(member.organization_id, member.user_id)
         return member
 
     async def get(

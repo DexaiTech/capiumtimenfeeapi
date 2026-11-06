@@ -9,7 +9,8 @@ Rules:
 * New hours are open-ended from ``effective_from``; the person's open-ended hours that started
   earlier end the day before. Any other overlap is refused.
 * Every add, end and delete is in the audit trail (``staff_hours.*``, on the staff member).
-* Nothing prices time from these hours yet.
+* Overtime is worked out from them as time is recorded (``app/services/overtime.py``); time
+  already recorded keeps its overtime when the hours change.
 """
 
 import uuid

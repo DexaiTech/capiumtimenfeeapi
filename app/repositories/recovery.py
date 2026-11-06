@@ -1,7 +1,7 @@
 """Recovery analysis queries (docs/modules/reports.md, "Recovery analysis").
 
-The time of a scope in "pieces": one row per job, client, person, day, overtime flag, billable
-flag and billing status, with the minutes, the value at the rates the time was priced at, its
+The time of a scope in "pieces": one row per job, client, person, day, billable flag and billing
+status, with the minutes, the value at the rates the time was priced at, its
 cost, what the invoices it is on bill it at and the share of the credit notes allocated to those
 invoices. Every query is scoped to one organization; money sums are cast back to ``BIGINT`` so
 every figure arrives as a Python ``int`` (the credited share is a ``numeric`` sum, rounded by the
@@ -88,7 +88,7 @@ class RecoveryRepository:
         billable_only: bool = True,
     ) -> Sequence[RowMapping]:
         """The time in ``period`` that matches ``f`` (billable time only unless asked), grouped by
-        ``job_id, client_id, user_id, entry_date, is_overtime, is_billable, billing_status``:
+        ``job_id, client_id, user_id, entry_date, is_billable, billing_status``:
         ``minutes``, ``charge_value``, ``cost_value``, ``billed_value`` (the live allocation of the
         time to an invoice, issued or draft; 0 for time that is unbilled or written off) and
         ``credited`` (the time's share, by value, of the net of the credit notes allocated to its
@@ -140,7 +140,6 @@ class RecoveryRepository:
             TimeEntry.client_id,
             TimeEntry.user_id,
             TimeEntry.entry_date,
-            TimeEntry.is_overtime,
             TimeEntry.is_billable,
             TimeEntry.billing_status,
         )

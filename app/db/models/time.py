@@ -170,7 +170,8 @@ class TimeEntry(Base, IdMixin, OrgScopedMixin, TimestampMixin):
     # Never printed on an invoice; seen by the owner and people who read or manage all time.
     internal_note: Mapped[str | None] = mapped_column(Text)
     is_billable: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
-    # Overtime (a practice setting): the rates below already include the overtime multiplier.
+    # Part of the entry is overtime (``time_entry_overtime``, APT81). The rates below are the
+    # standard ones; entries recorded before APT81 may still include the retired multiplier.
     is_overtime: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
     charge_rate: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default=text("0"))
     cost_rate: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default=text("0"))

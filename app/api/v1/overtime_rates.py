@@ -32,7 +32,6 @@ def get_overtime_rate_service(session: SessionDep) -> OvertimeRateService:
 
 
 OvertimeServiceDep = Annotated[OvertimeRateService, Depends(get_overtime_rate_service)]
-_NOT_PRICED = " Time is not priced from overtime rates yet."
 
 
 @router.get(
@@ -43,9 +42,7 @@ _NOT_PRICED = " Time is not priced from overtime rates yet."
         "name), newest period first. A rate is a `multiplier` of the standard cost rate "
         "(`multiplier_bp`, 15000 = 1.5x) or a `fixed` amount (`rate`, pence per hour). Filters: "
         "`level` (`grade` | `staff`), `user_id`, `grade_id`, `status` (`current`, `future` or "
-        "`ended`, today in the practice time zone). Not paginated."
-        + _NOT_PRICED
-        + " Requires `rate.read`."
+        "`ended`, today in the practice time zone). Not paginated. Requires `rate.read`."
     ),
     responses=error_responses(403, 404),
 )
@@ -81,7 +78,7 @@ async def list_overtime_rates(
         "409 `RATE_OVERLAP` when another rate of the same grade or staff member covers any day "
         "of the period (`details.conflicts` lists them); 409 `MEMBER_REMOVED` for a person who "
         "has left. A staff rate overrides the grade rate; they never stack. `rate` is null in "
-        "the response without `rate.read`." + _NOT_PRICED + " Requires `rate.manage`."
+        "the response without `rate.read`." + " Requires `rate.manage`."
     ),
     responses=error_responses(403, 404, 409),
 )
@@ -104,7 +101,7 @@ async def create_overtime_rate(
         "The one overtime rate of a staff member (`user_id`) on `date` (default today): their "
         "own staff rate, else their grade's rate, else none (`source` null, `rate` null). A "
         "staff rate overrides the grade rate; they never stack. An unknown staff member is "
-        "404. Nothing is written." + _NOT_PRICED + " Requires `rate.read`."
+        "404. Nothing is written. Requires `rate.read`."
     ),
     responses=error_responses(403, 404),
 )
@@ -151,7 +148,8 @@ async def end_overtime_rate(
     "/overtime-rates/{rate_id}",
     summary="Delete an overtime rate",
     description=(
-        "Deletes the rate. No time is priced from overtime rates yet, so no rate is in use. "
+        "Deletes the rate. Overtime already costed at it keeps its rate and cost (its "
+        "`overtime_rate_id` becomes null). "
         "Unknown ids are 404. Requires `rate.manage`."
     ),
     responses=error_responses(403, 404),
