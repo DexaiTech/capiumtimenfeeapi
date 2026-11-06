@@ -186,3 +186,45 @@ permission; every change listed in requirement 5 is in the audit trail.
 
 **Size (honest): Large, not Medium** — about 10–15 API dev-days and 10–14 UI dev-days (4–6 weeks),
 which is why we propose four phases.
+
+## 15. Decisions and Phase A contract (2026-11-06)
+
+Decided: "role" = **grade** (§11.1); APT84 first, then APT81 (APT84's migration 080 comes before
+this one). **Phase A is set-up only — no change to how time is priced.** Retiring the 061
+multiplier moves to Phase B, because it changes charges on recorded overtime and needs the client's
+answer to §11.9. Assumed (§11.2): standard hours start from each person's current weekly capacity.
+
+### Phase A — API (migration 081, after 080)
+
+- `staff_hours_bases`: `id`, `organization_id`, `user_id`, `basis` (`weekly`|`monthly`),
+  `standard_minutes` (> 0), `effective_from`, `effective_to` (null = open-ended), audit columns;
+  no overlapping periods per person (exclusion constraint, 409 `HOURS_OVERLAP`). Backfill: one
+  open-ended `weekly` row per member from `weekly_capacity_minutes`, effective from the member's
+  start date, else the day they joined.
+- `overtime_rates`: `id`, `organization_id`, `level` (`grade`|`staff`), `grade_id` / `user_id`
+  (exactly one, by level), `mode` (`multiplier`|`fixed`), `multiplier_bp` (10000–100000, for
+  multiplier) / `rate` (pence per hour, for fixed), `effective_from`, `effective_to`; no
+  overlapping periods per scope (409 `RATE_OVERLAP`, like rate rules).
+- Endpoints (organization-scoped; summary + description on each):
+  - `GET /staff/{user_id}/hours` (history, current first); `POST /staff/{user_id}/hours`
+    `{basis, standard_minutes, effective_from}` — ends the open-ended period the day before;
+    `DELETE /staff/{user_id}/hours/{id}`. Read `member.read`; write `member.update`.
+  - `GET /overtime-rates` (filters `level`, `user_id`, `grade_id`, `status` current|future|ended);
+    `POST /overtime-rates`; `PATCH /overtime-rates/{id}` `{effective_to}` (end a rate);
+    `DELETE /overtime-rates/{id}` (a rate not yet used). Read `rate.read`; write `rate.manage`.
+  - `GET /overtime-rates/resolve?user_id=&date=` → the one rate that applies (staff overrides
+    grade, never both) or none, with its source.
+- Audit: `staff_hours.added|ended|deleted`, `overtime_rate.added|ended|deleted`.
+- Nothing else changes: pricing, the overtime switch and the per-staff multiplier stay as they are
+  until Phase B.
+
+### Phase A — UI
+
+- Team → Rates → **Overtime Rates** page (reusing the Cost/Charge-out Rates patterns: list with
+  status, add panel — grade or staff, multiplier "× the cost rate" or fixed "£ per hour", effective
+  dates — end and delete), gated by `rate.read` / `rate.manage`.
+- Staff detail page: **Working hours** card — current basis and standard hours, dated history,
+  "Change working hours" panel (weekly / monthly, standard hours h:mm, effective from), gated by
+  `member.read` / `member.update`.
+- No change to Settings → Rates (overtime switch), Edit staff (multiplier) or time entry until
+  Phase B.
