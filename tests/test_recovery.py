@@ -192,7 +192,7 @@ async def test_staff_rates_only_values_people_without_their_grade_rate(client):
     by_person = await report(client, p.owner, p.org, NAME, group_by="person")
     assert row_named(by_person, "Pat Partner")["staff_value"] == 150_000
 
-    await set_org(p.org, rate_mode="staff_only")
+    await set_org(p.org, wip_valuation_sources=["client", "service", "staff"])
     by_person = await report(client, p.owner, p.org, NAME, group_by="person")
     assert row_named(by_person, "Sam Semi-Senior")["staff_value"] == 50_000
     # Ten hours at the practice default £20, not the grade's £150.

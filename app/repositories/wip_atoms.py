@@ -90,6 +90,8 @@ class WipAtom:
     minutes: int = 0
     charge_value: int | None = None
     rate: int | None = None
+    # Time: the source that priced it (``time_entries.rate_source``; ``none``: "No rate").
+    rate_source: str | None = None
     description: str | None = None
     person_user_id: uuid.UUID | None = None
     supplier: str | None = None
@@ -364,6 +366,7 @@ class WipAtomRepository:
                 Job.service_id,
                 Job.partner_user_id,
                 Job.manager_user_id,
+                TimeEntry.rate_source,
             )
             .select_from(TimeEntry)
             .join(
@@ -434,6 +437,7 @@ class WipAtomRepository:
                     minutes=int(row[5]),
                     charge_value=int(row[6]),
                     rate=int(row[7]),
+                    rate_source=row[20],
                     description=row[8],
                     person_user_id=row[3],
                     activity_code_id=row[9],

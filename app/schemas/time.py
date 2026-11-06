@@ -82,7 +82,8 @@ class TimeEntryRead(BaseModel):
         description=(
             "Level of the rate ladder that priced the entry: client_service_staff, "
             "client_service, client_staff, client, job, service_staff, service_grade, service, "
-            "staff, grade or default; "
+            'staff, grade, default or none ("No rate": no source switched on in the WIP '
+            "valuation had a rate and the practice default is 0); "
             "null for time recorded before the ladder existed"
         ),
     )

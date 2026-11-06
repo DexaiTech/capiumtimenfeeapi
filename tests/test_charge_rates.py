@@ -97,8 +97,9 @@ async def test_staff_rate_history_by_entry_date(client: AsyncClient) -> None:
             session, organization, [RateQuery(person.id, None, None, d) for d in cases]
         )
         assert [(r.charge_rate, r.cost_rate) for r in found] == list(cases.values())
+        # The practice default is 0 here: "No rate" (APT84).
         assert [r.source for r in found] == [
-            "default",
+            "none",
             "staff",
             "staff",
             "staff",

@@ -13,14 +13,19 @@ The charge-out rate of a time entry is the first that exists of, most specific f
 6. ``staff``: a rule for the person,
 7. ``grade``: a rule for the person's grade, else the grade's default charge-out rate,
 
-and finally ``default``: ``organizations.default_charge_rate``. A rule counts only on the days
-inside its effective period. In the practice's ``grade_only`` rate mode level 6 is skipped, so a
-person's own rate never prices time and the grade's rate does (levels 1-5 are unchanged). In
-the ``staff_only`` rate mode the grade rates (``service_grade`` and level 7) are skipped, so a
-person without a rate of their own is priced at the practice default. The cost rate is the
-person's ``staff`` cost rule, else the grade's cost rule or default cost rate, else
-(``staff_first``) the person's first cost rule when the day is before it starts, else 0, in
-every mode. The cost never depends on the client, the job or how the job is billed.
+then ``default``: ``organizations.default_charge_rate`` when it is above 0, else ``none``: 0,
+"No rate". A rule counts only on the days inside its effective period.
+
+WIP valuation (APT84): the levels come in four groups, tried in the practice's order
+(``organizations.wip_valuation_sources``): ``client`` (levels 1-4, the job's own rate included),
+``service`` (5), ``staff`` (6) and ``grade`` (7). A group left out of the order is switched off: it
+never prices time, and its steps come back after the others as not applicable, with the reason.
+Inside ``service``, ``service_grade`` applies only while ``grade`` is on. The former rate modes are
+the orders ``staff_first`` = client, service, staff, grade; ``grade_only`` = client, service, grade;
+``staff_only`` = client, service, staff. The cost rate is the person's ``staff`` cost rule, else
+the grade's cost rule or default cost rate, else (``staff_first``) the person's first cost rule
+when the day is before it starts, else 0, whatever the order. The cost never depends on the
+client, the job or how the job is billed.
 
 The entry's service is the service of its job. The person's grade is their current grade.
 
@@ -37,6 +42,7 @@ from datetime import date
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Organization
+from app.db.models.organization import WIP_VALUATION_SOURCES
 from app.repositories.time_rates import JobRate, RateLookupRepository, RuleKey, RuleRow
 
 CHARGE_SOURCES = (
@@ -51,6 +57,7 @@ CHARGE_SOURCES = (
     "staff",
     "grade",
     "default",
+    "none",
 )
 # Level 5 has three sources: the person's own rate for the service, else the grade's, else the
 # service's rate for everyone.
@@ -65,7 +72,16 @@ LEVEL_LABELS = {
     6: "Staff rate",
     7: "Grade rate",
 }
-STAFF_ONLY_REASON = "This practice prices by staff rates only: grade rates are not used."
+OFF_REASON = "Switched off in WIP valuation."
+GRADE_OFF_REASON = "Grade rates are switched off in WIP valuation."
+
+
+def service_sources(sources: Sequence[str]) -> tuple[str, ...]:
+    """The sources of level 5 that apply under a WIP valuation order: the grade's rate for the
+    service only while grade rates are on."""
+    if "grade" in sources:
+        return ("service_staff", "service_grade", "service")
+    return ("service_staff", "service")
 
 
 @dataclass(frozen=True, slots=True)
@@ -171,12 +187,14 @@ class RateBook:
         defaults: dict[uuid.UUID, tuple[int | None, int | None]],
         rules: dict[RuleKey, list[RuleRow]],
         overtime: dict[uuid.UUID, int | None] | None = None,
+        sources: Sequence[str] | None = None,
     ) -> None:
         self.default_rate = organization.default_charge_rate
         self.overtime_enabled = organization.overtime_enabled
         self.overtime_default_bp = organization.overtime_multiplier_bp
         self.overtime = overtime or {}
-        self.rate_mode = organization.rate_mode
+        # The WIP valuation order; ``sources`` overrides the practice's (what-if previews).
+        self.sources = tuple(organization.wip_valuation_sources if sources is None else sources)
         self.jobs = jobs
         self.grades = grades
         self.defaults = defaults
@@ -184,7 +202,11 @@ class RateBook:
 
     @classmethod
     async def load(
-        cls, session: AsyncSession, organization: Organization, queries: Sequence[RateQuery]
+        cls,
+        session: AsyncSession,
+        organization: Organization,
+        queries: Sequence[RateQuery],
+        sources: Sequence[str] | None = None,
     ) -> "RateBook":
         repo = RateLookupRepository(session)
         org_id = organization.id
@@ -211,7 +233,7 @@ class RateBook:
             overtime = await repo.member_overtime(
                 org_id, {q.user_id for q in queries if q.overtime}
             )
-        return cls(organization, jobs, grades, defaults, rules, overtime)
+        return cls(organization, jobs, grades, defaults, rules, overtime, sources)
 
     def context(self, query: RateQuery) -> _Context:
         job = self.jobs.get(query.job_id) if query.job_id else None
@@ -241,11 +263,40 @@ class RateBook:
         return None
 
     def charge_steps(self, c: _Context) -> Iterator[Step]:
-        """The charge-out levels in order of precedence. Lazy: stop at the first that exists."""
-        client, service, user, grade, day = c.client_id, c.service_id, c.user_id, c.grade_id, c.day
-        both = client is not None and service is not None
+        """The charge-out levels in order of precedence: the groups switched on in the WIP
+        valuation order, then those switched off, then the practice default and "No rate".
+        Lazy: stop at the first that exists."""
+        groups = {
+            "client": self._client_steps,
+            "service": self._service_steps,
+            "staff": self._staff_steps,
+            "grade": self._grade_steps,
+        }
+        for name in self.sources:
+            yield from groups[name](c, True)
+        for name in WIP_VALUATION_SOURCES:
+            if name not in self.sources:
+                yield from groups[name](c, False)
+        default = self.default_rate
+        yield _step(
+            None,
+            "default",
+            "Practice default rate",
+            applicable=default > 0,
+            reason="The practice default rate is 0.",
+            rate=default if default > 0 else None,
+            origin="practice_default" if default > 0 else None,
+        )
+        yield _step(None, "none", "No rate", rate=0, origin="none")
+
+    def _client_steps(self, c: _Context, on: bool) -> Iterator[Step]:
+        """Levels 1-4: the rates agreed with the client, then the job's own rate."""
+        client, service, user, day = c.client_id, c.service_id, c.user_id, c.day
+        both = on and client is not None and service is not None
         missing = (
-            "This time has no client and no service."
+            OFF_REASON
+            if not on
+            else "This time has no client and no service."
             if client is None and service is None
             else "This time has no client."
             if client is None
@@ -269,7 +320,7 @@ class RateBook:
         )
         rule3: RuleRow | None = None
         source3 = "client_staff"
-        if client is not None:
+        if on and client is not None:
             rule3 = self._rule("charge", client, None, user, None, day)
             if rule3 is None:
                 rule3 = self._rule("charge", client, None, None, None, day)
@@ -279,30 +330,34 @@ class RateBook:
             3,
             source3,
             LEVEL_LABELS[3] if source3 == "client_staff" else "Client rate for everyone",
-            applicable=client is not None,
-            reason="This time has no client.",
+            applicable=on and client is not None,
+            reason=OFF_REASON if not on else "This time has no client.",
             rule=rule3,
         )
-        job = c.job
+        job = c.job if on else None
         yield _step(
             4,
             "job",
             LEVEL_LABELS[4],
             applicable=job is not None,
-            reason="This time is not on a job.",
+            reason=OFF_REASON if not on else "This time is not on a job.",
             rate=job.hourly_rate if job is not None else None,
             origin="job" if job is not None and job.hourly_rate is not None else None,
         )
-        # The person's own rate for the service wins over the grade's rate for the service, which
-        # wins over the service's rate for everyone.
-        staff_only = self.rate_mode == "staff_only"
+
+    def _service_steps(self, c: _Context, on: bool) -> Iterator[Step]:
+        """Level 5: the person's own rate for the service wins over the grade's rate for the
+        service (only while grade rates are on), which wins over the service's rate for
+        everyone."""
+        service, user, grade, day = c.service_id, c.user_id, c.grade_id, c.day
+        grade_on = "grade" in self.sources
         rule5: RuleRow | None = None
         source5 = "service_grade"
-        if service is not None:
+        if on and service is not None:
             rule5 = self._rule("charge", None, service, user, None, day)
             if rule5 is not None:
                 source5 = "service_staff"
-            elif grade is not None and not staff_only:
+            elif grade is not None and grade_on:
                 rule5 = self._rule("charge", None, service, None, grade, day)
             if rule5 is None:
                 rule5 = self._rule("charge", None, service, None, None, day)
@@ -313,44 +368,44 @@ class RateBook:
             5,
             source5,
             labels5.get(source5, LEVEL_LABELS[5]),
-            applicable=service is not None
-            and (rule5 is not None or (grade is not None and not staff_only)),
-            reason="The job has no service."
+            applicable=on
+            and service is not None
+            and (rule5 is not None or (grade is not None and grade_on)),
+            reason=OFF_REASON
+            if not on
+            else "The job has no service."
             if service is None
-            else STAFF_ONLY_REASON
-            if staff_only
+            else GRADE_OFF_REASON
+            if not grade_on
             else "This person has no grade.",
             rule=rule5,
         )
-        grade_only = self.rate_mode == "grade_only"
+
+    def _staff_steps(self, c: _Context, on: bool) -> Iterator[Step]:
+        """Level 6: the person's own rate."""
         yield _step(
             6,
             "staff",
             LEVEL_LABELS[6],
-            applicable=not grade_only,
-            reason="This practice prices by grade only: staff rates are not used.",
-            rule=None if grade_only else self._rule("charge", None, None, user, None, day),
+            applicable=on,
+            reason=OFF_REASON,
+            rule=self._rule("charge", None, None, c.user_id, None, c.day) if on else None,
         )
-        # In ``staff_only`` mode the person's grade does not price time.
-        graded = None if staff_only else grade
-        grade_rule = self._rule("charge", None, None, None, graded, day) if graded else None
+
+    def _grade_steps(self, c: _Context, on: bool) -> Iterator[Step]:
+        """Level 7: a rule for the person's grade, else the grade's default charge-out rate."""
+        graded = c.grade_id if on else None
+        grade_rule = self._rule("charge", None, None, None, graded, c.day) if graded else None
         grade_default = self.defaults.get(graded, (None, None))[0] if graded else None
         yield _step(
             7,
             "grade",
             LEVEL_LABELS[7],
             applicable=graded is not None,
-            reason=STAFF_ONLY_REASON if staff_only else "This person has no grade.",
+            reason=OFF_REASON if not on else "This person has no grade.",
             rule=grade_rule,
             rate=grade_default if grade_rule is None else None,
             origin="grade_default" if grade_rule is None and grade_default is not None else None,
-        )
-        yield _step(
-            None,
-            "default",
-            "Practice default rate",
-            rate=self.default_rate,
-            origin="practice_default",
         )
 
     def cost_steps(self, c: _Context) -> Iterator[Step]:
@@ -450,12 +505,16 @@ class RateBook:
 
 
 async def resolve_many(
-    session: AsyncSession, organization: Organization, queries: Sequence[RateQuery]
+    session: AsyncSession,
+    organization: Organization,
+    queries: Sequence[RateQuery],
+    sources: Sequence[str] | None = None,
 ) -> list[ResolvedRate]:
-    """Resolve many entries with four queries in total, in the order given."""
+    """Resolve many entries with four queries in total, in the order given. ``sources``: a WIP
+    valuation order to price by instead of the practice's (a preview)."""
     if not queries:
         return []
-    book = await RateBook.load(session, organization, queries)
+    book = await RateBook.load(session, organization, queries, sources)
     return [book.resolve(q) for q in queries]
 
 

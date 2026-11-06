@@ -9,7 +9,7 @@ from zoneinfo import available_timezones
 from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 
 from app.db.models import Organization, OrganizationMember, Permission, Role
-from app.db.models.organization import FixedFeeWipMode, RateMode
+from app.db.models.organization import FixedFeeWipMode, RateMode, WipValuationSource
 from app.schemas.common import RequestModel
 from app.schemas.user import UserRead
 from app.utils.reminder_schedule import EARLIEST, LATEST, MAX_STEPS, effective_schedule
@@ -20,6 +20,18 @@ _RATE_ORDER = (
     "The order in which the recovery analysis looks for the rate the work could have been billed "
     "at, first to last: `client_job` (the rate agreed with the client for the job), `task` (the "
     "rate set against the job's service), `staff` (the person's charge-out rate). Each once"
+)
+_WIP_SOURCES = (
+    "The WIP valuation: the rate sources switched on, in the order they price time, first to "
+    "last: `client` (the rates agreed with the client and the job's own hourly rate), `service` "
+    "(the rates set against the job's service; its grade rate only while `grade` is on), `grade` "
+    "(the grade's rate) and `staff` (the person's own rate). A source left out is switched off. "
+    "When none of them has a rate the practice default applies, and when that is 0 the time is "
+    'valued at 0 with `rate_source` `none` ("No rate")'
+)
+_RATE_MODE_DEPRECATED = (
+    "Deprecated: read `wip_valuation_sources`. Derived from it: `grade_only` when grade rates are "
+    "on and staff rates off, `staff_only` the other way round, else `staff_first`"
 )
 
 
@@ -112,14 +124,8 @@ class OrganizationRead(BaseModel):
     expense_markup_bp: int = Field(
         description="Basis points added when an expense is recharged to the client (1000 = 10%)"
     )
-    rate_mode: RateMode = Field(
-        description=(
-            "Which rates price time: `staff_first` uses a staff member's own rate before their "
-            "grade's, `grade_only` skips the staff-level rate so the grade rate applies, "
-            "`staff_only` skips the grade rates so a staff member without their own rate is "
-            "charged the practice default"
-        )
-    )
+    wip_valuation_sources: list[WipValuationSource] = Field(description=_WIP_SOURCES)
+    rate_mode: RateMode = Field(description=_RATE_MODE_DEPRECATED)
     overtime_enabled: bool = Field(
         description="Whether overtime is on: time can then be marked as overtime and is priced "
         "at its normal rates times the multiplier"
@@ -194,6 +200,7 @@ class OrganizationRead(BaseModel):
             ),
             mileage_rate=organization.mileage_rate,
             expense_markup_bp=organization.expense_markup_bp,
+            wip_valuation_sources=organization.wip_valuation_sources,
             rate_mode=organization.rate_mode,
             overtime_enabled=organization.overtime_enabled,
             overtime_multiplier_bp=organization.overtime_multiplier_bp,
@@ -491,10 +498,10 @@ class OrganizationUpdate(RequestModel):
     rate_mode: RateMode | None = Field(
         default=None,
         description=(
-            "`staff_first`: a staff member's own rate comes before their grade's; `grade_only`: "
-            "the staff-level rate is skipped and the grade rate applies; `staff_only`: the grade "
-            "rates are skipped and a staff member without their own rate is charged the practice "
-            "default"
+            "Deprecated: use `PUT /organizations/{id}/wip-valuation`. Sets the WIP valuation the "
+            "mode stands for: `staff_first` client, service, staff, grade; `grade_only` client, "
+            "service, grade; `staff_only` client, service, staff. Sending the mode the practice "
+            "already has changes nothing. Recorded time is not re-valued"
         ),
     )
     overtime_enabled: bool | None = Field(
@@ -604,6 +611,58 @@ class OrganizationUpdate(RequestModel):
     def _no_nulls(self) -> Self:
         _reject_nulls(self, *(f for f in type(self).model_fields if f not in _NULLABLE_SETTINGS))
         return self
+
+
+class WipValuationPreviewRequest(RequestModel):
+    sources: list[Annotated[str, Field(max_length=20)]] = Field(
+        max_length=10,
+        description="The WIP valuation to preview: `client`, `service`, `grade` and/or `staff`, "
+        "each at most once, in priority order; at least one",
+    )
+
+
+class WipValuationUpdate(RequestModel):
+    sources: list[Annotated[str, Field(max_length=20)]] = Field(
+        max_length=10,
+        description="The new WIP valuation: `client`, `service`, `grade` and/or `staff`, each at "
+        "most once, in priority order; at least one (the sources left out are switched off)",
+    )
+    revalue: bool = Field(
+        default=False,
+        description="Also re-value the practice's unbilled time by the new order, in the same "
+        "transaction (billed, in-draft, written-off and period-locked time keeps its value)",
+    )
+
+
+class WipValuationSkipped(BaseModel):
+    """Time a re-value leaves alone, by reason."""
+
+    billed: int = Field(description="Billed time entries")
+    in_draft: int = Field(description="Time entries on a draft invoice")
+    locked: int = Field(description="Unbilled time entries in a locked period")
+    written_off: int = Field(description="Written-off time entries")
+
+
+class WipValuationPreview(BaseModel):
+    """What re-valuing the practice's unbilled time by an order would do. Nothing is saved."""
+
+    entries_changed: int | None = Field(
+        description="Unbilled time entries whose rate, value or rate source would change; null "
+        "when `too_many`"
+    )
+    wip_before: int | None = Field(
+        description="Pence: the value of the unbilled time that would be re-valued, now; null "
+        "when `too_many`"
+    )
+    wip_after: int | None = Field(
+        description="Pence: its value by the new order; null when `too_many`"
+    )
+    skipped: WipValuationSkipped | None = Field(description="Time left alone; null when `too_many`")
+    too_many: bool = Field(
+        description="More unbilled time entries than one re-value takes (20,000): the order can "
+        "be saved without re-valuing, and the time re-rated in parts (Team > Rates > Change Rates "
+        "on Past Time)"
+    )
 
 
 class OrganizationDelete(RequestModel):

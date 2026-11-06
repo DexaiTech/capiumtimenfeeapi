@@ -13,7 +13,10 @@ it is today. It is a two-step operation:
    (``rate_rerun_items``) and an audit row.
 
 Only ``unbilled`` entries are touched: billed, in-draft and written-off time never changes,
-and neither does time in a locked period (``app/services/period_locks.py``). The V1 endpoint
+and neither does time in a locked period (``app/services/period_locks.py``). An entry changes
+when its charge-out or cost rate does, or when the source that prices it does (APT84: the WIP
+valuation order can move an entry to another source at the same rate; an entry recorded before
+sources were recorded changes only when its rates do). The V1 endpoint
 ``POST /rates/revalue`` applies directly, without a preview, through the same engine.
 """
 
@@ -22,6 +25,7 @@ import hashlib
 import hmac
 import json
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -199,7 +203,14 @@ class RerateService:
 
     # --- The plan -------------------------------------------------------------------------
 
-    async def _plan(self, ctx: OrgContext, scope: RerateScope, *, lock: bool) -> Plan:
+    async def _plan(
+        self,
+        ctx: OrgContext,
+        scope: RerateScope,
+        *,
+        lock: bool,
+        sources: Sequence[str] | None = None,
+    ) -> Plan:
         org = ctx.organization
         filters = scope_filters(scope)
         if await self.repo.count_unbilled(org.id, filters) > MAX_ENTRIES:
@@ -224,6 +235,7 @@ class RerateService:
                     )
                     for e in priced
                 ],
+                sources,
             )
         )
         plan_entries: list[PlanEntry] = []
@@ -244,6 +256,8 @@ class RerateService:
                 continue
             rate = next(resolved)
             changed = (entry.charge_rate, entry.cost_rate) != (rate.charge_rate, rate.cost_rate)
+            # A new source at the same rates is a change too (not for time without a source).
+            changed = changed or entry.rate_source not in (None, rate.source)
             plan_entries.append(
                 PlanEntry(
                     entry,
@@ -340,14 +354,15 @@ class RerateService:
         )
 
     async def impact(
-        self, ctx: OrgContext, scope: RerateScope | None
+        self, ctx: OrgContext, scope: RerateScope | None, sources: Sequence[str] | None = None
     ) -> tuple[RerateTotals, RerateSkipped]:
         """What re-rating the scope (None: no time at all) would do as the rates stand in the
-        caller's transaction. Nothing is written."""
+        caller's transaction, priced by the WIP valuation order ``sources`` (None: the
+        practice's). Nothing is written."""
         if scope is None:
             plan = Plan([], dict.fromkeys(RerateSkipped.model_fields, 0), "")
         else:
-            plan = await self._plan(ctx, scope, lock=False)
+            plan = await self._plan(ctx, scope, lock=False, sources=sources)
         show_cost = policy.has_permission(ctx, "rate.read")
         return self._totals(plan, show_cost=show_cost), RerateSkipped(**plan.skipped)
 

@@ -269,6 +269,7 @@ class WipService:
                 minutes=e.minutes,
                 hours=hours_of(e.minutes),
                 rate=e.charge_rate,
+                rate_source=e.rate_source,
                 value=e.charge_value,
                 activity_code_id=e.activity_code_id,
             )

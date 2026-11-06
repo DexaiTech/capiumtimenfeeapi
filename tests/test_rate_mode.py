@@ -3,12 +3,17 @@ staff-level rate (level 6 of the charge-out ladder) so the grade rate applies, o
 (APT79), which skips the grade rates (the grade's rate for the service and level 7) so a person
 without a rate of their own is priced at the practice default. The resolver, the rate preview,
 time entries, the staff list and re-rating all use it; the client, job and service rates and the
-cost ladder do not change."""
+cost ladder do not change.
+
+APT84: the modes are the WIP valuation orders they stand for (``RATE_MODE_SOURCES``); a new
+practice tries the grade before the staff rate, so these tests start from the staff-first order."""
 
 from datetime import date
 
 from httpx import AsyncClient
 
+from app.db.models.organization import RATE_MODE_SOURCES
+from app.services.charge_rates import GRADE_OFF_REASON, OFF_REASON
 from tests.clients_helpers import sql
 from tests.domain_factories import (
     make_client,
@@ -41,7 +46,13 @@ async def world(client: AsyncClient):
         client, owner, org, kind="charge", user_id=person.id, rate=4_600, effective_from=FROM
     )
     await new_rate(client, owner, org, kind="charge", grade_id=snr, rate=3_700, effective_from=FROM)
+    await set_mode(org, "staff_first")
     return owner, org, person, acme, svc, job
+
+
+async def set_mode(org: dict, mode: str) -> None:
+    """The WIP valuation the rate mode stands for, straight in the database."""
+    await set_practice(org, wip_valuation_sources=list(RATE_MODE_SOURCES[mode]))
 
 
 async def resolved(client: AsyncClient, actor, org: dict, person, **params) -> dict:
@@ -59,7 +70,10 @@ async def switch(client: AsyncClient, actor, org: dict, mode: str):
 
 async def test_a_new_practice_prices_staff_first(client: AsyncClient) -> None:
     owner, org, person, *_ = await world(client)
+    # A new practice reads as staff first; its order (APT84) puts the grade before the staff rate.
     assert org["rate_mode"] == "staff_first"
+    assert org["wip_valuation_sources"] == ["client", "service", "grade", "staff"]
+    # The staff-first order (set by ``world``) prices the person's own rate first.
     found = await resolved(client, owner, org, person)
     assert (found["charge_rate"], found["charge_source"]) == (4_600, "staff")
     steps = found["charge_ladder"]
@@ -78,10 +92,12 @@ async def test_grade_only_skips_the_staff_rate_and_the_grade_rate_applies(
     found = await resolved(client, owner, org, person)
     assert (found["charge_rate"], found["charge_source"]) == (3_700, "grade")
     steps = found["charge_ladder"]
-    assert [i for i, s in enumerate(steps) if s["selected"]] == [6]
+    # APT84: the grade comes next and level 6, switched off, after the sources that are on.
+    assert [i for i, s in enumerate(steps) if s["selected"]] == [5]
     # Level 6 is shown, not applicable, and says why; the staff rule still exists as data.
-    assert steps[5]["applicable"] is False and steps[5]["exists"] is False
-    assert "grade only" in steps[5]["reason"]
+    assert steps[6]["level"] == 6
+    assert steps[6]["applicable"] is False and steps[6]["exists"] is False
+    assert steps[6]["reason"] == OFF_REASON
 
     # The grade rate is the only thing left to fall back on: the personal rate never shows through.
     set_to = await sql("SELECT id FROM rate_rules WHERE level = 'grade'")
@@ -113,7 +129,7 @@ async def test_staff_only_prices_by_the_person_s_own_rate_else_the_practice_defa
     assert [i for i, s in enumerate(steps) if s["selected"]] == [5]
     # The grade level is shown, not applicable, and says why.
     assert steps[6]["applicable"] is False and steps[6]["exists"] is False
-    assert "staff rates only" in steps[6]["reason"]
+    assert steps[6]["reason"] == OFF_REASON
 
     # Someone with no rate of their own is charged the practice default, never the grade's rate
     # (a grade rule or the grade's default rate).
@@ -124,7 +140,8 @@ async def test_staff_only_prices_by_the_person_s_own_rate_else_the_practice_defa
     assert (found["charge_rate"], found["charge_source"]) == (2_000, "default")
     steps = found["charge_ladder"]
     assert steps[6]["applicable"] is False and steps[6]["exists"] is False
-    assert [i for i, s in enumerate(steps) if s["selected"]] == [len(steps) - 1]
+    # The practice default; "No rate" (APT84) comes after it.
+    assert [i for i, s in enumerate(steps) if s["selected"]] == [len(steps) - 2]
 
     # Back to staff first: the grade rate applies to them again.
     assert (await switch(client, owner, org, "staff_first")).status_code == 200
@@ -137,7 +154,7 @@ async def test_staff_only_keeps_the_client_job_and_service_rates_but_not_the_gra
 ) -> None:
     owner, org, person, acme, svc, job = await world(client)
     snr = await grade_id(org, "SNR")
-    await set_practice(org, rate_mode="staff_only")
+    await set_mode(org, "staff_only")
 
     # The grade's rate for the service is a grade rate: skipped, so the person's own rate applies.
     await new_rate(
@@ -154,7 +171,7 @@ async def test_staff_only_keeps_the_client_job_and_service_rates_but_not_the_gra
     assert (found["charge_rate"], found["charge_source"]) == (4_600, "staff")
     level5 = found["charge_ladder"][4]
     assert level5["applicable"] is False and level5["exists"] is False
-    assert "staff rates only" in level5["reason"]
+    assert level5["reason"] == GRADE_OFF_REASON
 
     # Rates that are not about the grade still apply, most specific first.
     ladder = [
@@ -203,7 +220,7 @@ async def test_levels_one_to_five_are_the_same_in_both_modes(client: AsyncClient
             rule_ids[source] = made["id"]
     for source, _scope, rate in ladder:
         for mode in ("staff_first", "grade_only"):
-            await set_practice(org, rate_mode=mode)
+            await set_mode(org, mode)
             found = await resolved(client, owner, org, person, job_id=job.id)
             assert (found["charge_rate"], found["charge_source"]) == (rate, source), (mode, source)
         if source == "job":
@@ -214,10 +231,10 @@ async def test_levels_one_to_five_are_the_same_in_both_modes(client: AsyncClient
             )
             assert gone.status_code == 200, gone.text
     # Nothing above the staff level is left: now the two modes differ.
-    await set_practice(org, rate_mode="staff_first")
+    await set_mode(org, "staff_first")
     found = await resolved(client, owner, org, person, job_id=job.id)
     assert (found["charge_rate"], found["charge_source"]) == (4_600, "staff")
-    await set_practice(org, rate_mode="grade_only")
+    await set_mode(org, "grade_only")
     found = await resolved(client, owner, org, person, job_id=job.id)
     assert (found["charge_rate"], found["charge_source"]) == (3_700, "grade")
 
@@ -228,14 +245,14 @@ async def test_the_cost_rate_is_unaffected_by_the_mode(client: AsyncClient) -> N
         client, owner, org, kind="cost", user_id=person.id, rate=1_500, effective_from=FROM
     )
     for mode in ("staff_first", "grade_only", "staff_only"):
-        await set_practice(org, rate_mode=mode)
+        await set_mode(org, mode)
         found = await resolved(client, owner, org, person)
         assert (found["cost_rate"], found["cost_source"]) == (1_500, "staff"), mode
     # Nor is the grade's cost rate: staff only is about the charge-out rate.
     await sql("DELETE FROM rate_rules WHERE kind = 'cost'")
     await set_grade_rates(org, "SNR", cost=1_200)
     for mode in ("staff_first", "grade_only", "staff_only"):
-        await set_practice(org, rate_mode=mode)
+        await set_mode(org, mode)
         found = await resolved(client, owner, org, person)
         assert (found["cost_rate"], found["cost_source"]) == (1_200, "grade"), mode
 
@@ -272,7 +289,7 @@ async def test_the_staff_list_shows_the_rate_that_applies(client: AsyncClient) -
         return row["charge_rate"], row["charge_rate_source"]
 
     assert await shown() == (4_600, "staff")
-    await set_practice(org, rate_mode="grade_only")
+    await set_mode(org, "grade_only")
     assert await shown() == (3_700, "grade")
 
 
@@ -292,7 +309,7 @@ async def test_rerating_prices_by_the_mode_and_previews_it(client: AsyncClient) 
 
     # Staff first prices it at 4 600 again: nothing to change.
     assert (await preview())["totals"]["entries_to_change"] == 0
-    await set_practice(org, rate_mode="grade_only")
+    await set_mode(org, "grade_only")
     shown = await preview()
     assert shown["totals"]["entries_to_change"] == 1
     [item] = shown["items"]

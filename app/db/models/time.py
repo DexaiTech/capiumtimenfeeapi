@@ -124,7 +124,7 @@ class TimeEntry(Base, IdMixin, OrgScopedMixin, TimestampMixin):
         CheckConstraint(
             "rate_source IS NULL OR rate_source IN ('client_service_staff', 'client_service', "
             "'client_staff', 'client', 'job', 'service_staff', 'service_grade', 'service', "
-            "'staff', 'grade', 'default')",
+            "'staff', 'grade', 'default', 'none')",
             name="rate_source",
         ),
         Index(
@@ -176,8 +176,9 @@ class TimeEntry(Base, IdMixin, OrgScopedMixin, TimestampMixin):
     cost_rate: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default=text("0"))
     charge_value: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default=text("0"))
     cost_value: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default=text("0"))
-    # Which level of the rate ladder priced the entry (see ``RATE_SOURCES``); null for time
-    # recorded before the ladder existed.
+    # Which level of the rate ladder priced the entry (see ``RATE_SOURCES``; ``none``: no source
+    # had a rate and the practice default is 0, "No rate"); null for time recorded before the
+    # ladder existed.
     rate_source: Mapped[str | None] = mapped_column(Text)
     billing_status: Mapped[str] = mapped_column(Text, nullable=False, server_default="unbilled")
     created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))

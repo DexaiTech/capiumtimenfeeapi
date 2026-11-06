@@ -1083,7 +1083,12 @@ async def test_staff_show_their_standard_rates_with_the_level_that_prices_them(
     client: AsyncClient,
 ) -> None:
     owner, org = await practice(client)
-    await set_practice(org, default_charge_rate=2_000)
+    # The staff-first WIP valuation (APT84): a new practice tries the grade before the staff rate.
+    await set_practice(
+        org,
+        default_charge_rate=2_000,
+        wip_valuation_sources=["client", "service", "staff", "grade"],
+    )
     person = await new_staff(client, owner, org, "Sam Staff")
     assert (
         person["charge_rate"],

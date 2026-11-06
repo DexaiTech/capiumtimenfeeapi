@@ -35,6 +35,8 @@ async def test_it_comes_after_the_rates_for_the_person_and_the_grade_on_the_serv
     client: AsyncClient,
 ):
     owner, org, person, _acme, svc, job = await world(client)
+    # The staff-first WIP valuation (APT84): a new practice tries the grade before the staff rate.
+    await set_practice(org, wip_valuation_sources=["client", "service", "staff", "grade"])
     snr = await grade_id(org, "SNR")
     await sql("UPDATE jobs SET hourly_rate = NULL WHERE id = :j", j=str(job.id))
     await new_rate(
