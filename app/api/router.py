@@ -36,6 +36,7 @@ from app.api.v1 import (
     onboarding,
     opening_balances,
     organizations,
+    overtime,
     overtime_rates,
     payments,
     people,
@@ -109,6 +110,7 @@ api_router.include_router(time_views.router)
 api_router.include_router(timesheet_reminders.router)
 api_router.include_router(time_entries.router)
 api_router.include_router(timesheets.router)
+api_router.include_router(overtime.router)
 api_router.include_router(disbursements.router)
 api_router.include_router(wip.router)
 # The static /wip/* paths: summary, items, ledger, adjustments and transfers.
