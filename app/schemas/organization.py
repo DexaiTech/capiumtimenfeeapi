@@ -127,12 +127,12 @@ class OrganizationRead(BaseModel):
     wip_valuation_sources: list[WipValuationSource] = Field(description=_WIP_SOURCES)
     rate_mode: RateMode = Field(description=_RATE_MODE_DEPRECATED)
     overtime_enabled: bool = Field(
-        description="Whether overtime is on: time can then be marked as overtime and is priced "
-        "at its normal rates times the multiplier"
+        description="Whether overtime is on: time beyond each person's standard hours is then "
+        "worked out as overtime and costed at the overtime rates (cost only; charge-out never "
+        "changes). Off: no overtime is worked out and nobody is asked to confirm it"
     )
     overtime_multiplier_bp: int = Field(
-        description="Basis points of the normal rate that overtime is paid and charged at "
-        "(15000 = 1.5x), unless the staff member has their own"
+        description="Retired (APT81): kept and stored, never applied; overtime rates replace it"
     )
     cost_plus_markup_bp: int = Field(
         description="Basis points added to the cost of the work for the cost-plus value of the "
@@ -507,15 +507,17 @@ class OrganizationUpdate(RequestModel):
     overtime_enabled: bool | None = Field(
         default=None,
         description=(
-            "Whether overtime is on. Off hides it everywhere; time already marked as overtime "
-            "keeps its value, and a new or re-rated entry is priced at its normal rate"
+            "Whether overtime is on (worked out from each person's working hours, costed at "
+            "the overtime rates). Off: nothing is worked out or asked; overtime already "
+            "recorded stays as it is"
         ),
     )
     overtime_multiplier_bp: int | None = Field(
         default=None,
         ge=10000,
         le=100000,
-        description="Overtime rate as basis points of the normal rate (10000-100000; 15000 = 1.5x)",
+        description="Retired (APT81): kept and stored, never applied; overtime rates replace "
+        "it (10000-100000)",
     )
     cost_plus_markup_bp: int | None = Field(
         default=None,

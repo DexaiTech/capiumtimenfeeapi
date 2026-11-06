@@ -9,7 +9,7 @@ not editable) and any custom role a practice builds from the catalogue (`PUT
 /organizations/{id}/roles/{role_id}/permissions`; nobody can grant a permission they do not hold
 themselves).
 
-There are **65** permissions in **15** groups. `GET /permissions` returns the same catalogue by
+There are **66** permissions in **15** groups. `GET /permissions` returns the same catalogue by
 group then code; `GET /organizations/{id}` and `GET /users/me/organizations` return the caller's
 own permission codes.
 
@@ -21,9 +21,9 @@ own permission codes.
 
 | Role | Key | Permissions | Purpose |
 |---|---|---|---|
-| Owner | `owner` | 65 | Full control, including deleting the practice. |
-| Admin | `admin` | 64 | Runs the practice: staff, roles, settings and billing. |
-| Partner | `partner` | 60 | Owns client relationships, billing and write-offs. |
+| Owner | `owner` | 66 | Full control, including deleting the practice. |
+| Admin | `admin` | 65 | Runs the practice: staff, roles, settings and billing. |
+| Partner | `partner` | 61 | Owns client relationships, billing and write-offs. |
 | Manager | `manager` | 36 | Runs jobs, approves time and prepares bills. |
 | Staff | `staff` | 11 | Records time and disbursements on their work. |
 | Billing | `billing` | 29 | Credit control: invoices, credit notes and payments. |
@@ -146,6 +146,7 @@ gave them.
 | `report.export` | Download reports as CSV, Excel or PDF | ✓ | ✓ | ✓ | ✓ |  | ✓ |  |
 | `report.financial` | View WIP, debtors, billing and profit reports | ✓ | ✓ | ✓ | ✓ |  | ✓ |  |
 | `report.read` | View time and job reports | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `report.staff_cost` | View the staff cost report | ✓ | ✓ | ✓ |  |  |  |  |
 
 ### Roles
 

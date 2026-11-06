@@ -24,6 +24,19 @@ InternalNote = Annotated[str, Field(max_length=2000)]
 NOTE_DESCRIPTION = (
     "Internal note (up to 2000 characters), never printed on an invoice; blank clears it"
 )
+CONFIRM_OVERTIME = (
+    "The person confirmed adding overtime hours. Without it, a write that adds overtime "
+    "(time beyond the standard hours of the week or month) is refused with 409 "
+    "`OVERTIME_CONFIRMATION_REQUIRED` and nothing is saved"
+)
+# Route descriptions of the time writes that ask before adding overtime (APT81).
+OVERTIME_WRITE_NOTE = (
+    " With overtime on (`overtime_enabled`), a write that adds overtime (time beyond the "
+    "person's standard hours of the week or month) answers 409 `OVERTIME_CONFIRMATION_REQUIRED` "
+    "(`details`: `overtime_minutes` added, `standard_minutes`, `period_start`, `period_end`) and "
+    "saves nothing, unless the body has `confirm_overtime: true`. Overtime changes only the "
+    "Staff Cost report, never the rates or values."
+)
 
 
 def blank_note_to_none(value: str | None) -> str | None:
@@ -69,8 +82,9 @@ class TimeEntryRead(BaseModel):
     is_overtime: bool = Field(
         default=False,
         description=(
-            "Marked as overtime: priced at the normal rates times the overtime multiplier "
-            "(`charge_rate` and `cost_rate` include it). Only in a practice with overtime on"
+            "Part of the entry is overtime: beyond the person's standard hours of the week or "
+            "month (worked out while the practice has overtime on). Cost only: `charge_rate`, "
+            "`charge_value`, `cost_rate` and `cost_value` stay at the standard rates"
         ),
     )
     charge_rate: int = Field(description="Snapshot, minor units per hour")
@@ -184,10 +198,11 @@ class TimeEntryCreate(RequestModel):
     is_overtime: bool | None = Field(
         default=None,
         description=(
-            "Overtime: priced at the normal rates times the multiplier. Default false; true "
-            "needs overtime switched on for the practice (422)"
+            "Ignored: overtime is worked out from the person's working hours (kept so older "
+            "clients that send it are not refused)"
         ),
     )
+    confirm_overtime: bool = Field(default=False, description=CONFIRM_OVERTIME)
 
     _note = field_validator("internal_note")(blank_note_to_none)
 
@@ -208,8 +223,9 @@ class TimeEntryUpdate(RequestModel):
     internal_note: InternalNote | None = Field(default=None, description=NOTE_DESCRIPTION)
     is_billable: bool | None = None
     is_overtime: bool | None = Field(
-        default=None, description="Overtime; true needs overtime switched on for the practice"
+        default=None, description="Ignored: overtime is worked out from the person's working hours"
     )
+    confirm_overtime: bool = Field(default=False, description=CONFIRM_OVERTIME)
 
     _note = field_validator("internal_note")(blank_note_to_none)
 
@@ -223,6 +239,10 @@ class TimeEntryUpdate(RequestModel):
 
 class TimeEntryBulkCreate(RequestModel):
     entries: list[TimeEntryCreate] = Field(min_length=1, max_length=100)
+    confirm_overtime: bool = Field(
+        default=False,
+        description=CONFIRM_OVERTIME + " (for the whole batch; the entries' own flags are ignored)",
+    )
 
 
 class WeekGridRow(BaseModel):
@@ -354,12 +374,16 @@ class TimerStart(RequestModel):
     replace: bool = Field(
         default=False, description="Stop the running timer (writing its entry) first"
     )
+    confirm_overtime: bool = Field(
+        default=False, description=CONFIRM_OVERTIME + " (the entry of the timer it stops)"
+    )
 
 
 class TimerStop(RequestModel):
     description: Description | None = Field(
         default=None, description="Replaces the timer's description on the entry"
     )
+    confirm_overtime: bool = Field(default=False, description=CONFIRM_OVERTIME)
 
 
 # --- Timesheets ----------------------------------------------------------------------------

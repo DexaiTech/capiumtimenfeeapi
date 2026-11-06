@@ -3,7 +3,9 @@
 Locking: every write takes the person's timesheet row(s) ``FOR UPDATE`` (in id order) before
 it touches an entry, then the entry row. That serialises the 24-hour daily cap, the
 timesheet status checks (a sheet cannot be submitted or approved halfway through an edit)
-and the entry's billing status (billing locks entries before allocating them).
+and the entry's billing status (billing locks entries before allocating them). With overtime on,
+the person's overtime lock comes first (``overtime.lock_people``), and every write works out the
+overtime of the periods it touched before it commits (``OvertimeCapture``).
 """
 
 import uuid
@@ -39,6 +41,7 @@ from app.schemas.time import (
 from app.services import audit, charge_rates, period_locks
 from app.services.charge_rates import RateQuery
 from app.services.job_budget_alerts import refresh_job_budgets
+from app.services.overtime import OvertimeCapture, lock_people
 from app.services.policy import OrgContext, has_permission
 from app.services.time_rules import (
     EDITABLE_SHEET_STATUSES,
@@ -59,6 +62,8 @@ from app.utils.pagination import Page, PageParams
 
 # What a job's budget usage is made of: a change to any of these re-evaluates its budget alerts.
 BUDGET_FIELDS = frozenset({"minutes", "job_id", "charge_value", "is_billable"})
+# What an entry's overtime is made of: a change to any of these works its periods out again.
+OVERTIME_FIELDS = frozenset({"entry_date", "minutes", "client_id", "job_id", "cost_rate"})
 
 
 def wip_eligibility_clause(organization: Organization) -> ColumnElement[bool]:
@@ -99,7 +104,6 @@ class _Draft:
     names: dict[str, Any] = field(default_factory=dict)
     internal_note: str | None = None
     task_id: uuid.UUID | None = None
-    is_overtime: bool = False
 
 
 def _f(prefix: str, name: str) -> str:
@@ -305,6 +309,13 @@ class TimeEntryService:
             [entry_id] = await self._create_many(
                 ctx, [data], rctx, prefix_items=False, source=source
             )
+            await OvertimeCapture(self.session).recompute(
+                ctx,
+                rctx,
+                {data.user_id or ctx.user.id: {data.entry_date}},
+                confirmed=data.confirm_overtime,
+                written=[entry_id],
+            )
             [view] = await self.entries.views(ctx.organization_id, [entry_id])
         return TimeEntryRead.from_view(
             view, show_cost=show_cost(ctx), show_note=can_see_note(ctx, view.entry.user_id)
@@ -316,6 +327,12 @@ class TimeEntryService:
         """All or nothing: one invalid entry rolls the whole batch back."""
         async with unit_of_work(self.session):
             ids = await self._create_many(ctx, data.entries, rctx, prefix_items=True, source="bulk")
+            touched: dict[uuid.UUID, set[date]] = {}
+            for item in data.entries:
+                touched.setdefault(item.user_id or ctx.user.id, set()).add(item.entry_date)
+            await OvertimeCapture(self.session).recompute(
+                ctx, rctx, touched, confirmed=data.confirm_overtime, written=ids
+            )
             views = await self.entries.views(ctx.organization_id, ids)
         cost = show_cost(ctx)
         return [
@@ -379,7 +396,6 @@ class TimeEntryService:
             if job is not None:
                 ensure_job_open(job)
             billable = self.resolve_billable(item.is_billable, job, activity, client, prefix)
-            overtime = self.resolve_overtime(org, item.is_overtime, prefix)
             drafts.append(
                 _Draft(
                     user_id=owner,
@@ -398,7 +414,6 @@ class TimeEntryService:
                     },
                     internal_note=item.internal_note,
                     task_id=task.id if task else None,
-                    is_overtime=overtime,
                 )
             )
 
@@ -407,6 +422,7 @@ class TimeEntryService:
         )
 
         # Lock the sheets, then check their status and the daily cap under the lock.
+        await lock_people(self.session, org, {d.user_id for d in drafts})
         weeks = {(d.user_id, week_start_for(org, d.entry_date)) for d in drafts}
         sheets = await self.sheets.lock_weeks(org_id, weeks)
         for draft in drafts:
@@ -422,10 +438,7 @@ class TimeEntryService:
         rates = await charge_rates.resolve_many(
             self.session,
             org,
-            [
-                RateQuery(d.user_id, d.client_id, d.job_id, d.entry_date, overtime=d.is_overtime)
-                for d in drafts
-            ],
+            [RateQuery(d.user_id, d.client_id, d.job_id, d.entry_date) for d in drafts],
         )
         ids: list[uuid.UUID] = []
         for draft, rate in zip(drafts, rates, strict=True):
@@ -443,7 +456,6 @@ class TimeEntryService:
                 description=draft.description,
                 internal_note=draft.internal_note,
                 is_billable=draft.is_billable,
-                is_overtime=draft.is_overtime,
                 charge_rate=rate.charge_rate,
                 cost_rate=rate.cost_rate,
                 charge_value=time_value(draft.minutes, rate.charge_rate),
@@ -480,6 +492,7 @@ class TimeEntryService:
             if current is None:
                 raise NotFoundError("Time entry not found.")
             self.ensure_can_write(ctx, current.user_id)
+            await lock_people(self.session, org, [current.user_id])
 
             new_date = (
                 data.entry_date
@@ -586,11 +599,6 @@ class TimeEntryService:
                 )
                 self._ensure_day_cap(logged.get(new_date, 0) + new_minutes, new_date, "")
 
-            overtime = (
-                self.resolve_overtime(org, data.is_overtime, "")
-                if "is_overtime" in fields
-                else entry.is_overtime
-            )
             [rate] = await charge_rates.resolve_many(
                 self.session,
                 org,
@@ -600,7 +608,6 @@ class TimeEntryService:
                         client.id if client else None,
                         job.id if job else None,
                         new_date,
-                        overtime=overtime,
                     )
                 ],
             )
@@ -613,7 +620,6 @@ class TimeEntryService:
                 "activity_code_id": activity.id if activity else None,
                 "description": data.description if "description" in fields else entry.description,
                 "is_billable": billable,
-                "is_overtime": overtime,
                 "timesheet_id": new_sheet.id,
                 "charge_rate": rate.charge_rate,
                 "cost_rate": rate.cost_rate,
@@ -622,7 +628,7 @@ class TimeEntryService:
                 "rate_source": rate.source,
             }
             changes: dict[str, list[Any]] = {}
-            old_job_id = entry.job_id
+            old_job_id, old_date = entry.job_id, entry.entry_date
             for name, value in new_values.items():
                 old = getattr(entry, name)
                 if old != value:
@@ -652,6 +658,14 @@ class TimeEntryService:
                         actor_user_id=ctx.user.id,
                         rctx=rctx,
                     )
+                if changes.keys() & OVERTIME_FIELDS:
+                    await OvertimeCapture(self.session).recompute(
+                        ctx,
+                        rctx,
+                        {entry.user_id: {old_date, entry.entry_date}},
+                        confirmed=data.confirm_overtime,
+                        written=[entry.id],
+                    )
             [view] = await self.entries.views(org_id, [entry.id])
         return TimeEntryRead.from_view(
             view, show_cost=show_cost(ctx), show_note=can_see_note(ctx, view.entry.user_id)
@@ -664,6 +678,7 @@ class TimeEntryService:
             if current is None:
                 raise NotFoundError("Time entry not found.")
             self.ensure_can_write(ctx, current.user_id)
+            await lock_people(self.session, org, [current.user_id])
             # Lock the entry's own sheet by id (see update()).
             [sheet] = await self.sheets.lock_many(org.id, [current.timesheet_id])
             entry = await self.entries.get(org.id, entry_id, for_update=True)
@@ -674,11 +689,13 @@ class TimeEntryService:
             await period_locks.assert_open(self.session, org.id, entry.entry_date, "time")
             self._ensure_entry_editable(entry, sheet)
             await self._audit(ctx, rctx, "time_entry.deleted", entry, {})
-            job_id = entry.job_id
+            job_id, owner, day = entry.job_id, entry.user_id, entry.entry_date
             await self.entries.delete(entry)
             await refresh_job_budgets(
                 self.session, org.id, [job_id], actor_user_id=ctx.user.id, rctx=rctx
             )
+            # Deleting never adds overtime: later entries of the period are re-split unasked.
+            await OvertimeCapture(self.session).recompute(ctx, rctx, {owner: {day}}, ask=False)
 
     # --- Rule helpers --------------------------------------------------------------------
 
@@ -811,15 +828,6 @@ class TimeEntryService:
                 _f(prefix, "is_billable"), "Time on a non-billable job cannot be billable."
             )
         return requested
-
-    @staticmethod
-    def resolve_overtime(org: Organization, requested: bool | None, prefix: str) -> bool:
-        """Overtime is marked only in a practice that has it on."""
-        if requested and not org.overtime_enabled:
-            raise ValidationError.for_field(
-                _f(prefix, "is_overtime"), "Overtime is not switched on for this practice."
-            )
-        return bool(requested)
 
     @staticmethod
     def _ensure_sheet_editable(sheet: Timesheet) -> None:

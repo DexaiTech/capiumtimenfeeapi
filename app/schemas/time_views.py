@@ -8,6 +8,7 @@ from pydantic import AliasChoices, BaseModel, Field, field_validator, model_vali
 
 from app.schemas.common import RequestModel
 from app.schemas.time import (
+    CONFIRM_OVERTIME,
     NOTE_DESCRIPTION,
     Description,
     EntryDate,
@@ -87,6 +88,7 @@ class CopyWeekRequest(RequestModel):
         description="Copy only these entries of the source week; default all of them",
     )
     include_notes: bool = Field(default=False, description="Copy the internal notes too")
+    confirm_overtime: bool = Field(default=False, description=CONFIRM_OVERTIME)
 
 
 class CopySkipped(BaseModel):
@@ -108,6 +110,7 @@ class CopyEntryRequest(RequestModel):
         description="The day to copy the entry to",
     )
     include_notes: bool = Field(default=False, description="Copy the internal note too")
+    confirm_overtime: bool = Field(default=False, description=CONFIRM_OVERTIME)
 
 
 # --- Corrections ---------------------------------------------------------------------------
@@ -145,6 +148,7 @@ class TimeCorrection(RequestModel):
     is_billable: bool | None = Field(
         default=None, validation_alias=AliasChoices("billable", "is_billable")
     )
+    confirm_overtime: bool = Field(default=False, description=CONFIRM_OVERTIME)
 
     _note = field_validator("internal_note")(blank_note_to_none)
 

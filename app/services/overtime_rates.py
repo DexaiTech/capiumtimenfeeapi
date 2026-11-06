@@ -10,8 +10,10 @@ Rules:
   constraint makes it safe under concurrent requests).
 * Exactly one rate applies to a person on a day: their own staff rate, else their grade's rate,
   else none. The two never stack.
-* A rate is ended with a last day, or deleted. Nothing prices time from these rates yet, so no
-  rate is in use.
+* A rate is ended with a last day, or deleted. Overtime already costed at a deleted rate keeps
+  its rate and cost (``time_entry_overtime.overtime_rate_id`` becomes null).
+* Overtime is costed at the rate in force on the entry's day as time is recorded
+  (``app/services/overtime.py``); changing a rate does not re-cost recorded overtime.
 * Every add, end and delete is in the audit trail (``overtime_rate.*``).
 """
 

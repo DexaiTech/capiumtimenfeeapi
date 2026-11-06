@@ -37,12 +37,11 @@ class TimeRollup:
 
 @dataclass(frozen=True, slots=True)
 class ReadyPiece:
-    """Time ready to bill of one job, person, day and overtime flag."""
+    """Time ready to bill of one job, person and day."""
 
     job_id: uuid.UUID | None
     user_id: uuid.UUID
     entry_date: date
-    is_overtime: bool
     minutes: int
     charge_value: int
     cost_value: int
@@ -108,9 +107,9 @@ class BillingSummaryRepository:
     async def ready_time_pieces(
         self, organization_id: uuid.UUID, client_id: uuid.UUID, *, require_approval: bool
     ) -> list[ReadyPiece]:
-        """The time ready to bill per job, person, day and overtime flag, with its value and cost
-        (the recovery comparison of the invoicing screen values it at the staff rates too)."""
-        keys = (TimeEntry.job_id, TimeEntry.user_id, TimeEntry.entry_date, TimeEntry.is_overtime)
+        """The time ready to bill per job, person and day, with its value and cost (the recovery
+        comparison of the invoicing screen values it at the staff rates too)."""
+        keys = (TimeEntry.job_id, TimeEntry.user_id, TimeEntry.entry_date)
         stmt = (
             select(
                 *keys,
@@ -127,7 +126,7 @@ class BillingSummaryRepository:
             .order_by(*keys)
         )
         return [
-            ReadyPiece(row[0], row[1], row[2], row[3], int(row[4]), int(row[5]), int(row[6]))
+            ReadyPiece(row[0], row[1], row[2], int(row[3]), int(row[4]), int(row[5]))
             for row in (await self.session.execute(stmt)).all()
         ]
 

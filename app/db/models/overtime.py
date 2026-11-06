@@ -9,21 +9,26 @@ overtime rates of grades and staff.
   multiplier of the standard cost rate (``multiplier_bp``, 15000 = 1.5x) or a fixed amount in
   pence per hour (``rate``), with the same dated periods. The rates of one grade or one person
   never overlap. A staff rate overrides the grade rate; the two never stack.
-
-Nothing prices time from these tables yet: time keeps its rates as before.
+* ``time_entry_overtime`` (phase B): the overtime portion of one time entry, worked out from the
+  person's standard hours, with the overtime rate and cost applied, and its approval status. It
+  is cost only: charge-out, WIP and invoices never read it.
 """
 
 import uuid
-from datetime import date
+from datetime import date, datetime
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     CheckConstraint,
     Date,
+    DateTime,
     ForeignKey,
     ForeignKeyConstraint,
+    Index,
     Integer,
     Text,
+    UniqueConstraint,
     text,
 )
 from sqlalchemy.dialects.postgresql import UUID, ExcludeConstraint
@@ -35,6 +40,8 @@ from app.db.models.clients import _member_fk
 HOURS_BASES = ("weekly", "monthly")
 OVERTIME_LEVELS = ("grade", "staff")
 OVERTIME_MODES = ("multiplier", "fixed")
+OVERTIME_SOURCES = ("staff", "grade", "none")
+OVERTIME_STATUSES = ("pending", "approved", "rejected")
 _NIL = "'00000000-0000-0000-0000-000000000000'::uuid"
 
 
@@ -115,10 +122,65 @@ class OvertimeRate(Base, IdMixin, OrgScopedMixin, TimestampMixin):
     created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
 
 
+class TimeEntryOvertime(Base, IdMixin, OrgScopedMixin, TimestampMixin):
+    """The overtime portion of one time entry (at most one row per entry)."""
+
+    __tablename__ = "time_entry_overtime"
+    __table_args__ = (
+        UniqueConstraint("time_entry_id", name="uq_time_entry_overtime_time_entry_id"),
+        ForeignKeyConstraint(
+            ["organization_id", "time_entry_id"],
+            ["time_entries.organization_id", "time_entries.id"],
+            name="fk_time_entry_overtime_time_entries",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["organization_id", "user_id"],
+            ["organization_members.organization_id", "organization_members.user_id"],
+            name="fk_time_entry_overtime_organization_members",
+        ),
+        CheckConstraint("overtime_minutes > 0", name="overtime_minutes"),
+        CheckConstraint("rate_source IN ('staff', 'grade', 'none')", name="rate_source"),
+        CheckConstraint("overtime_rate >= 0", name="overtime_rate"),
+        CheckConstraint("overtime_cost >= 0", name="overtime_cost"),
+        CheckConstraint("premium_cost >= 0", name="premium_cost"),
+        CheckConstraint("status IN ('pending', 'approved', 'rejected')", name="status"),
+        Index("ix_time_entry_overtime_organization_id_user_id", "organization_id", "user_id"),
+        Index("ix_time_entry_overtime_organization_id_status", "organization_id", "status"),
+    )
+
+    time_entry_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    overtime_minutes: Mapped[int] = mapped_column(Integer, nullable=False)
+    # On a job of a client other than the built-in Internal client; false: unallocated.
+    allocated: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    overtime_rate_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("overtime_rates.id", ondelete="SET NULL")
+    )
+    rate_source: Mapped[str] = mapped_column(Text, nullable=False)
+    # Pence per hour actually applied (0 when no overtime rate applies).
+    overtime_rate: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    # overtime_minutes at overtime_rate; premium_cost = that less the standard cost of the same
+    # minutes (never below 0).
+    overtime_cost: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    premium_cost: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="pending")
+    confirmed_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id")
+    )
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    decided_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    decision_note: Mapped[str | None] = mapped_column(Text)
+
+
 __all__ = [
     "HOURS_BASES",
     "OVERTIME_LEVELS",
     "OVERTIME_MODES",
+    "OVERTIME_SOURCES",
+    "OVERTIME_STATUSES",
     "OvertimeRate",
     "StaffHoursBasis",
+    "TimeEntryOvertime",
 ]

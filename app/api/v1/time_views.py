@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, Query, status
 from app.dependencies.common import ContextDep, SessionDep
 from app.dependencies.organization import OrgContextDep, PageParamsDep
 from app.schemas.common import ApiResponse, error_responses, ok, ok_page
-from app.schemas.time import MAX_TIME_DATE, MIN_TIME_DATE, TimeEntryRead
+from app.schemas.time import MAX_TIME_DATE, MIN_TIME_DATE, OVERTIME_WRITE_NOTE, TimeEntryRead
 from app.schemas.time_views import (
     CopyEntryRequest,
     CopyWeekRequest,
@@ -51,7 +51,7 @@ _COPY_RULES = (
     "time increment, at most 24 hours a day (`DAY_LIMIT_EXCEEDED`), no time on a completed or "
     "cancelled job (`JOB_CLOSED`) or for an inactive client (`CLIENT_INACTIVE`), no time in a "
     "locked period (`PERIOD_LOCKED`) and an editable timesheet. Rates are taken again for the "
-    "new date. Own time needs `time.log`, anyone else's `time.manage_all`."
+    "new date. Own time needs `time.log`, anyone else's `time.manage_all`." + OVERTIME_WRITE_NOTE
 )
 
 
@@ -160,7 +160,8 @@ async def copy_entry(
         "with `DELETE /time-entries/{entry_id}`). Needs `time.manage_all` or `timesheet.approve`, "
         "and not one's own time unless `organization.update` (403 `SELF_CORRECTION_FORBIDDEN`). "
         "`reason` is required (422 `TIME_CORRECTION_REASON_REQUIRED`) and is kept in the audit "
-        "entry `time_entry.deleted`. A locked period still refuses it (409 `PERIOD_LOCKED`)."
+        "entry `time_entry.deleted`. A locked period still refuses it (409 `PERIOD_LOCKED`). "
+        "The overtime of the rest of the period is worked out again, without asking."
     ),
     responses=error_responses(403, 404, 409),
 )
@@ -190,6 +191,7 @@ async def remove_entry(
         "rate is kept unless the client, job, date or activity changes. The entry may move to "
         "another week and then joins that week's timesheet. One history row (before and after) "
         "and the audit entry `time_entry.corrected` are written. Returns the corrected entry."
+        + OVERTIME_WRITE_NOTE
     ),
     responses=error_responses(403, 404, 409),
 )

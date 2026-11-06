@@ -53,7 +53,8 @@ async def list_hours(
         "open-ended hours that started earlier end the day before (audited as "
         "`staff_hours.ended`). 409 `HOURS_OVERLAP` when other hours cover the period (hours "
         "starting the same day or later, or a period with an end date); `details.conflicts` "
-        "lists them. Time is not priced from these hours yet. Requires `member.update`."
+        "lists them. Overtime of time recorded from now on is worked out from them; recorded "
+        "time keeps its overtime. Requires `member.update`."
     ),
     responses=error_responses(403, 404, 409),
 )

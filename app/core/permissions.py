@@ -96,6 +96,7 @@ CATALOGUE: tuple[PermissionDef, ...] = (
     PermissionDef("opening_balance.import", "Billing", "Import and manage opening balances"),
     # Exports, integrations and data tools
     PermissionDef("report.export", "Reports", "Download reports as CSV, Excel or PDF"),
+    PermissionDef("report.staff_cost", "Reports", "View the staff cost report"),
     PermissionDef("audit_log.export", "Audit", "Export the audit log"),
     PermissionDef("integration.read", "Integrations", "View integration status and sync logs"),
     PermissionDef(

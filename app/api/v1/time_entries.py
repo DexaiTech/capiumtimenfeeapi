@@ -12,6 +12,7 @@ from app.schemas.common import ApiResponse, error_responses, ok, ok_page
 from app.schemas.time import (
     MAX_TIME_DATE,
     MIN_TIME_DATE,
+    OVERTIME_WRITE_NOTE,
     BillingStatus,
     TimeEntryBulkCreate,
     TimeEntryCreate,
@@ -53,7 +54,7 @@ _WRITE_RULES = (
     "hierarchy; `cost_rate`/`cost_value` are null without `rate.read`. `internal_note` (up to "
     "2000 characters) is never printed on an invoice and is null for everyone but the "
     "person, `time.read_all` and `time.manage_all`; `service_id`/`service_name` are the "
-    "job's service (read-only)."
+    "job's service (read-only)." + OVERTIME_WRITE_NOTE
 )
 
 
@@ -197,7 +198,8 @@ async def update_time_entry(
     summary="Delete a time entry",
     description=(
         "Deletes an unbilled entry on an open or rejected timesheet (409 `TIME_LOCKED` "
-        "otherwise). Own entries need `time.log`, others' `time.manage_all`."
+        "otherwise). Own entries need `time.log`, others' `time.manage_all`. The overtime of "
+        "the rest of the period is worked out again, without asking."
     ),
     responses=error_responses(403, 404, 409),
 )
@@ -233,7 +235,7 @@ async def get_timer(org: TimerOrg, service: TimerServiceDep) -> ApiResponse[Time
         "without them) and optionally an activity. One per person: "
         "409 `TIMER_RUNNING` when one exists, unless `replace: true`, which first stops it "
         "(writing its entry). The client and job must accept time (409 `CLIENT_INACTIVE`, "
-        "`JOB_CLOSED`). Requires `time.log`."
+        "`JOB_CLOSED`). Requires `time.log`." + OVERTIME_WRITE_NOTE
     ),
     responses=error_responses(403, 404, 409),
 )
@@ -272,6 +274,7 @@ async def resume_timer(org: TimerOrg, service: TimerServiceDep) -> ApiResponse[T
         "least one increment) on the day the timer was started, deletes the timer and "
         "returns the entry. The entry follows every time rule (409 `TIME_LOCKED`, ...); on "
         "an error the timer is kept. An optional `description` replaces the timer's."
+        + OVERTIME_WRITE_NOTE
     ),
     responses=error_responses(403, 404, 409),
 )
