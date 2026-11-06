@@ -8,7 +8,7 @@ from typing import Any
 from sqlalchemy import delete, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Grade, OrganizationMember, RateRule
+from app.db.models import Grade, OrganizationMember, OvertimeRate, RateRule
 from app.db.models.organization import GONE_STATUSES
 from app.repositories.time_paging import keyset_finish, keyset_query
 from app.utils.pagination import Page, PageParams
@@ -97,7 +97,8 @@ class GradeRepository:
         }
 
     async def is_used(self, organization_id: uuid.UUID, grade_id: uuid.UUID) -> bool:
-        """Held by any staff member (whatever their status) or named by a rate rule."""
+        """Held by any staff member (whatever their status) or named by a rate rule or an
+        overtime rate."""
         checks = [
             exists().where(
                 OrganizationMember.organization_id == organization_id,
@@ -106,13 +107,17 @@ class GradeRepository:
             exists().where(
                 RateRule.organization_id == organization_id, RateRule.grade_id == grade_id
             ),
+            exists().where(
+                OvertimeRate.organization_id == organization_id, OvertimeRate.grade_id == grade_id
+            ),
         ]
         return bool(await self.session.scalar(select(or_(*checks))))
 
     async def used_ids(
         self, organization_id: uuid.UUID, grade_ids: Collection[uuid.UUID]
     ) -> set[uuid.UUID]:
-        """Which of these grades are held by staff (whatever their status) or named by a rule."""
+        """Which of these grades are held by staff (whatever their status) or named by a rule
+        or an overtime rate."""
         if not grade_ids:
             return set()
         ids = list(grade_ids)
@@ -123,7 +128,10 @@ class GradeRepository:
         by_rule = select(RateRule.grade_id).where(
             RateRule.organization_id == organization_id, RateRule.grade_id.in_(ids)
         )
-        rows = (await self.session.execute(by_staff.union(by_rule))).scalars()
+        by_overtime = select(OvertimeRate.grade_id).where(
+            OvertimeRate.organization_id == organization_id, OvertimeRate.grade_id.in_(ids)
+        )
+        rows = (await self.session.execute(by_staff.union(by_rule, by_overtime))).scalars()
         return {grade_id for grade_id in rows if grade_id is not None}
 
     async def name_taken(

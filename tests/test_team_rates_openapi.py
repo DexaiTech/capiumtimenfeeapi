@@ -38,6 +38,14 @@ EXPECTED = {
     ("get", "/rates/{rule_id}"): "Rates",
     ("patch", "/rates/{rule_id}"): "Rates",
     ("delete", "/rates/{rule_id}"): "Rates",
+    ("get", "/staff/{user_id}/hours"): "Staff",
+    ("post", "/staff/{user_id}/hours"): "Staff",
+    ("delete", "/staff/{user_id}/hours/{hours_id}"): "Staff",
+    ("get", "/overtime-rates"): "Rates",
+    ("post", "/overtime-rates"): "Rates",
+    ("get", "/overtime-rates/resolve"): "Rates",
+    ("patch", "/overtime-rates/{rate_id}"): "Rates",
+    ("delete", "/overtime-rates/{rate_id}"): "Rates",
     ("get", "/activity-codes/{activity_id}"): "Settings",
     ("patch", "/activity-codes/{activity_id}"): "Settings",
     ("post", "/activity-codes/{activity_id}/activate"): "Settings",
@@ -63,6 +71,9 @@ CONFLICTS = {
     ("patch", "/rates/{rule_id}"),
     ("delete", "/rates/{rule_id}"),
     ("post", "/rates/rerate"),
+    ("post", "/staff/{user_id}/hours"),
+    ("post", "/overtime-rates"),
+    ("patch", "/overtime-rates/{rate_id}"),
     ("patch", "/activity-codes/{activity_id}"),
 }
 
@@ -89,6 +100,8 @@ LISTS = (
     ("get", "/rates/history"),
     ("get", "/rates/reruns"),
     ("get", "/rates/reruns/{run_id}/items"),
+    ("get", "/overtime-rates"),
+    ("get", "/overtime-rates/resolve"),
     ("get", "/services"),
     ("get", "/activity-codes"),
 )
@@ -112,3 +125,44 @@ async def test_every_new_operation_has_a_unique_id(client):
         for operation in methods.values()
     ]
     assert len(ids) == len(set(ids))
+
+
+# (method, path) -> (permission, the error codes the description names)
+OVERTIME_ROUTES = {
+    ("get", "/staff/{user_id}/hours"): ("member.read", []),
+    ("post", "/staff/{user_id}/hours"): ("member.update", ["HOURS_OVERLAP"]),
+    ("delete", "/staff/{user_id}/hours/{hours_id}"): ("member.update", []),
+    ("get", "/overtime-rates"): ("rate.read", []),
+    ("post", "/overtime-rates"): ("rate.manage", ["RATE_OVERLAP", "MEMBER_REMOVED"]),
+    ("get", "/overtime-rates/resolve"): ("rate.read", []),
+    ("patch", "/overtime-rates/{rate_id}"): ("rate.manage", ["RATE_OVERLAP"]),
+    ("delete", "/overtime-rates/{rate_id}"): ("rate.manage", []),
+}
+OVERTIME_SCHEMAS = (
+    "StaffHoursRead",
+    "StaffHoursCreate",
+    "OvertimeRateRead",
+    "OvertimeRateCreate",
+    "OvertimeRateEnd",
+    "OvertimeResolveRead",
+)
+
+
+async def test_the_working_hours_and_overtime_routes_name_permission_and_errors(client):
+    schema = (await client.get("/openapi.json")).json()
+    for (method, path), (permission, codes) in OVERTIME_ROUTES.items():
+        description = schema["paths"][PREFIX + path][method]["description"]
+        assert f"`{permission}`" in description, (method, path)
+        for code in codes:
+            assert f"`{code}`" in description, (method, path, code)
+
+
+async def test_every_field_of_the_overtime_schemas_is_described(client):
+    schemas = (await client.get("/openapi.json")).json()["components"]["schemas"]
+    missing = [
+        f"{name}.{field}"
+        for name in OVERTIME_SCHEMAS
+        for field, prop in schemas[name]["properties"].items()
+        if not prop.get("description")
+    ]
+    assert not missing, missing
