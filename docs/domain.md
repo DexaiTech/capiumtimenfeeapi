@@ -96,7 +96,9 @@ grade's default cost rate.
   (all on by default) and `invoice_approval_required` (off). Off, the flow is skipped (submitted
   work is approved at once) and switching it off approves what is waiting, unless a locked period
   or the WIP left stops it (`docs/modules/foundation.md`, "Approval switches").
-* `rate_mode`: `staff_first` (default), `grade_only` or `staff_only`. See Rates.
+* `wip_valuation_sources` (APT84): which rate sources price time and in what order — `client`,
+  `service`, `grade`, `staff`, 1 to 4 of them. It replaced `rate_mode`, which the API still
+  derives for one release (deprecated). See Rates.
 * `fixed_fee_wip_mode` decides **when the unbilled part of a fixed fee counts as WIP** (hourly
   and non-billable jobs are not affected). This is the contract the WIP module implements:
   * `on_completion` (default): the unbilled fixed fee counts as WIP **once the job is
@@ -198,18 +200,20 @@ before it starts, else 0 (cost rules exist only for staff and grades). The cost 
 on the client, the job or the job's billing basis: a cost rate added "from today" also costs
 the time already recorded for earlier days.
 
-* **Rate mode** (`organizations.rate_mode`): `staff_first` (default) uses the ladder above.
-  `grade_only` **skips level 6**: a person's own `staff` rate never prices time and their
-  grade's rate (level 7) does; levels 1–5, the practice default and the cost rate are
-  unchanged. The `staff` rules are kept and apply again if the mode is switched back. One
-  resolver (`app/services/charge_rates.py`) serves saving time, the preview
-  (`GET /rates/resolve`, where the level 6 step is `applicable: false` with the reason) and
-  re-rating, so a preview always equals what saving or re-rating will do. Switching the mode
-  never rewrites recorded time.
-  `staff_only` (APT79) **skips the grade rates** instead: the grade's rate for the service
-  (`service_grade`, level 5) and level 7, so a person without a `staff` rate is charged the
-  practice default. The client, job and service rates, the person's own rates and the cost rate
-  are unchanged; the skipped steps are `applicable: false` with the reason in the preview.
+* **WIP valuation** (`organizations.wip_valuation_sources`, APT84) decides the order of the
+  ladder: the practice switches the four sources on or off and orders them — `client` (levels
+  1–3 and the job's own rate, level 4), `service` (level 5; its `service_grade` rate only while
+  `grade` is on), `staff` (level 6) and `grade` (level 7). The first enabled source with a rate
+  prices the entry; then the practice default when it is above 0, else the entry is valued 0
+  with `rate_source` `none` ("No rate"). Migration 080 gave each practice the order of its old
+  rate mode (`staff_first` → client, service, staff, grade; `grade_only` → client, service, grade;
+  `staff_only` → client, service, staff), so no value changed; a new practice starts with client,
+  service, grade, staff. One resolver (`app/services/charge_rates.py`) serves saving time, the
+  preview (`GET /rates/resolve`, where switched-off steps are `applicable: false` with the
+  reason) and re-rating. Changing the order re-values unbilled time only when asked, after
+  `POST /organizations/{id}/wip-valuation/preview` (see `docs/modules/foundation.md`).
+  `rate_mode` (`staff_first`, `grade_only`, `staff_only`) is derived from the order for one
+  release and is deprecated.
 
 * The rate, its source (`rate_source`: the level that priced it) and the value are
   snapshotted on the entry when it is saved. A rate change never rewrites recorded time;
