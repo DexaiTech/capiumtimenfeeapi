@@ -194,3 +194,14 @@ Rules:
   ruff check, ruff format --check, mypy, migrations and the full pytest suite (~17 min). Check it
   with `gh pr checks <n>`; a PR is not ready while it is red. The local full suite takes hours on
   a laptop, so run the affected tests locally and let CI run the rest.
+* A migration runs before the new API starts, so the API still live must keep working on the
+  migrated database. Only add tables and columns in the release. Drop or rename them a release
+  later, once no live code reads them.
+* After every merge, check the live site before calling the work done:
+  - `/api/v1/system` answers 200;
+  - a new route answers 401 instead of 404, which shows the new API is live;
+  - the changed screens work.
+
+  If the site is down or answering 500, tell the lead at once. On 6 Nov 2026 the live database
+  was missing migration 080's column, and the site was down until someone fixed it on the
+  server.
