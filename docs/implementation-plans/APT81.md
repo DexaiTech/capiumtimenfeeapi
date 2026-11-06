@@ -228,3 +228,58 @@ answer to §11.9. Assumed (§11.2): standard hours start from each person's curr
   `member.read` / `member.update`.
 - No change to Settings → Rates (overtime switch), Edit staff (multiplier) or time entry until
   Phase B.
+
+## 16. Decisions and contract for Phases B–D (2026-11-06)
+
+Decided by the developer: (§11.9) from release overtime never raises charge-out; saved entries keep
+their stored values (billed untouched, unbilled change only if re-rated). (§11.4) "Unallocated" =
+overtime on the built-in Internal client's jobs; overtime on any other job is allocated. (§11.7)
+rejecting overtime removes only the overtime **premium** (the hours stay at standard cost). (§11.12)
+a new permission `report.staff_cost` ("View the staff cost report"), given to Owner, Admin and Partner.
+Recommended defaults adopted (§11.2/3/5/6/8/10/11/13): new staff get an open-ended weekly hours row
+from their weekly capacity when added; weekly period = Monday–Sunday, monthly = calendar month;
+entries become overtime in order of entry date, then time recorded (edits re-split the period);
+profitability and cost-to-business keep the **standard** cost of every hour (the premium is only on
+the Staff Cost Report); overtime is auto-approved for people exempt from approval or when approval
+is off; the warning also applies to copy, copy-week and timer stop; "amend" = the existing
+correction flow (which re-splits); the dialog title is "Add overtime hours?" with the client's
+sentence "You are adding overtime hours. Are you sure?" and the overtime hours in the body.
+The practice "Overtime" switch stays as the on/off for the whole feature (off: no detection, no
+warnings); the 061 multipliers (practice and per staff) are retired — overtime rates replace them.
+
+### API (migration 082)
+
+- `time_entry_overtime`: `id`, `organization_id`, `time_entry_id` (unique), `user_id`,
+  `overtime_minutes` (> 0), `allocated` (bool), `overtime_rate_id` (nullable), `rate_source`
+  (`staff`|`grade`|`none`), `overtime_rate` (pence/h actually applied), `overtime_cost` (pence),
+  `premium_cost` (pence = overtime cost − standard cost of those minutes, ≥ 0), `status`
+  (`pending`|`approved`|`rejected`), `confirmed_by`, `confirmed_at`, `decided_by`, `decided_at`,
+  `decision_note`, timestamps. New permission `report.staff_cost` (catalogue + default roles).
+- Detection: on every time write (create, update, copy, copy-week, timer stop, correct, remove,
+  delete) recompute the person's period; a write that **adds or increases** overtime and lacks
+  `confirm_overtime: true` → 409 `OVERTIME_CONFIRMATION_REQUIRED`, `details: {overtime_minutes,
+  standard_minutes, period_start, period_end}`; with it → saved, rows created/updated (status
+  `pending`, or `approved` when exempt / approval off), audit `overtime.confirmed` (user, time).
+  Re-splits caused by edits elsewhere need no confirmation. Locked periods are never rewritten.
+- `RateBook` no longer applies the 061 multiplier to charge or cost; `time_entries.is_overtime`
+  becomes "has an overtime portion" (kept in step).
+- Approval: `GET /overtime` (filters user, status, from, to, allocated; with the entry, job,
+  client), `POST /overtime/{id}/approve`, `POST /overtime/{id}/reject` `{note}`; permission: the
+  person's approver or `time.manage_all`; audit `overtime.approved|rejected`.
+- Report: `GET /reports/staff-cost` (filters `from`, `to`, `user_id`, `grade_id`, `job_id`,
+  `client_id`, `status`, `overtime_type` allocated|unallocated) → rows per staff member and period:
+  `standard_minutes`, `standard_cost`, `overtime_minutes_allocated`, `overtime_cost_allocated`,
+  `overtime_minutes_unallocated`, `overtime_cost_unallocated`, `total_cost`, `pending_overtime_cost`;
+  `GET /reports/staff-cost/jobs?user_id=…` → flagged jobs (job, client, overtime minutes, rate
+  applied, cost, status); CSV/XLSX/PDF downloads with `report.export`; permission
+  `report.staff_cost`; `report.exported` audit. Overtime amounts appear nowhere else.
+
+### UI
+
+- One shared confirm (`ConfirmDialog`, "Add overtime hours?") wired into every time write path:
+  EntryPanel (6 screens), Week grid autosave, timer stop, copy entry, copy week. Overtime badge on
+  entries; approvals show overtime entries with Approve / Reject (note).
+- Settings → Rates: the "Overtime" switch help text becomes cost-only; the multiplier fields
+  (practice and Edit staff) are removed (overtime rates replace them).
+- Reports → **Staff Cost** report (config-driven `ReportScreen`): filters as above, per-staff rows,
+  drill-down to flagged jobs, downloads, gated by `report.staff_cost`.
