@@ -386,32 +386,46 @@ Any other combination is 422 `invalid_scope` (field `scope`). Cost rates exist o
 The **charge-out rate** of a time entry is the first that exists of: level 1 (client, the job's service and the
 person), 2, 3 (the client's rate for the person, else the client's rate for everyone), 4 (the job's own hourly
 rate; undated), 5 (the job's service and the person's *current* grade), 6, 7 (a grade rule in force, else the
-grade's `default_charge_rate`), and finally the practice's `default_charge_rate`. A rule counts only on the days
-inside its period. The **cost rate** is the person's `staff` cost rule, else the grade's cost rule, else the
+grade's `default_charge_rate`), and finally the practice's `default_charge_rate` when it is above 0, else 0 with
+the source `none` ("No rate"). The order of the levels is the practice's **WIP valuation** (below); this is the
+order of the staff-first valuation. A rule counts only on the days inside its period. The **cost rate** is the person's `staff` cost rule, else the grade's cost rule, else the
 grade's `default_cost_rate`, else (`staff_first`) the person's first `staff` cost rule when the day is before it
 starts, else 0. The cost never depends on the client, the job or its billing basis (APT51).
 
 The result and its source are saved on each entry when it is saved (`charge_rate`, `cost_rate`, values and
-`rate_source`, one of `client_service_staff, client_service, client_staff, client, job, service_grade, staff,
-grade, default`). A rate change never touches recorded entries. An unbilled entry is re-priced only when it
+`rate_source`, one of `client_service_staff, client_service, client_staff, client, job, service_staff,
+service_grade, service, staff, grade, default, none`). A rate change never touches recorded entries. An unbilled entry is re-priced only when it
 is itself changed (the Time module's rule: an edit re-takes the rate from the ladder as it is then) or by
 re-rating. The exception is a missing cost: a cost rule for a person or a grade, a grade's default cost rate,
 or a move to another grade fills in the cost of the person's unbilled, unlocked time recorded with a cost of 0
 (charge-out untouched; audit `time_entries.costed`). Migration 064 did the same once for existing time.
 
-**Rate mode.** The practice setting `rate_mode` (`PATCH /organizations/{id}`, `organization.update`, default
-`staff_first`) can be `grade_only`: level 6 (a `staff` charge rule) is then **skipped**, so a person's own rate
-never prices time and their grade's rate does. Levels 1–5, 7 and the practice default are unchanged, and so is the
-**cost** rate (a person's cost rule still comes first). The `staff` rules are kept: they can still be listed,
-created and edited, and they price time again as soon as the mode is switched back. One resolver
-(`app/services/charge_rates.py`) serves a time entry that is saved, `GET /rates/resolve` and re-rating, so the
-preview always shows what saving or re-rating will do: in `grade_only` mode the `staff` step of `charge_ladder`
-comes back with `applicable: false` and the reason "This practice prices by grade only: staff rates are not
-used.". It can also be `staff_only` (APT79): the grade rates (the grade's rate for the service at level 5, and
-level 7) are then skipped, so a person without a `staff` rule is charged the practice default; those steps come
-back with `applicable: false` and the reason "This practice prices by staff rates only: grade rates are not
-used.". The other rates of level 5 and the cost rate are unchanged. Changing the mode never touches recorded
-entries; they follow it only when they are edited or re-rated.
+**WIP valuation (APT84).** The practice setting `wip_valuation_sources` (Settings → General → WIP & billing;
+`PUT /organizations/{id}/wip-valuation`, `organization.update`, see `docs/modules/foundation.md`) lists the
+rate sources switched on, in the order they price time: `client` (levels 1–4: the rates agreed with the client
+and the job's own hourly rate), `service` (level 5), `grade` (level 7) and `staff` (level 6). The ladder tries
+the groups in that order; a group left out is **switched off** and never prices time. Inside `service`, the
+grade's rate for the service (`service_grade`) applies only while `grade` is on; the person's own rate for the
+service and the service's rate for everyone always do. When no group has a rate the practice default applies,
+and when that is 0 the time is valued at 0 with `rate_source` `none` ("No rate"). The **cost** rate never
+depends on it. A new practice starts with client, service, grade, staff; migration 080 gave every existing
+practice the order of its former rate mode, so no value changed: `staff_first` = client, service, staff,
+grade; `grade_only` = client, service, grade (staff off); `staff_only` = client, service, staff (grade off).
+One resolver (`app/services/charge_rates.py`) serves a time entry that is saved, `GET /rates/resolve`, the
+client Jobs tab (`GET /clients/{id}/job-rates`) and re-rating, so the preview always shows what saving or
+re-rating will do: `charge_ladder` lists the groups switched on in their order, then those switched off with
+`applicable: false` and the reason "Switched off in WIP valuation." (a `service_grade` step while grade rates are
+off says "Grade rates are switched off in WIP valuation."), then the practice default and "No rate". The rules of
+a switched-off group are kept and price time again when it is switched back on. Saving a new order re-values the
+unbilled time only on request (`revalue`, after the preview); otherwise recorded entries follow it when they are
+edited or re-rated. Re-rating counts an entry whose source changes at the same rates as a change, so its source
+is brought up to date (time recorded before sources were recorded changes only when its rates do).
+
+**Rate mode (deprecated).** `rate_mode` (`staff_first`, `grade_only`, `staff_only`, APT79) is kept for one
+release for older clients: `GET /organizations/{id}` derives it from `wip_valuation_sources` (`grade_only` when
+grade rates are on and staff rates off, `staff_only` the other way round, else `staff_first`), and `PATCH
+/organizations/{id}` with `rate_mode` sets the order the mode stands for (sending the mode the practice already
+reads as changes nothing). It no longer has a column of its own.
 
 **Overtime.** The practice setting `overtime_enabled` (default false) and `overtime_multiplier_bp` (basis points,
 default 15000 = 1.5x) switch on time marked `is_overtime` (`POST`/`PATCH /time-entries`; 422 while the setting is

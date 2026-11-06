@@ -1,25 +1,29 @@
 """The hourly rate of each of a client's jobs and where it comes from (APT54).
 
 A job of a client is billed, by default, at the **task rate**: the rates set against its service
-(service + grade, staff + service; not service + grade while the practice prices by staff rates
-only, APT79), else each person's charge-out rate. The accountant can agree a
+(service + grade, staff + service; not service + grade while grade rates are switched off in the
+WIP valuation, APT84), else each person's charge-out rate. The accountant can agree a
 custom **client rate** for the job instead: the job's own hourly rate (``jobs.hourly_rate``, level
 4 of the charge-out ladder in ``charge_rates``), set or cleared with ``PATCH /jobs/{id}``. A rate
 agreed with the client for everyone (the client's rate for the job's service, else for any
 service: levels 2 and 3) still comes first, as the ladder has it; the answer names it so the
 screen can say so. Fixed-fee jobs bill their fee and non-billable jobs nothing.
 
+The groups are tried in the practice's WIP valuation order and a group switched off never
+prices, exactly as in ``charge_rates`` (``client``: the client's rates and the job's own rate,
+``service``: the task rate, ``staff``/``grade``: each person's charge-out rate).
+
 Read only; no figure is written. Rule rates need ``rate.read`` (null without it), like ``/rates``;
 the job's own rate and fee are part of the job (``job.read``).
 """
 
 import uuid
+from collections.abc import Sequence
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models.organization import RateMode
 from app.repositories.billing_common import BillingReferenceRepository
-from app.repositories.job_rates import TASK_LEVELS, ChargeRuleRow, JobRateRepository, JobTermsRow
+from app.repositories.job_rates import ChargeRuleRow, JobRateRepository, JobTermsRow
 from app.schemas.job_rates import (
     ClientJobRates,
     ClientRuleRef,
@@ -28,6 +32,7 @@ from app.schemas.job_rates import (
     TaskRate,
 )
 from app.services.billing_common import get_client_or_404, today_for
+from app.services.charge_rates import service_sources
 from app.services.policy import OrgContext, has_permission
 
 RATE_PERMISSION = "rate.read"
@@ -43,15 +48,12 @@ def _client_rule(job: JobTermsRow, rules: list[ChargeRuleRow]) -> ChargeRuleRow 
 
 
 def describe(
-    job: JobTermsRow, rules: list[ChargeRuleRow], show_rates: bool, rate_mode: RateMode
+    job: JobTermsRow, rules: list[ChargeRuleRow], show_rates: bool, sources: Sequence[str]
 ) -> JobRateRead:
-    client_rule = _client_rule(job, rules)
-    # Staff rates only: a grade's rate for the service never prices time, as in ``charge_rates``.
-    levels = (
-        tuple(level for level in TASK_LEVELS if level != "service_grade")
-        if rate_mode == "staff_only"
-        else TASK_LEVELS
-    )
+    client_on = "client" in sources
+    client_rule = _client_rule(job, rules) if client_on else None
+    # The service's rates that apply under the WIP valuation, as in ``charge_rates``.
+    levels = service_sources(sources) if "service" in sources else ()
     task = [
         rule.rate
         for rule in rules
@@ -60,22 +62,29 @@ def describe(
     person_rules = sum(
         1
         for rule in rules
-        if rule.level == "client_staff"
-        or (rule.level == "client_service_staff" and rule.service_id == job.service_id)
+        if client_on
+        and (
+            rule.level == "client_staff"
+            or (rule.level == "client_service_staff" and rule.service_id == job.service_id)
+        )
     )
     source: JobRateSource
     if job.billing_basis == "fixed":
         source = "fixed_fee"
     elif job.billing_basis == "non_billable":
         source = "non_billable"
-    elif client_rule is not None:
-        source = "client_rule"
-    elif job.hourly_rate is not None:
-        source = "job"
-    elif task:
-        source = "task"
     else:
         source = "staff"
+        for group in sources:
+            if group == "client" and client_rule is not None:
+                source = "client_rule"
+            elif group == "client" and job.hourly_rate is not None:
+                source = "job"
+            elif group == "service" and task:
+                source = "task"
+            elif group not in ("staff", "grade"):
+                continue
+            break
     return JobRateRead(
         job_id=job.id,
         billing_basis=job.billing_basis,
@@ -117,5 +126,5 @@ class JobRateService:
             client_id=client.id,
             as_of=today,
             show_rates=show_rates,
-            jobs=[describe(job, rules, show_rates, org.rate_mode) for job in jobs],
+            jobs=[describe(job, rules, show_rates, org.wip_valuation_sources) for job in jobs],
         )

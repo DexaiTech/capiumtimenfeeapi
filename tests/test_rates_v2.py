@@ -58,6 +58,8 @@ async def world(client: AsyncClient):
 
 async def test_precedence_ladder_exact_pence_at_every_level(client: AsyncClient) -> None:
     owner, org, person, acme, svc, job = await world(client)
+    # The staff-first WIP valuation (APT84): a new practice tries the grade before the staff rate.
+    await set_practice(org, wip_valuation_sources=["client", "service", "staff", "grade"])
     snr = await grade_id(org, "SNR")
     await set_grade_rates(org, "SNR", charge=3_000, cost=700)
     ladder = [

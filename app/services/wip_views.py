@@ -119,6 +119,7 @@ def item_read(
         minutes=atom.minutes if is_time else None,
         hours=hours_of(atom.minutes) if is_time else None,
         rate=atom.rate,
+        rate_source=atom.rate_source,
         value=atom.value,
         activity_code_id=atom.activity_code_id,
         supplier=atom.supplier,

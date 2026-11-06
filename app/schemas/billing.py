@@ -203,6 +203,13 @@ class WipItemRead(BaseModel):
     minutes: int | None
     hours: Decimal | None
     rate: int | None
+    rate_source: str | None = Field(
+        default=None,
+        description="Time only: the source of the charge-out rate (`time_entries.rate_source`: "
+        'a level of the rate ladder, `default` for the practice default, `none` for "No rate": '
+        "no source switched on in the WIP valuation had a rate and the practice default is 0); "
+        "null for other items and for time recorded before sources were recorded",
+    )
     value: int = Field(description="What counts in the totals (pence)")
     activity_code_id: uuid.UUID | None = None
     supplier: str | None = None

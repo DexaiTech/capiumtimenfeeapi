@@ -1,6 +1,7 @@
 """Tenancy: the practice (an organization), its roles and its staff (members)."""
 
 import uuid
+from collections.abc import Sequence
 from datetime import date, datetime
 from typing import TYPE_CHECKING, Literal
 
@@ -42,6 +43,37 @@ FixedFeeWipMode = Literal["on_completion", "by_budget_progress"]
 RateMode = Literal["staff_first", "grade_only", "staff_only"]
 # How a practice locks: a lock covers one week, month, quarter or accounting year.
 LockGranularity = Literal["weekly", "monthly", "quarterly", "annually"]
+# The rate sources that value time (WIP valuation, APT84), in the order a new practice uses them.
+WipValuationSource = Literal["client", "service", "grade", "staff"]
+WIP_VALUATION_SOURCES: tuple[WipValuationSource, ...] = ("client", "service", "grade", "staff")
+# The order each (deprecated) rate mode stands for; migration 080 gave every practice the one of
+# its rate mode, so no recorded value changed.
+RATE_MODE_SOURCES: dict[RateMode, tuple[WipValuationSource, ...]] = {
+    "staff_first": ("client", "service", "staff", "grade"),
+    "grade_only": ("client", "service", "grade"),
+    "staff_only": ("client", "service", "staff"),
+}
+
+
+def rate_mode_of(sources: Sequence[str]) -> RateMode:
+    """The rate mode closest to an order: ``grade_only`` when grade rates are on and staff rates
+    off, ``staff_only`` the other way round, else ``staff_first``."""
+    if "grade" in sources and "staff" not in sources:
+        return "grade_only"
+    if "staff" in sources and "grade" not in sources:
+        return "staff_only"
+    return "staff_first"
+
+
+# 1 to 4 of the sources, each at most once (migration 080).
+WIP_VALUATION_CHECK = (
+    "cardinality(wip_valuation_sources) BETWEEN 1 AND 4 "
+    "AND wip_valuation_sources <@ ARRAY['client', 'service', 'grade', 'staff']::text[] "
+    + " ".join(
+        f"AND cardinality(array_positions(wip_valuation_sources, '{source}')) <= 1"
+        for source in WIP_VALUATION_SOURCES
+    )
+)
 
 
 class Organization(Base, IdMixin, TimestampMixin, SoftDeleteMixin):
@@ -89,9 +121,7 @@ class Organization(Base, IdMixin, TimestampMixin, SoftDeleteMixin):
             "AND recovery_rate_order @> ARRAY['client_job', 'task', 'staff']::text[]",
             name="recovery_rate_order",
         ),
-        CheckConstraint(
-            "rate_mode IN ('staff_first', 'grade_only', 'staff_only')", name="rate_mode"
-        ),
+        CheckConstraint(WIP_VALUATION_CHECK, name="wip_valuation_sources"),
         CheckConstraint(
             "overtime_multiplier_bp BETWEEN 10000 AND 100000", name="overtime_multiplier_bp"
         ),
@@ -205,10 +235,12 @@ class Organization(Base, IdMixin, TimestampMixin, SoftDeleteMixin):
     expense_markup_bp: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default=text("0")
     )
-    # Which rates price time: ``staff_first`` takes a staff member's own rate before their grade's;
-    # ``grade_only`` skips the staff-level rate (rung 6 of the ladder) so the grade rate applies;
-    # ``staff_only`` skips the grade rates so a person without their own rate gets the default.
-    rate_mode: Mapped[RateMode] = mapped_column(Text, nullable=False, server_default="staff_first")
+    # WIP valuation (APT84): the rate sources that price time, first to last (``client``: the
+    # client's rates and the job's own rate, ``service``, ``grade``, ``staff``). A source left out
+    # is switched off. It replaced ``rate_mode``, which is now derived from it (below).
+    wip_valuation_sources: Mapped[list[str]] = mapped_column(
+        ARRAY(Text), nullable=False, server_default=text("'{client,service,grade,staff}'::text[]")
+    )
     # Period locks: locks are exactly one period of this length inside the accounting year that
     # starts on ``financial_year_start_month``/``_day`` (1 January: the calendar year). It stays
     # unconfirmed (``period_lock_configured`` false) until someone makes the choice.
@@ -265,6 +297,16 @@ class Organization(Base, IdMixin, TimestampMixin, SoftDeleteMixin):
     created_by: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id"), nullable=False
     )
+
+    @property
+    def rate_mode(self) -> RateMode:
+        """Deprecated (APT84): derived from ``wip_valuation_sources``. Setting it sets the order
+        the mode stands for (``RATE_MODE_SOURCES``), so an older client keeps working."""
+        return rate_mode_of(self.wip_valuation_sources)
+
+    @rate_mode.setter
+    def rate_mode(self, mode: RateMode) -> None:
+        self.wip_valuation_sources = list(RATE_MODE_SOURCES[mode])
 
 
 class Permission(Base, IdMixin, TimestampMixin):

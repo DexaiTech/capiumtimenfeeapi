@@ -90,15 +90,16 @@ def _staff(_: Organization, facts: OnboardingFacts) -> Check:
 
 
 def _grades_rates(org: Organization, facts: OnboardingFacts) -> Check:
-    # Staff rates only (APT79): a grade's rate (its default charge-out rate, a grade or service +
-    # grade rule) never prices time, so it does not count as the rates being set up.
-    staff_only = org.rate_mode == "staff_only"
-    grades = 0 if staff_only else facts.grades_with_rate
-    rules = facts.charge_rules_without_grade if staff_only else facts.charge_rules
+    # Grade rates switched off in the WIP valuation (APT84): a grade's rate (its default
+    # charge-out rate, a grade or service + grade rule) never prices time, so it does not count
+    # as the rates being set up.
+    grade_off = "grade" not in org.wip_valuation_sources
+    grades = 0 if grade_off else facts.grades_with_rate
+    rules = facts.charge_rules_without_grade if grade_off else facts.charge_rules
     done = grades > 0 or rules > 0 or org.default_charge_rate > 0
     detail = _count(facts.grades_with_rate, "grade") + " with a default charge-out rate"
-    if staff_only:
-        detail += " (not used: the practice prices by staff rates only)"
+    if grade_off:
+        detail += " (not used: grade rates are switched off in WIP valuation)"
     return Check(done, detail)
 
 

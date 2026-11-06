@@ -83,9 +83,10 @@ async def test_downgrading_removes_what_020_added_and_upgrading_seeds_every_prac
         assert await sql(ESTIMATE_ROW, o=org["id"]) == [
             {"prefix": "EST", "padding": 5, "next_number": 1}
         ]
-        assert await sql("SELECT rate_mode FROM organizations WHERE id = :o", o=org["id"]) == [
-            {"rate_mode": "staff_first"}
-        ]
+        # Migration 080 (APT84) turned the rate mode into the WIP valuation it stands for.
+        assert await sql(
+            "SELECT wip_valuation_sources AS s FROM organizations WHERE id = :o", o=org["id"]
+        ) == [{"s": ["client", "service", "staff", "grade"]}]
     assert await scalar("SELECT count(*) FROM period_locks") == 2
     assert await scalar("SELECT count(*) FROM period_lock_events") == 0
 

@@ -41,6 +41,8 @@ the JSON keep the word `organization`.
 | GET | `/organizations/by-slug/{slug}` | active member | Resolve a slug |
 | GET | `/organizations/{id}` | `organization.read` | The practice, my role and my permissions |
 | PATCH | `/organizations/{id}` | `organization.update` | Practice and billing settings |
+| POST | `/organizations/{id}/wip-valuation/preview` | `organization.update` | What re-valuing the unbilled time by a WIP valuation would do; nothing is saved |
+| PUT | `/organizations/{id}/wip-valuation` | `organization.update` | Save the WIP valuation, optionally re-valuing the unbilled time |
 | DELETE | `/organizations/{id}` | `organization.delete` | Soft delete; body `{confirm_name}` |
 | GET | `/organizations/{id}/members` | `member.read` | Staff, by name, cursor-paginated; `status` (repeatable), `role_id`, `q` |
 | GET | `/organizations/{id}/members/{user_id}` | `member.read` | One member (any status, removed included) |
@@ -77,7 +79,7 @@ target is looked up, so a caller without the permission gets 403 for any id.
   "wip_adjustment_approval_required": true, "expense_approval_required": true,
   "receipt_required_threshold": 2500, "invoice_approval_required": false,
   "invoice_approval_threshold": 0, "mileage_rate": 45, "expense_markup_bp": 0,
-  "rate_mode": "staff_first",
+  "wip_valuation_sources": ["client", "service", "grade", "staff"], "rate_mode": "staff_first",
   "email": null, "phone": null,
   "address_line1": null, "address_line2": null, "city": null, "postcode": null,
   "country": "GB", "bank_details": null, "invoice_footer": null, "created_at": "…Z"
@@ -110,7 +112,7 @@ target is looked up, so a caller without the permission gets 403 for any id.
 | `expense_markup_bp` | integer basis points, 0–100 000 (1000 = 10%) |
 | `cost_plus_markup_bp` | integer basis points, 0–100 000 (5000 = 50%) |
 | `recovery_rate_order` | `client_job`, `task` and `staff`, each once, in any order |
-| `rate_mode` | `staff_first`, `grade_only` or `staff_only` |
+| `rate_mode` | Deprecated: `staff_first`, `grade_only` or `staff_only`; sets the WIP valuation it stands for (see [WIP valuation](#wip-valuation)) |
 | `country` | ISO 3166 alpha-2, upper case |
 | `vat_number`, `company_number` (≤ 20), `email` (valid address), `phone` (≤ 40), `address_line1`, `address_line2` (≤ 200), `city` (≤ 100), `postcode` (≤ 20), `bank_details` (≤ 500), `invoice_footer` (≤ 1000) | nullable: `null`, `""` or blanks clear them; text is trimmed |
 
@@ -136,7 +138,8 @@ their own `time_increment_minutes`):
 | `expense_markup_bp` | 0 | Basis points added when an expense is recharged to the client |
 | `cost_plus_markup_bp` | 5 000 (50%) | The margin on cost of the "cost plus" basis of the recovery analysis (`docs/modules/reports.md`), unless the client or the job has its own |
 | `recovery_rate_order` | `client_job`, `task`, `staff` | The order in which the recovery analysis looks for the rate the work could have been billed at |
-| `rate_mode` | `staff_first` | `grade_only` skips the staff-level rate when time is priced, `staff_only` the grade rates (`docs/domain.md`, "Rates") |
+| `wip_valuation_sources` | `client`, `service`, `grade`, `staff` | The rate sources that price time, in order; see [WIP valuation](#wip-valuation) |
+| `rate_mode` | `staff_first` | Deprecated, derived from `wip_valuation_sources` |
 | `client_segments_enabled` | true | Whether the practice uses client segments (see [Client segments switch](#client-segments-switch)) |
 | `branches_enabled` | false | Whether the practice uses branches: on, every client needs one (see [Branches switch](#branches-switch)) |
 
@@ -145,6 +148,32 @@ threshold of -1 or 100 000 001, a `mileage_rate` of 1001, an `expense_markup_bp`
 fraction, a value outside the two modes); the database keeps the same bounds in named check
 constraints (`ck_organizations_*`). Every change is audited as `organization.updated` with
 `changes: {setting: [old, new]}`, and everyone in the practice can read them.
+
+### WIP valuation
+
+Ticket APT84: the practice chooses which rate sources value its time and in what order (Settings →
+General → WIP & billing, "WIP valuation"). `wip_valuation_sources` lists the sources switched on,
+first to last: `client` (the rates agreed with the client and the job's own hourly rate), `service`,
+`grade` and `staff`; 1 to 4, each once (check constraint `ck_organizations_wip_valuation_sources`).
+How the rate ladder uses it: `docs/modules/team-rates.md`, "WIP valuation". It is changed with its
+own endpoints, not with `PATCH`:
+
+* `POST /organizations/{id}/wip-valuation/preview` — body `{"sources": ["client", "service",
+  "grade", "staff"]}`. Nothing is saved. Response `{entries_changed, wip_before, wip_after,
+  skipped: {billed, in_draft, locked, written_off}, too_many}`: the unbilled time entries whose rate,
+  value or source would change, the value (pence) of the unbilled, unlocked time now and by the new
+  order, and the time left alone. `too_many` (the other fields null) above 20 000 unbilled entries.
+* `PUT /organizations/{id}/wip-valuation` — body `{"sources": [...], "revalue": false}`. Saves the
+  order (audit `organization.updated`, `changes: {wip_valuation_sources: [old, new]}`, only when it
+  changes) and returns `OrganizationRead`. With `revalue: true` the unbilled time is re-valued by it in
+  the same transaction through the re-rate engine (a re-rate run, audit `rate.rerun` with
+  `wip_valuation_sources`); billed, in-draft, written-off and period-locked time keeps its value. 422
+  `WIP_VALUATION_TOO_LARGE` with `revalue` above 20 000 unbilled entries (save without re-valuing and
+  re-rate in parts in Team → Rates → Change Rates on Past Time).
+
+Both need `organization.update`. 422 `WIP_VALUATION_SOURCES` ("Keep at least one rate switched on.")
+when `sources` is empty, names another source or names one twice. The deprecated `rate_mode` is
+derived from the order and `PATCH` still accepts it (see the table above).
 
 ### Approval switches
 

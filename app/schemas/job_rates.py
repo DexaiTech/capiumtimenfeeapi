@@ -24,7 +24,8 @@ class ClientRuleRef(BaseModel):
 
 class TaskRate(BaseModel):
     """The rates set against the job's service (service + grade, staff + service) in force; no
-    service + grade rate while the practice prices by staff rates only."""
+    service + grade rate while grade rates are switched off in the WIP valuation, and none while
+    the service source is."""
 
     low: int = Field(description="The lowest, pence per hour")
     high: int = Field(description="The highest, pence per hour (= `low` when they agree)")

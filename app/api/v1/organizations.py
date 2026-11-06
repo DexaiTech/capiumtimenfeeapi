@@ -5,7 +5,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Path, status
 
 from app.dependencies.auth import VerifiedPrincipalDep
-from app.dependencies.common import ContextDep, SessionDep, forbid_when_closed
+from app.dependencies.common import ContextDep, SessionDep, SettingsDep, forbid_when_closed
 from app.dependencies.organization import require
 from app.schemas.common import ApiResponse, error_responses, ok
 from app.schemas.organization import (
@@ -14,11 +14,15 @@ from app.schemas.organization import (
     OrganizationDelete,
     OrganizationRead,
     OrganizationUpdate,
+    WipValuationPreview,
+    WipValuationPreviewRequest,
+    WipValuationUpdate,
 )
 from app.services.integration_connections import ConnectionService
 from app.services.integrations import CENTRAL_CLIENT
 from app.services.organizations import OrganizationService
 from app.services.policy import OrgContext
+from app.services.wip_valuation import WipValuationService
 
 router = APIRouter(prefix="/organizations", tags=["Organizations"])
 me_router = APIRouter(prefix="/users/me", tags=["Organizations"])
@@ -29,6 +33,14 @@ def get_organization_service(session: SessionDep) -> OrganizationService:
 
 
 OrganizationServiceDep = Annotated[OrganizationService, Depends(get_organization_service)]
+
+
+def get_wip_valuation_service(session: SessionDep, settings: SettingsDep) -> WipValuationService:
+    return WipValuationService(session, settings)
+
+
+WipValuationServiceDep = Annotated[WipValuationService, Depends(get_wip_valuation_service)]
+SettingsEditor = Annotated[OrgContext, Depends(require("organization.update"))]
 NoCreationWhenClosed = Depends(
     forbid_when_closed(
         "ORGANIZATION_CREATION_DISABLED",
@@ -155,7 +167,8 @@ async def get_organization(
         "`invoice_approval_required`, `invoice_approval_threshold` (pence, 0 to 100000000), "
         "`payment_reminders_enabled`, `payment_reminder_days_after_due` (1 to 365), "
         "`mileage_rate` (pence per mile, 0 to 1000), `expense_markup_bp` (basis points, 0 to "
-        "100000), `rate_mode` (`staff_first`, `grade_only` or `staff_only`), "
+        "100000), `rate_mode` (deprecated: `staff_first`, `grade_only` or `staff_only`, "
+        "mapped to the WIP valuation it stands for; see `PUT .../wip-valuation`), "
         "`cost_plus_markup_bp` (basis points, 0 to 100000, the margin on cost of the recovery "
         "analysis) and "
         "`recovery_rate_order` (`client_job`, `task` and `staff`, each once, in the order the "
@@ -183,6 +196,60 @@ async def update_organization(
 ) -> ApiResponse[OrganizationRead]:
     organization = await service.update(org, body, ctx)
     return ok(OrganizationRead.from_model(organization), "Practice settings updated")
+
+
+@router.post(
+    "/{organization_id}/wip-valuation/preview",
+    summary="Preview a WIP valuation",
+    description=(
+        "Nothing is saved. Says what re-valuing the practice's unbilled time by the WIP "
+        "valuation `sources` (`client`, `service`, `grade`, `staff`: the rate sources switched "
+        "on, in priority order) would do: `entries_changed` (rate, value or rate source), "
+        "`wip_before` and `wip_after` (pence, the unbilled time that would be re-valued) and "
+        "`skipped` (billed, in-draft, written-off and period-locked time, which keeps its "
+        "value). `too_many` (the other figures null) when the practice has more than 20,000 "
+        'unbilled entries: save without re-valuing. 422 `WIP_VALUATION_SOURCES` "Keep at least '
+        'one rate switched on." when `sources` is empty, and when it names another source or '
+        "one twice. Requires `organization.update`."
+    ),
+    responses=error_responses(403, 404),
+)
+async def preview_wip_valuation(
+    body: WipValuationPreviewRequest, org: SettingsEditor, service: WipValuationServiceDep
+) -> ApiResponse[WipValuationPreview]:
+    return ok(await service.preview(org, body))
+
+
+@router.put(
+    "/{organization_id}/wip-valuation",
+    summary="Save the WIP valuation",
+    description=(
+        "Saves `sources` as the practice's WIP valuation (`wip_valuation_sources`): the rate "
+        "sources that price time, first to last, of `client` (the rates agreed with the client "
+        "and the job's own hourly rate), `service`, `grade` and `staff`; the ones left out are "
+        "switched off. Time recorded from now on is priced by it. With `revalue` the practice's "
+        "unbilled time is re-valued by it in the same transaction (a re-rate run, audited "
+        "`rate.rerun`; billed, in-draft, written-off and period-locked time keeps its value). "
+        "A change is audited as `organization.updated` (`changes.wip_valuation_sources`). "
+        '422 `WIP_VALUATION_SOURCES` "Keep at least one rate switched on." when `sources` is '
+        "empty, and when it names another source or one twice; 422 `WIP_VALUATION_TOO_LARGE` "
+        "with `revalue` when the practice has more than 20,000 unbilled entries (save without "
+        "re-valuing and re-rate in parts in Team > Rates > Change Rates on Past Time). "
+        "Returns the practice. Requires `organization.update`."
+    ),
+    responses=error_responses(403, 404),
+)
+async def update_wip_valuation(
+    body: WipValuationUpdate,
+    org: SettingsEditor,
+    service: WipValuationServiceDep,
+    ctx: ContextDep,
+) -> ApiResponse[OrganizationRead]:
+    organization, run = await service.update(org, body, ctx)
+    message = "WIP valuation saved"
+    if run is not None:
+        message += f", {run.entries_changed} entries re-valued"
+    return ok(OrganizationRead.from_model(organization), message)
 
 
 @router.delete(

@@ -43,12 +43,16 @@ An item of `GET /clients/{client_id}/wip` (the legacy keys are kept, the new one
   "job": {"id": "…", "number": "J00042", "name": "Accounts 2026"},
   "person": {"user_id": "…", "full_name": "Grace Hopper"},
   "description": "Bank reconciliation", "minutes": 90, "hours": "1.50", "rate": 12000,
-  "value": 18000, "charge_value": 18000, "component": "time", "selectable": true,
+  "rate_source": "staff", "value": 18000, "charge_value": 18000, "component": "time", "selectable": true,
   "activity_code_id": null, "supplier": null, "claim_id": null, "fixed_fee": null
 }
 ```
 
 * `value` is what counts in the totals, `charge_value` (time only) what the time is worth at its charge-out rate: they differ only for time on a fixed-fee job whose fee is already recognised (value `0`, see section 3).
+* `rate` (time only) is the charge-out rate the time was valued at and `rate_source` where it came from
+  (`time_entries.rate_source`, the levels of `docs/modules/team-rates.md`, valued by the practice's WIP
+  valuation, APT84). `none` is **"No rate"**: no source switched on had a rate and the practice default is
+  0, so the time is valued at 0. Null for other kinds and for time recorded before sources were recorded.
 * `selectable` says whether billing may take **this item by its id** (`time`, `disbursement`, `expense`: yes; `fixed_fee`, `adjustment`: no).
 * `person`: the person who did the work (time), the claimant (expense), the person who recorded it (disbursement).
 * `fixed_fee` (kind `fixed_fee` only): `{fee, recognised, billed, mode, progress_bp, time_entry_ids}`.

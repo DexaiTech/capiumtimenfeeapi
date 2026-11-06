@@ -175,7 +175,7 @@ async def test_staff_rates_only_leaves_out_the_grade_rates_for_the_service(clien
     accounts = await make_job(org, anker, "Annual Accounts", service_id=uuid.UUID(service["id"]))
     assert _job(await _rates(client, owner, org, anker.id), accounts.id)["source"] == "task"
 
-    await set_practice(org, rate_mode="staff_only")
+    await set_practice(org, wip_valuation_sources=["client", "service", "staff"])
     row = _job(await _rates(client, owner, org, anker.id), accounts.id)
     assert row["source"] == "staff" and row["task_rate"] is None
 

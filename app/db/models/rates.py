@@ -69,6 +69,7 @@ RATE_SOURCES = (
     "staff",
     "grade",
     "default",
+    "none",
 )
 _NIL = "'00000000-0000-0000-0000-000000000000'::uuid"
 

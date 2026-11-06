@@ -556,11 +556,12 @@ async def test_grade_rates_do_not_set_up_the_rates_of_a_staff_rates_only_practic
     await _grade_rate(client, owner, org)
     assert steps(await checklist(client, owner, org))["grades_rates"]["state"] == "done"
 
-    await set_practice(org, rate_mode="staff_only")
+    await set_practice(org, wip_valuation_sources=["client", "service", "staff"])
     step = steps(await checklist(client, owner, org))["grades_rates"]
     assert (step["state"], step["detected"]) == ("todo", False)
     assert step["detail"] == (
-        "1 grade with a default charge-out rate (not used: the practice prices by staff rates only)"
+        "1 grade with a default charge-out rate (not used: grade rates are switched off in WIP "
+        "valuation)"
     )
     # A practice default rate (or any charge-out rule) still counts.
     await _practice_default_rate(client, owner, org)
@@ -570,7 +571,7 @@ async def test_grade_rates_do_not_set_up_the_rates_of_a_staff_rates_only_practic
 async def test_grade_rules_do_not_set_up_the_rates_of_a_staff_rates_only_practice(client):
     """APT79: in the staff rates only mode a grade's charge-out rule prices nothing either."""
     owner, org = await practice(client)
-    await set_practice(org, rate_mode="staff_only")
+    await set_practice(org, wip_valuation_sources=["client", "service", "staff"])
     snr = await grade_id(org)
     await new_rate(client, owner, org, kind="charge", grade_id=snr, rate=3_700, effective_from=FROM)
     assert steps(await checklist(client, owner, org))["grades_rates"]["state"] == "todo"
