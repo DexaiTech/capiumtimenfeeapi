@@ -10,12 +10,14 @@ Ticket APT84: the practice chooses which rate sources value its time, and in wha
   most once. Each practice gets the order of its rate mode, so no value changes: ``staff_first``
   -> client, service, staff, grade; ``grade_only`` -> client, service, grade; ``staff_only`` ->
   client, service, staff. A new practice starts with client, service, grade, staff.
-* ``organizations.rate_mode`` is dropped: the API derives it from the sources.
+* ``organizations.rate_mode`` is kept, with its check, for one release: the API derives the rate
+  mode from the sources and keeps this column equal to it, so the API of the previous release can
+  still read it while a deploy runs. A later migration drops it.
 * ``time_entries.rate_source`` may be ``none``: no enabled source had a rate and the practice
   default is 0 ("No rate").
 
-Downgrading gives each practice the rate mode closest to its sources and records ``none`` as
-``default`` again (both valued at 0).
+Downgrading sets each practice's rate mode to the one closest to its sources and records ``none``
+as ``default`` again (both valued at 0).
 """
 
 from collections.abc import Sequence
@@ -72,18 +74,12 @@ def upgrade() -> None:
     op.create_check_constraint(
         op.f("ck_organizations_wip_valuation_sources"), "organizations", _SOURCES_CHECK
     )
-    op.drop_constraint(op.f("ck_organizations_rate_mode"), "organizations", type_="check")
-    op.drop_column("organizations", "rate_mode")
     _rate_source_check(_NEW_SOURCES)
 
 
 def downgrade() -> None:
     op.execute("UPDATE time_entries SET rate_source = 'default' WHERE rate_source = 'none'")
     _rate_source_check(_OLD_SOURCES)
-    op.add_column(
-        "organizations",
-        sa.Column("rate_mode", sa.Text(), server_default="staff_first", nullable=False),
-    )
     op.execute(
         "UPDATE organizations SET rate_mode = CASE "
         "WHEN 'grade' = ANY(wip_valuation_sources) AND NOT 'staff' = ANY(wip_valuation_sources) "
@@ -91,11 +87,6 @@ def downgrade() -> None:
         "WHEN 'staff' = ANY(wip_valuation_sources) AND NOT 'grade' = ANY(wip_valuation_sources) "
         "THEN 'staff_only' "
         "ELSE 'staff_first' END"
-    )
-    op.create_check_constraint(
-        op.f("ck_organizations_rate_mode"),
-        "organizations",
-        "rate_mode IN ('staff_first', 'grade_only', 'staff_only')",
     )
     op.drop_constraint(
         op.f("ck_organizations_wip_valuation_sources"), "organizations", type_="check"

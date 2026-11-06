@@ -238,7 +238,7 @@ async def test_another_practice_cannot_be_changed(client):
 @pytest.mark.parametrize(
     ("assignment", "constraint"),
     [
-        ("wip_valuation_sources = '{}'", "ck_organizations_wip_valuation_sources"),
+        ("rate_mode = 'staff'", "ck_organizations_rate_mode"),
         ("fixed_fee_wip_mode = 'never'", "ck_organizations_fixed_fee_wip_mode"),
         (
             "wip_adjustment_approval_threshold = -1",

@@ -425,7 +425,8 @@ is brought up to date (time recorded before sources were recorded changes only w
 release for older clients: `GET /organizations/{id}` derives it from `wip_valuation_sources` (`grade_only` when
 grade rates are on and staff rates off, `staff_only` the other way round, else `staff_first`), and `PATCH
 /organizations/{id}` with `rate_mode` sets the order the mode stands for (sending the mode the practice already
-reads as changes nothing). It no longer has a column of its own.
+reads as changes nothing). Its column is kept, in step with the order, for one release only (a later
+migration drops it).
 
 **Overtime.** The practice setting `overtime_enabled` (default false) and `overtime_multiplier_bp` (basis points,
 default 15000 = 1.5x) switch on time marked `is_overtime` (`POST`/`PATCH /time-entries`; 422 while the setting is

@@ -501,6 +501,12 @@ async def test_migration_080_gives_each_practice_the_order_of_its_rate_mode(
     ok_data(await put(client, custom_owner, custom, ["grade", "client"]))
     person = await staff(org)
     no_rate = await make_time_entry(org, person, charge_rate=0, cost_rate=0, rate_source="none")
+    # Every write of the order keeps the former rate mode column in step (one release).
+    rows = await sql("SELECT id::text AS id, rate_mode FROM organizations")
+    modes = {row["id"]: row["rate_mode"] for row in rows}
+    for mode, (_, practice_org) in practices.items():
+        assert modes[practice_org["id"]] == mode
+    assert modes[custom["id"]] == "grade_only"
 
     try:
         down = await migrate("downgrade", "079")
@@ -529,11 +535,15 @@ async def test_migration_080_gives_each_practice_the_order_of_its_rate_mode(
     for mode, (_, practice_org) in practices.items():
         assert sources[practice_org["id"]] == list(RATE_MODE_SOURCES[mode]), mode
     assert sources[custom["id"]] == list(RATE_MODE_SOURCES["grade_only"])
-    columns = await sql(
-        "SELECT column_name FROM information_schema.columns "
-        "WHERE table_name = 'organizations' AND column_name = 'rate_mode'"
-    )
-    assert columns == []
+    # The former column stays for one release, in step with the order.
+    rows = await sql("SELECT id::text AS id, rate_mode FROM organizations")
+    modes = {row["id"]: row["rate_mode"] for row in rows}
+    for mode, (_, practice_org) in practices.items():
+        assert modes[practice_org["id"]] == mode
+    ok_data(await put(client, custom_owner, custom, ["client", "staff"]))
+    assert await sql("SELECT rate_mode FROM organizations WHERE id = :o", o=custom["id"]) == [
+        {"rate_mode": "staff_only"}
+    ]
     # A practice created now starts with the ticket's default order.
     _, fresh = await practice(client, "Fresh Practice")
     assert fresh["wip_valuation_sources"] == NEW_PRACTICE

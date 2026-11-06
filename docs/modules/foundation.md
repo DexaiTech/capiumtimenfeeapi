@@ -173,7 +173,10 @@ own endpoints, not with `PATCH`:
 
 Both need `organization.update`. 422 `WIP_VALUATION_SOURCES` ("Keep at least one rate switched on.")
 when `sources` is empty, names another source or names one twice. The deprecated `rate_mode` is
-derived from the order and `PATCH` still accepts it (see the table above).
+derived from the order and `PATCH` still accepts it (see the table above). The column
+`organizations.rate_mode` is kept for one release only, so the API of the previous release can read
+it while a deploy runs: every write of `wip_valuation_sources` sets it to the derived mode, nothing
+reads it, and a later migration drops it.
 
 ### Approval switches
 

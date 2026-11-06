@@ -23,7 +23,7 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, UUID
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 
 from app.db.base import Base, IdMixin, SoftDeleteMixin, TimestampMixin
 from app.db.models.user import User
@@ -122,6 +122,9 @@ class Organization(Base, IdMixin, TimestampMixin, SoftDeleteMixin):
             name="recovery_rate_order",
         ),
         CheckConstraint(WIP_VALUATION_CHECK, name="wip_valuation_sources"),
+        CheckConstraint(
+            "rate_mode IN ('staff_first', 'grade_only', 'staff_only')", name="rate_mode"
+        ),
         CheckConstraint(
             "overtime_multiplier_bp BETWEEN 10000 AND 100000", name="overtime_multiplier_bp"
         ),
@@ -241,6 +244,12 @@ class Organization(Base, IdMixin, TimestampMixin, SoftDeleteMixin):
     wip_valuation_sources: Mapped[list[str]] = mapped_column(
         ARRAY(Text), nullable=False, server_default=text("'{client,service,grade,staff}'::text[]")
     )
+    # The former ``rate_mode`` column, kept for one release (APT84) so an API of the previous
+    # release still reads it during a deploy; kept equal to ``rate_mode_of`` the sources on every
+    # write of them. Nothing reads it; a later migration drops it.
+    legacy_rate_mode: Mapped[RateMode] = mapped_column(
+        "rate_mode", Text, nullable=False, server_default="staff_first"
+    )
     # Period locks: locks are exactly one period of this length inside the accounting year that
     # starts on ``financial_year_start_month``/``_day`` (1 January: the calendar year). It stays
     # unconfirmed (``period_lock_configured`` false) until someone makes the choice.
@@ -307,6 +316,11 @@ class Organization(Base, IdMixin, TimestampMixin, SoftDeleteMixin):
     @rate_mode.setter
     def rate_mode(self, mode: RateMode) -> None:
         self.wip_valuation_sources = list(RATE_MODE_SOURCES[mode])
+
+    @validates("wip_valuation_sources")
+    def _sync_legacy_rate_mode(self, _key: str, sources: list[str]) -> list[str]:
+        self.legacy_rate_mode = rate_mode_of(sources)
+        return sources
 
 
 class Permission(Base, IdMixin, TimestampMixin):
