@@ -151,7 +151,7 @@ A caller with `audit_log.read` reads the history of **every** record type. Anyon
 | `disbursement`, `wip_write_off` | A disbursement, a WIP write-off | `wip.read` |
 | `time_entry`, `timesheet` | A time entry, a timesheet | `time.read_all` |
 | `expense_claim`, `expense`, `expense_receipt` | A claim, its lines, its receipts | `expense.read_all` |
-| `rate_rule`, `staff_rate`, `client_rate` | Rates | `rate.read` |
+| `rate_rule`, `staff_rate`, `client_rate`, `overtime_rate` | Rates, overtime rates | `rate.read` |
 | `ticket`, `ticket_comment`, `ticket_attachment` | A ticket and what hangs from it | `ticket.read` |
 | `period_lock` | The practice's period lock | `period_lock.read` |
 | anything else (`member`, `role`, `organization`, `vat_rate`, `sequence`, ...) | Staff, roles and settings | `audit_log.read` only |
@@ -237,11 +237,11 @@ The trail holds what each module writes; the full list of actions by module:
 |---|---|
 | Sign-in (`user`, `session`; no practice) | `auth.registered`, `auth.email_verified`, `auth.login`, `auth.login_failed`, `auth.logout`, `auth.logout_all`, `auth.refresh_reuse_detected`, `auth.password_reset_requested`, `auth.password_reset`, `auth.password_changed`, `auth.session_revoked` |
 | Practice (`organization`) | `organization.created`, `.updated` (with `changes`), `.deleted` |
-| Staff and roles (`member`, `role`) | `member.created`, `.updated`, `.role_changed`, `.suspended`, `.reactivated`, `.removed`, `.password_reset`; `staff.created`, `.updated`, `.deactivated`, `.left`, `.reactivated`, `.deleted`, `.invited`, `.login_linked`, `.login_unlinked`; `role.created`, `.updated`, `.permissions_changed`, `.deleted` |
+| Staff and roles (`member`, `role`) | `member.created`, `.updated`, `.role_changed`, `.suspended`, `.reactivated`, `.removed`, `.password_reset`; `staff.created`, `.updated`, `.deactivated`, `.left`, `.reactivated`, `.deleted`, `.invited`, `.login_linked`, `.login_unlinked`; `staff_hours.added`, `.ended`, `.deleted` (working hours, on the member); `role.created`, `.updated`, `.permissions_changed`, `.deleted` |
 | Clients (`client`, `client_contact`, `client_service`) | `client.created`, `.updated`, `.archived`, `.deleted`, `.imported`, `.central_*`; `client_contact.*`, `client_service.*` |
 | Jobs (`job`, `task`) | `job.created`, `.updated`, `.status_changed`, `.assignees_changed`, `.copied`, `.deleted`, `.budget_alert`, `.tasks_reordered`; `task.created`, `.updated`, `.status_changed`, `.assignees_changed`, `.deleted` |
 | Time (`time_entry`, `timesheet`) | `time_entry.created`, `.updated`, `.deleted`, `.copied`, `.week_copied`, `.corrected`; `timesheet.submitted`, `.recalled`, `.approved`, `.rejected`, `.reopened`, `.reminders_sent` |
-| Rates (`rate_rule`, `staff_rate`, `client_rate`, `rate_rerun`) | `rate.created`, `.updated`, `.deleted`, `.rerun`; `staff_rate.*`, `client_rate.*`; `time_entries.revalued`, `time_entries.costed` |
+| Rates (`rate_rule`, `staff_rate`, `client_rate`, `rate_rerun`, `overtime_rate`) | `rate.created`, `.updated`, `.deleted`, `.rerun`; `staff_rate.*`, `client_rate.*`; `overtime_rate.added`, `.ended`, `.deleted`; `time_entries.revalued`, `time_entries.costed` |
 | Expenses (`disbursement`, `expense_claim`, `expense`, `expense_receipt`, `expense_type`) | `disbursement.*`; `expense_claim.created`, `.updated`, `.deleted`, `.submitted`, `.recalled`, `.returned`, `.approved`; `expense.created`, `.updated`, `.corrected`, `.deleted`; `expense_receipt.added`, `.deleted`; `expense_type.*` |
 | Billing (`invoice`, `credit_note`, `payment`, `wip_write_off`) | `invoice.draft_created`, `.wip_added`, `.updated`, `.line_added`, `.line_updated`, `.line_removed`, `.draft_deleted`, `.issued`, `.voided`, `.send_queued`; `credit_note.issued`; `payment.recorded`, `.allocated`, `.unallocated`, `.voided`; `wip.written_off`, `.write_off_reversed` |
 | Period lock (`period_lock`) | `period_lock.locked`, `.reopened` (with `reason` and `changes.locked_through`) |

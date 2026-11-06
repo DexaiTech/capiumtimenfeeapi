@@ -38,6 +38,8 @@ _NOT_HISTORY = frozenset(
         # The person's inbox and their own settings go with their membership.
         "notifications",
         "notification_preferences",
+        # Their working hours (APT81) are part of the membership, like its weekly capacity.
+        "staff_hours_bases",
     }
 )
 # Ids kept without a foreign key (the history outlives what it names).

@@ -36,6 +36,7 @@ from app.api.v1 import (
     onboarding,
     opening_balances,
     organizations,
+    overtime_rates,
     payments,
     people,
     period_locks,
@@ -47,6 +48,7 @@ from app.api.v1 import (
     segments,
     settings,
     staff,
+    staff_hours,
     statement_sends,
     system,
     ticket_tags,
@@ -75,6 +77,7 @@ api_router.include_router(people.router)
 # Before staff, rates and jobs: /staff/export, /rates/export and /jobs/export are not ids.
 api_router.include_router(data_import_export.router)
 api_router.include_router(staff.router)
+api_router.include_router(staff_hours.router)
 api_router.include_router(grades.router)
 api_router.include_router(roles.permissions_router)
 api_router.include_router(roles.router)
@@ -85,6 +88,7 @@ api_router.include_router(period_locks.router)
 api_router.include_router(onboarding.router)
 api_router.include_router(rates.router)
 api_router.include_router(rate_rules.router)
+api_router.include_router(overtime_rates.router)
 api_router.include_router(clients.router)
 api_router.include_router(client_overview.router)
 api_router.include_router(central_clients.router)

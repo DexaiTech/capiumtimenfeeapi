@@ -4,8 +4,10 @@ Code: `app/api/v1/{staff,grades,rate_rules,rates,settings}.py` → `app/services
 → `app/repositories/{staff,grades,rate_rules,rate_history,rate_reruns,rates,settings,time_rates}.py`;
 schemas in `app/schemas/{staff,grades,rate_rules,rates,settings}.py`; models `app/db/models/{organization,practice,rates}.py`.
 Tests: `tests/test_staff.py`, `test_staff_login.py`, `test_grades.py`, `test_rates_v2.py`, `test_rerate.py`,
-`test_services_activities.py`, `test_team_rates_openapi.py` (helpers in `tests/team_helpers.py`).
-Migrations: `010` (grades, staff profile), `011` (rate rules, history, re-rating), `012` (services, activity types, links).
+`test_services_activities.py`, `test_team_rates_openapi.py` (helpers in `tests/team_helpers.py`),
+`test_staff_hours.py`, `test_overtime_rates.py`, `test_overtime_setup_migration.py`.
+Migrations: `010` (grades, staff profile), `011` (rate rules, history, re-rating), `012` (services, activity types, links),
+`081` (working hours and overtime rates, APT81).
 **No permission was added**: everything uses the existing codes (see [Permissions](#permissions)).
 
 All paths are under `/api/v1/organizations/{organization_id}`. Another practice's ids answer 404. The rules
@@ -62,6 +64,11 @@ schema is `/openapi.json`; every route there has a summary, a description and it
 | GET | `/rates/reruns/{run_id}` | `rate.read` |
 | GET | `/rates/reruns/{run_id}/items` | `rate.read` |
 | POST | `/rates/revalue` (V1) | `rate.manage` |
+| GET, POST | `/staff/{user_id}/hours` | `member.read`, `member.update` |
+| DELETE | `/staff/{user_id}/hours/{hours_id}` | `member.update` |
+| GET, POST | `/overtime-rates` | `rate.read`, `rate.manage` |
+| GET | `/overtime-rates/resolve` | `rate.read` |
+| PATCH, DELETE | `/overtime-rates/{rate_id}` | `rate.manage` |
 | GET, POST | `/members/{user_id}/rates` (V1) | `rate.read`, `rate.manage` |
 | DELETE | `/staff-rates/{rate_id}` (V1) | `rate.manage` |
 | GET | `/staff-rates/current` (V1) | `rate.read` |
@@ -80,7 +87,7 @@ schema is `/openapi.json`; every route there has a summary, a description and it
 | GET, PATCH | `/sequences`, `/sequences/{kind}` | any member, `organization.update` (new kind `staff`) |
 
 `/rates/resolve`, `/rates/history` and `/rates/reruns…` are declared before `/rates/{rule_id}`, so those
-words are never read as an id.
+words are never read as an id; likewise `/overtime-rates/resolve` before `/overtime-rates/{rate_id}`.
 
 ---
 
@@ -690,6 +697,111 @@ hourly_rate, effective_from, effective_to, created_at, updated_at}`.
 
 ---
 
+# Working hours and overtime rates (APT81 Phase A)
+
+Set-up only: **nothing prices time from these tables yet**. Time entries, WIP, invoices, reports, the
+overtime switch and multiplier of migration 061 (`organizations.overtime_enabled` / `overtime_multiplier_bp`,
+`organization_members.overtime_multiplier_bp`, `time_entries.is_overtime`) work exactly as before; the
+threshold split, approval and the Staff Cost report follow in later phases (`docs/implementation-plans/APT81.md`).
+Code: `app/api/v1/{staff_hours,overtime_rates}.py` → `app/services/{staff_hours,overtime_rates}.py` →
+`app/repositories/overtime.py`; schemas `app/schemas/overtime.py`; models `app/db/models/overtime.py`.
+
+## Tables (migration 081)
+
+| Table | Columns | Rules |
+|---|---|---|
+| `staff_hours_bases` | `id`, `organization_id`, `user_id`, `basis` (`weekly` or `monthly`), `standard_minutes` (> 0), `effective_from`, `effective_to` (null = open-ended), `created_by`, `created_at`, `updated_at` | A person's periods never overlap (exclusion `ex_staff_hours_bases_user_period`). Rows go with the membership (`ON DELETE CASCADE`) and do not stop a staff record from being deleted. |
+| `overtime_rates` | `id`, `organization_id`, `level` (`grade` or `staff`), `grade_id` / `user_id` (exactly one, by level), `mode` (`multiplier` or `fixed`), `multiplier_bp` (10000–100000, multiplier only) / `rate` (pence per hour ≥ 0, fixed only), `effective_from`, `effective_to`, `created_by`, `created_at`, `updated_at` | The rates of one grade or one person never overlap (exclusion `ex_overtime_rates_scope_period`). A grade named by an overtime rate is deactivated, not deleted. |
+
+The migration gives every member one open-ended `weekly` row of their `weekly_capacity_minutes`, from their
+`start_date`, else the day they joined (practice time zone); a member with a capacity of 0 gets none. Staff added
+later start without working hours until some are added. `PATCH /staff` still edits `weekly_capacity_minutes`
+on its own (targets and utilisation keep reading it).
+
+## GET /staff/{user_id}/hours
+
+Permission `member.read`. `StaffHoursRead[]`: the current period first, then the rest newest first. 404 for a
+person who is not a member of the practice.
+
+`StaffHoursRead`: `{id, user_id, basis, standard_minutes, effective_from, effective_to, status
+(current|future|ended), created_by (null for migrated rows), created_at, updated_at}`.
+
+## POST /staff/{user_id}/hours
+
+Permission `member.update`. Body `{basis, standard_minutes, effective_from}` → 201 `StaffHoursRead`.
+`standard_minutes` is 1–10080 for `weekly`, 1–44640 for `monthly` (422 on the field). The new hours are
+open-ended; the person's **open-ended** hours that started earlier end the day before (audited
+`staff_hours.ended`). Any other overlap (hours starting the same day or later, or a period with an end date
+that covers the day) is 409 `HOURS_OVERLAP` with `details.conflicts [{id, effective_from, effective_to}]`.
+
+```json
+POST /staff/7c1e…/hours
+{"basis": "weekly", "standard_minutes": 1800, "effective_from": "2026-12-01"}
+→ 201 {"success": true, "message": "Working hours changed", "data": {"id": "…", "user_id": "7c1e…",
+   "basis": "weekly", "standard_minutes": 1800, "effective_from": "2026-12-01", "effective_to": null,
+   "status": "future", "created_by": "…", "created_at": "…", "updated_at": "…"}}
+```
+
+## DELETE /staff/{user_id}/hours/{hours_id}
+
+Permission `member.update`. Deletes one period; the others are left as they are (an earlier period is not
+re-opened). 404 for an unknown id or another person's.
+
+## GET /overtime-rates
+
+Permission `rate.read`. `OvertimeRateRead[]`, not paginated: grade rates first (by grade name), then staff rates
+(by name), newest period first. Filters `level`, `user_id`, `grade_id`, `status` (current|future|ended, today in
+the practice time zone).
+
+`OvertimeRateRead`: `{id, level, grade {id, code, name} | null, staff {id, code, full_name} | null, mode,
+multiplier_bp, rate (null without rate.read), effective_from, effective_to, status, created_by, created_at,
+updated_at}`.
+
+## POST /overtime-rates
+
+Permission `rate.manage`. Body `{level, grade_id?, user_id?, mode, multiplier_bp?, rate?, effective_from,
+effective_to?}` → 201 `OvertimeRateRead`. `grade` names a `grade_id` and no `user_id`, `staff` the reverse;
+`multiplier` takes `multiplier_bp` (10000 = 1× to 100000 = 10×, of the standard cost rate) and no `rate`,
+`fixed` takes `rate` (pence per hour) and no `multiplier_bp`. Each mistake is 422 on the field, as is an unknown
+grade or staff member. 409 `RATE_OVERLAP` (`details.conflicts`) when another rate of the grade or person covers
+a day of the period; 409 `MEMBER_REMOVED` for someone who has left. There is no `close_previous`: end the
+running rate first.
+
+```json
+POST /overtime-rates
+{"level": "grade", "grade_id": "…", "mode": "multiplier", "multiplier_bp": 15000, "effective_from": "2026-01-01"}
+→ 201 {"data": {"id": "…", "level": "grade", "grade": {"id": "…", "code": "SNR", "name": "Senior"},
+   "staff": null, "mode": "multiplier", "multiplier_bp": 15000, "rate": null,
+   "effective_from": "2026-01-01", "effective_to": null, "status": "current", …}}
+```
+
+## PATCH /overtime-rates/{rate_id}
+
+Permission `rate.manage`. Body `{effective_to}` (required): the rate's last day, past or future. 422 on
+`effective_to` before the rate's first day; 409 `RATE_OVERLAP` when the new period meets another rate of the
+grade or person. Audited `overtime_rate.ended` with `changes.effective_to`.
+
+## DELETE /overtime-rates/{rate_id}
+
+Permission `rate.manage`. Deletes the rate. Nothing prices time from overtime rates yet, so no rate is in use
+(an in-use check arrives with the pricing in phase B).
+
+## GET /overtime-rates/resolve
+
+Permission `rate.read`. Query `user_id` (required), `date` (default today). The **one** rate of the person
+that day: their own staff rate, else their current grade's rate, else none. A staff rate overrides the
+grade rate; the two never stack. 404 for an unknown person.
+
+```json
+GET /overtime-rates/resolve?user_id=7c1e…&date=2026-06-01
+→ 200 {"data": {"user_id": "7c1e…", "on_date": "2026-06-01", "grade_id": "…", "source": "staff",
+   "rate": {"id": "…", "level": "staff", "mode": "fixed", "rate": 3000, "multiplier_bp": null, …}}}
+```
+
+`source` is `staff`, `grade` or null (then `rate` is null too).
+
+---
+
 # Services and activity types
 
 Both lists are bounded and not paginated; any member reads them. Writes need `settings.manage`.
@@ -826,9 +938,10 @@ All errors use the envelope above. 401 `AUTH_REQUIRED`, 403 `PERMISSION_DENIED`,
 | `GRADE_CODE_TAKEN`, `GRADE_NAME_TAKEN` | 409 | Duplicate grade code or name (case-insensitive). |
 | `SERVICE_CODE_TAKEN`, `SERVICE_NAME_TAKEN` | 409 | Duplicate service code or name. |
 | `ACTIVITY_CODE_TAKEN`, `ACTIVITY_NAME_TAKEN` | 409 | Duplicate activity code or name. |
-| `RATE_OVERLAP` | 409 | Another rule of the kind and scope covers part of the period. `details.conflicts`. |
+| `RATE_OVERLAP` | 409 | Another rule of the kind and scope (or another overtime rate of the grade or person) covers part of the period. `details.conflicts`. |
+| `HOURS_OVERLAP` | 409 | Other working hours of the person cover part of the period. `details.conflicts`. |
 | `RATE_IN_USE` | 409 | Deleting a used rule, or moving its start. |
-| `MEMBER_REMOVED` | 409 | A rate for someone who has left. |
+| `MEMBER_REMOVED` | 409 | A rate or overtime rate for someone who has left. |
 | `STAFF_RATE_EXISTS`, `CLIENT_RATE_EXISTS` | 409 | V1 duplicates (same start day; same client scope). |
 | `PREVIEW_REQUIRED`, `PREVIEW_MISMATCH`, `PREVIEW_STALE` | 409 | Re-rating without, with another or with an out-of-date preview. |
 | `VALIDATION_ERROR` | 422 | Field validation. `details[].code` includes `invalid_scope`, `invalid_kind` (rates), `scope_too_large`, `after_leaving_date` (time entry after the person left), `activity_not_allowed` (time entry or timer), `required` (invite without an email), `duplicate`. |
@@ -866,7 +979,9 @@ cost rates as `null`.
 `staff.created|updated|deactivated|left|reactivated|deleted|invited|login_linked|login_unlinked`,
 `grade.created|updated|deactivated|deleted`, `rate.created|updated|deleted` (rate rules; V1 endpoints keep
 `staff_rate.created|deleted`, `client_rate.created|updated|deleted`), `rate.rerun`, `time_entries.revalued`,
-`service.activity_codes_changed`, plus the existing settings actions. Each has a `meta` naming the record and,
+`staff_hours.added|ended|deleted` (on the staff member, `meta.staff_hours_id`),
+`overtime_rate.added|ended|deleted` (on the overtime rate; `meta.kind` = `cost`, so `rate` is hidden without
+`rate.read`), `service.activity_codes_changed`, plus the existing settings actions. Each has a `meta` naming the record and,
 for updates, `changes: {field: [old, new]}`.
 
 # Rule decisions and limitations
