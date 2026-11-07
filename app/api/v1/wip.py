@@ -159,7 +159,8 @@ async def client_recovery(
     status_code=status.HTTP_201_CREATED,
     summary="Write off WIP",
     description=(
-        "Takes WIP out of the ledger without an invoice: either the listed items or all WIP "
+        "Takes WIP out of the ledger without an invoice: either the listed items (time "
+        "entries, disbursements, approved expense lines at their recharge amount) or all WIP "
         "of `job_id`, with a reason and date (default today). Each item gets an allocation "
         "with billed value 0 and becomes `written_off`. Items that are not the client's "
         "answer 422 `CLIENT_MISMATCH`; items that are not unbilled WIP 409 "

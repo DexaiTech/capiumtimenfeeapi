@@ -325,16 +325,19 @@ class WipService:
                     job.id,
                     require_approval=organization.require_timesheet_approval,
                 )
-                if not time_ids and not disbursement_ids:
+                expense_ids = await self.wip.job_expense_ids(ctx.organization_id, job.id)
+                if not time_ids and not disbursement_ids and not expense_ids:
                     raise conflict("WIP_NOT_AVAILABLE", "This job has no work in progress.")
             else:
                 assert data.items is not None
                 time_ids = [i.time_entry_id for i in data.items if i.time_entry_id]
                 disbursement_ids = [i.disbursement_id for i in data.items if i.disbursement_id]
-                if len(set(time_ids)) + len(set(disbursement_ids)) != len(data.items):
+                expense_ids = [i.expense_id for i in data.items if i.expense_id]
+                distinct = len(set(time_ids)) + len(set(disbursement_ids)) + len(set(expense_ids))
+                if distinct != len(data.items):
                     raise invalid("DUPLICATE_ITEM", "items", "Each item may appear only once.")
             items = await lock_wip_items(
-                self.session, organization, client, time_ids, disbursement_ids
+                self.session, organization, client, time_ids, disbursement_ids, expense_ids
             )
             written_off_on = data.written_off_on or today_for(organization)
             await period_locks.assert_open(self.session, ctx.organization_id, written_off_on, "wip")
@@ -349,25 +352,38 @@ class WipService:
                     created_by=ctx.user.id,
                 )
             )
-            allocations = [
-                WipAllocation(
-                    organization_id=ctx.organization_id,
-                    time_entry_id=e.id,
-                    write_off_id=write_off.id,
-                    wip_value=e.charge_value,
-                    billed_value=0,
-                )
-                for e in items.time_entries
-            ] + [
-                WipAllocation(
-                    organization_id=ctx.organization_id,
-                    disbursement_id=d.id,
-                    write_off_id=write_off.id,
-                    wip_value=d.amount,
-                    billed_value=0,
-                )
-                for d in items.disbursements
-            ]
+            allocations = (
+                [
+                    WipAllocation(
+                        organization_id=ctx.organization_id,
+                        time_entry_id=e.id,
+                        write_off_id=write_off.id,
+                        wip_value=e.charge_value,
+                        billed_value=0,
+                    )
+                    for e in items.time_entries
+                ]
+                + [
+                    WipAllocation(
+                        organization_id=ctx.organization_id,
+                        disbursement_id=d.id,
+                        write_off_id=write_off.id,
+                        wip_value=d.amount,
+                        billed_value=0,
+                    )
+                    for d in items.disbursements
+                ]
+                + [
+                    WipAllocation(
+                        organization_id=ctx.organization_id,
+                        expense_id=e.id,
+                        write_off_id=write_off.id,
+                        wip_value=e.recharge_amount,
+                        billed_value=0,
+                    )
+                    for e in items.expenses
+                ]
+            )
             await self.wip.add_allocations(allocations)
             set_items_status(items, "written_off")
             await self.session.flush()
@@ -435,16 +451,12 @@ class WipService:
             allocations = await self.wip.allocations_for_write_off(
                 ctx.organization_id, write_off.id
             )
-            items = await lock_items(
-                self.session,
-                ctx.organization_id,
-                [a.time_entry_id for a in allocations if a.time_entry_id],
-                [a.disbursement_id for a in allocations if a.disbursement_id],
-            )
+            items = await lock_allocation_items(self.session, ctx.organization_id, allocations)
             moved_on = (
                 any(a.reversed_at is not None for a in allocations)
                 or any(t.billing_status != "written_off" for t in items.time_entries)
                 or any(d.billing_status != "written_off" for d in items.disbursements)
+                or any(e.billing_status != "written_off" for e in items.expenses)
             )
             if moved_on:
                 raise conflict(
@@ -478,8 +490,8 @@ class WipService:
 def _write_off_items(allocations: list[WipAllocation]) -> list[WriteOffItemRead]:
     return [
         WriteOffItemRead(
-            kind="time" if a.time_entry_id else "disbursement",
-            id=a.time_entry_id or a.disbursement_id,
+            kind="time" if a.time_entry_id else "disbursement" if a.disbursement_id else "expense",
+            id=a.time_entry_id or a.disbursement_id or a.expense_id,
             wip_value=a.wip_value,
         )
         for a in allocations
