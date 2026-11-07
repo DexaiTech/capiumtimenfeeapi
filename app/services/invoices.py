@@ -379,12 +379,21 @@ class InvoiceService:
             ctx.organization_id, [i.client_id for i in invoices]
         )
         today = today_for(ctx.organization)
+        # The approval history matters only for the invoices this caller could approve: one
+        # query for those, none when there are none.
+        waiting = (
+            [i.id for i in invoices if i.status == "awaiting_approval"]
+            if policy.has_permission(ctx, "invoice.approve")
+            else []
+        )
+        approvals = await self.invoices.approvals_by_invoice(ctx.organization_id, waiting)
         return [
             InvoiceSummaryRead.build(
                 i,
                 clients.get(i.client_id),
                 display_status(i, today),
                 approval_needed(ctx.organization, i),
+                self._can_approve(ctx, i, approvals.get(i.id, [])),
             )
             for i in invoices
         ]
@@ -459,6 +468,7 @@ class InvoiceService:
             client,
             display_status(invoice, today_for(ctx.organization)),
             approval_needed(ctx.organization, invoice),
+            self._can_approve(ctx, invoice, approvals),
         )
         return InvoiceRead(
             **summary.model_dump(),
@@ -481,7 +491,6 @@ class InvoiceService:
                 )
                 for a in approvals
             ],
-            can_approve=self._can_approve(ctx, invoice, approvals),
             lines=line_reads,
             vat_summary=[
                 VatSummaryRow(vat_rate_bp=bp, net=net, vat=vat)
