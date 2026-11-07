@@ -110,7 +110,8 @@ class TimeEntryRead(BaseModel):
         description=(
             "The last day of the locked period the entry's date lies in (Settings > Period "
             "Lock): the entry cannot be edited or deleted until it is unlocked. Null when the "
-            "date is open. Filled in by the list, one entry and the day view"
+            "date is open. Filled in by the list, one entry, the day view and the timesheet "
+            "detail"
         ),
     )
     is_opening_balance: bool = Field(
@@ -409,6 +410,12 @@ class TimesheetRead(BaseModel):
         description="Billable minutes with no charge-out rate (charge_rate 0): they go to WIP "
         "at £0. The approval screens warn about them; approving is still allowed."
     )
+    approval_exempt: bool = Field(
+        description="True when the week needs no approval, so submitting it approves it at once "
+        "(the rule the submit applies): the practice does not approve timesheets "
+        "(require_timesheet_approval off), or auto_approve_privileged_time is on and the owner "
+        "holds timesheet.exempt. Its time counts as approved even before it is submitted."
+    )
     created_at: datetime
     updated_at: datetime
 
@@ -431,6 +438,7 @@ class TimesheetRead(BaseModel):
             non_billable_minutes=totals.total_minutes - totals.billable_minutes,
             billable_value=totals.billable_value,
             zero_rate_minutes=totals.zero_rate_minutes,
+            approval_exempt=sheet.approval_exempt,
             created_at=sheet.created_at,
             updated_at=sheet.updated_at,
         )

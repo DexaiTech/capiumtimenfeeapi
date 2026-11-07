@@ -205,6 +205,12 @@ async def test_time_reads_say_which_entries_lie_in_a_locked_period(client):
         )
     )
     assert [item["period_locked_through"] for item in day["entries"]] == [None]
+    # The timesheet detail says it too (TIME-05).
+    detailed = {}
+    for sheet_id in {inside.timesheet_id, outside.timesheet_id}:
+        sheet = ok_data(await client.get(p.url(f"/timesheets/{sheet_id}"), headers=worker.headers))
+        detailed |= {item["id"]: item["period_locked_through"] for item in sheet["entries"]}
+    assert detailed == {str(inside.id): str(lock), str(outside.id): None}
 
     # Unlocked, the same entry is open again.
     await set_lock(p.org, None)
