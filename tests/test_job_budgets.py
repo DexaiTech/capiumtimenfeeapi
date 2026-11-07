@@ -97,6 +97,8 @@ async def test_the_list_with_bands_and_totals(client: AsyncClient) -> None:
     assert (totals["jobs"], totals["green"], totals["amber"], totals["red"]) == (4, 2, 1, 1)
     assert (totals["budget_minutes"], totals["logged_minutes"]) == (1800, 750)
     assert totals["budget_minutes_used_bp"] == 3500  # 630 of 1800: Charlie has no hours budget
+    assert totals["minutes_basis_logged"] == 630  # the figures the percentages are of (CLI-04)
+    assert totals["fee_basis_value"] == 27_000
     assert (totals["budget_fee"], totals["time_value"], totals["wip_value"]) == (
         70_000,
         75_000,
