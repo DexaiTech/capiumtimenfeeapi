@@ -46,12 +46,15 @@ flowchart LR
 
 | Record | Path |
 |---|---|
-| Job | `planned → in_progress ↔ on_hold`, `in_progress → completed → closed`; `cancelled` from any open state |
+| Job | `planned → in_progress ↔ on_hold` (also `planned → on_hold`), `in_progress → completed → closed`; `closed` from any open state; reopen `completed`/`closed → in_progress`; `cancelled` from any open state, final |
 | Timesheet | `open → submitted → approved`; `submitted → rejected → submitted`; recall `submitted → open`; reopen `approved → open` |
 | Expense claim | `draft → submitted → approved`; `submitted → returned → submitted`; recall `submitted → draft` |
 | Invoice | `draft → [awaiting_approval → approved] → issued → void`; derived: `credited`, `paid`, `overdue`, `part_paid` |
 | Estimate | `draft → sent → accepted | declined`; derived `expired`; converts to a draft invoice |
 | Time and expense items (WIP) | `unbilled → in_draft → billed`, or `unbilled → written_off`; void returns `billed → unbilled` |
+| Overtime (time entry) | `pending → approved` or `rejected` (a decided row can be decided the other way); `approved` at once when the person's time needs no approval; back to `pending` when the entry's overtime changes |
+| WIP adjustment | `pending → approved` or `rejected`; `approved` at once within the threshold (or with approval off); `approved → reversed` |
+| Recurring schedule | `active ↔ paused`; `ended` once the next run date is past the end date (after a run, an edit or a resume), final |
 | Ticket | `open, in_progress, requirement_pending, clarification_required, blocked, ready_for_ba_review, reopened, closed, invalid, on_hold`; any status may follow any other |
 
 ## Before you start

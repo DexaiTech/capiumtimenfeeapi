@@ -493,7 +493,7 @@ practice no longer pursues is archived (and can be unarchived).
 | GET | `/leads/{lead_id}` | `client.read` | One lead. |
 | PATCH | `/leads/{lead_id}` | `client.update` | Change any field; text fields accept null. The costs stay editable after conversion. |
 | POST | `/leads/{lead_id}/archive` · `/unarchive` | `client.delete` | Set / clear `archived_at`. Doing it twice changes nothing. |
-| POST | `/leads/{lead_id}/convert` | `client.create` | Body `{code?}` (optional; may be empty). Creates the client and links it. |
+| POST | `/leads/{lead_id}/convert` | `client.create` | Body `{code?, branch_id?}` (both optional; may be empty). `branch_id` is required while the practice uses branches (422 `BRANCH_REQUIRED`). Creates the client and links it. |
 
 **LeadRead**: the columns (`id, name, client_type, contact_name, email, phone, source, notes,
 acquisition_cost, onboarding_cost, archived_at, converted_client_id, converted_at, created_by,
