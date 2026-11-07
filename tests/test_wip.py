@@ -7,6 +7,7 @@ from sqlalchemy import text
 from app.db.session import get_sessionmaker
 from tests.billing_helpers import billing_status, count_rows, draft, hourly_job, new_practice
 from tests.domain_factories import make_client, make_disbursement, make_time_entry, staff
+from tests.expense_helpers import make_claim, make_line
 from tests.factories import audit_entries, error
 
 TODAY = date.today()
@@ -382,6 +383,83 @@ async def test_write_off_a_whole_job(client):
         json={"client_id": str(p.client.id), "job_id": str(job.id), "reason": "Again"},
     )
     assert empty.status_code == 409 and error(empty)["code"] == "WIP_NOT_AVAILABLE"
+
+
+async def _expense_line(p, amount: int = 2_500, **fields):
+    claim = await make_claim(p.org, p.owner, status="approved")
+    return await make_line(
+        p.org, claim, client=p.client, is_billable=True, recharge_amount=amount, **fields
+    )
+
+
+async def test_write_off_an_expense_line_and_reverse(client):
+    p = await new_practice(client)
+    line = await _expense_line(p)
+    keep = await _expense_line(p, 400)
+    response = await client.post(
+        p.url("/wip/write-offs"),
+        headers=p.owner.headers,
+        json={
+            "client_id": str(p.client.id),
+            "items": [{"expense_id": str(line)}],
+            "reason": "Not rechargeable after all",
+        },
+    )
+    assert response.status_code == 201, response.text
+    data = response.json()["data"]
+    assert (data["total_wip_value"], data["item_count"]) == (2_500, 1)
+    assert data["items"] == [{"kind": "expense", "id": str(line), "wip_value": 2_500}]
+    assert await billing_status("expenses", [line, keep]) == {
+        line: "written_off",
+        keep: "unbilled",
+    }
+    [row] = (await client.get(p.url("/wip"), headers=p.owner.headers)).json()["data"]
+    assert (row["expense_value"], row["total"]) == (400, 400)
+    detail = (
+        await client.get(p.url(f"/wip/write-offs/{data['id']}"), headers=p.owner.headers)
+    ).json()["data"]
+    assert detail["items"] == data["items"]
+
+    reversed_ = await client.delete(p.url(f"/wip/write-offs/{data['id']}"), headers=p.owner.headers)
+    assert reversed_.status_code == 200, reversed_.text
+    assert (await billing_status("expenses", [line]))[line] == "unbilled"
+    assert await count_rows("SELECT count(*) FROM wip_allocations") == 0
+    [row] = (await client.get(p.url("/wip"), headers=p.owner.headers)).json()["data"]
+    assert (row["expense_value"], row["total"]) == (2_900, 2_900)
+
+
+async def test_write_off_a_whole_job_includes_its_expense_lines(client):
+    p = await new_practice(client)
+    job = await hourly_job(p)
+    entry = await make_time_entry(p.org, p.owner, client=p.client, job=job)
+    line = await _expense_line(p, job=job)
+    elsewhere = await _expense_line(p, 400)
+    response = await client.post(
+        p.url("/wip/write-offs"),
+        headers=p.owner.headers,
+        json={"client_id": str(p.client.id), "job_id": str(job.id), "reason": "Abortive work"},
+    )
+    assert response.status_code == 201, response.text
+    assert response.json()["data"]["total_wip_value"] == 12_000 + 2_500
+    assert (await billing_status("time_entries", [entry.id]))[entry.id] == "written_off"
+    assert await billing_status("expenses", [line, elsewhere]) == {
+        line: "written_off",
+        elsewhere: "unbilled",
+    }
+
+
+async def test_a_written_off_expense_line_cannot_be_written_off_again(client):
+    p = await new_practice(client)
+    line = await _expense_line(p)
+    body = {"client_id": str(p.client.id), "items": [{"expense_id": str(line)}], "reason": "x"}
+    first = await client.post(p.url("/wip/write-offs"), headers=p.owner.headers, json=body)
+    assert first.status_code == 201, first.text
+    again = await client.post(p.url("/wip/write-offs"), headers=p.owner.headers, json=body)
+    assert again.status_code == 409 and error(again)["code"] == "WIP_NOT_AVAILABLE"
+    assert error(again)["details"] == [{"expense_id": str(line), "reason": "written_off"}]
+    twice = {**body, "items": [{"expense_id": str(line)}, {"expense_id": str(line)}]}
+    duplicate = await client.post(p.url("/wip/write-offs"), headers=p.owner.headers, json=twice)
+    assert duplicate.status_code == 422 and error(duplicate)["code"] == "DUPLICATE_ITEM"
 
 
 async def test_write_off_rules(client):
