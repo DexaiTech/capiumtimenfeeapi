@@ -54,7 +54,7 @@ app/
   repositories/    database queries              dependencies/  auth, practice scope
   middleware/      request id, rate and size     workers/       job runner and handlers
                    limits, security headers      templates/     email templates
-  maintenance/     bootstrap, reset_data
+  maintenance/     bootstrap, reset_data, seed_leads
 alembic/           migrations                    tests/         test suite
 ```
 
@@ -181,6 +181,15 @@ API.
 `python -m app.maintenance.reset_data` shows what it would delete; with `--yes` it empties
 every table except the schema version and the permission catalogue. It does not touch the
 uploaded files: empty `STORAGE_DIR` yourself when you start over.
+
+**Sample leads (local and staging only, never production).**
+`python -m app.maintenance.seed_leads --practice-slug smith-co [--count N] [--yes]` adds up to
+14 fictional UK prospects (default 12: most open, 2 converted into clients, 2 archived) to a
+practice, as its oldest active Owner, so the audit trail is the app's own. It is a dry run
+without `--yes`, prints the target as host:port/database, refuses when `APP_ENV=production`,
+and skips names the practice already has, so running it again adds nothing. Their notes start
+with `Sample lead (seed)`. While the practice uses branches, conversions take the first active
+branch; with none, those leads stay open.
 
 ## Tests
 

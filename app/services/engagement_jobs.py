@@ -203,8 +203,9 @@ def _reason(exc: Exception) -> str:
     return (getattr(exc, "message", None) or str(exc) or type(exc).__name__)[:500]
 
 
-async def _system_context(session: AsyncSession, organization_id: uuid.UUID) -> OrgContext | None:
-    """The worker acts as the practice's oldest active Owner (None: the practice has none)."""
+async def system_context(session: AsyncSession, organization_id: uuid.UUID) -> OrgContext | None:
+    """The practice's oldest active Owner, as whom the worker and the maintenance commands act
+    (None: the practice has none)."""
     member = await EngagementJobRepository(session).oldest_owner(organization_id)
     if member is None:
         return None
@@ -428,7 +429,7 @@ async def run_due(session: AsyncSession) -> dict[str, int]:
 
 async def _run_practice(session: AsyncSession, organization_id: uuid.UUID) -> tuple[int, int]:
     repo = EngagementJobRepository(session)
-    ctx = await _system_context(session, organization_id)
+    ctx = await system_context(session, organization_id)
     if ctx is None:
         log.warning("engagement_jobs_no_owner", organization_id=str(organization_id))
         return 0, 0
@@ -441,7 +442,7 @@ async def _run_practice(session: AsyncSession, organization_id: uuid.UUID) -> tu
             log.exception("engagement_job_failed", engagement_id=str(engagement_id))
             await session.rollback()
             # The rollback expired the context's rows: load them again.
-            reloaded = await _system_context(session, organization_id)
+            reloaded = await system_context(session, organization_id)
             if reloaded is None:
                 return created, failed + 1
             ctx = reloaded
