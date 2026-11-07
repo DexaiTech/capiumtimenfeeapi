@@ -209,6 +209,36 @@ async def test_a_download_needs_report_export(client: AsyncClient, monkeypatch) 
         assert response.status_code == 200, fmt
 
 
+async def test_the_original_wip_csv_needs_report_export_and_is_audited(
+    client: AsyncClient, monkeypatch
+) -> None:
+    """``GET /reports/wip?format=csv`` without ``group_by`` (the original report) is a download
+    like any other: ``report.export`` on top of ``report.financial``, and a ``report.exported``
+    audit row."""
+    d = await everything(client, monkeypatch)
+    await custom_role(d.org, "Finance only", {"report.read", "report.financial"})
+    finance = await add_member(d.org["id"], "Finance only")
+    assert (await call(client, finance, d.org, "wip", as_at=AS_AT)).status_code == 200
+    response = await download(client, finance, d.org, "wip", "csv", as_at=AS_AT)
+    assert response.status_code == 403, response.text
+    assert error(response)["code"] == "PERMISSION_DENIED"
+    assert await audit_entries(d.org["id"], "report.exported") == []
+
+    data = await get_data(client, d.owner, d.org, "wip", as_at=AS_AT)  # JSON: not audited
+    assert await audit_entries(d.org["id"], "report.exported") == []
+    response = await download(client, d.owner, d.org, "wip", "csv", as_at=AS_AT)
+    assert response.status_code == 200, response.text
+    assert response.headers["content-disposition"] == f'attachment; filename="wip_{AS_AT}.csv"'
+    [entry] = await audit_entries(d.org["id"], "report.exported")
+    assert (entry["actor_user_id"], entry["target_type"]) == (str(d.owner.id), "report")
+    assert entry["metadata"] == {
+        "report": "wip",
+        "format": "csv",
+        "filters": {"as_at": AS_AT},
+        "row_count": len(data["rows"]),
+    }
+
+
 async def test_the_report_permission_still_applies_to_downloads(
     client: AsyncClient, monkeypatch
 ) -> None:

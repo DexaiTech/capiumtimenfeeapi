@@ -7,6 +7,7 @@ import pytest
 from httpx import AsyncClient
 
 from tests.domain_factories import make_client, make_disbursement, make_time_entry, practice
+from tests.expense_helpers import make_claim, make_line
 from tests.report_helpers import SEPTEMBER, get_data, wide_dataset
 from tests.reports_helpers import LineSpec, make_invoice
 from tests.time_helpers import org_url
@@ -124,11 +125,23 @@ async def test_wip_report_equals_the_wip_screen(client: AsyncClient) -> None:
     await make_time_entry(  # not WIP: already billed
         org, owner, client=beta, entry_date=date(2026, 9, 10), billing_status="billed"
     )
+    # An approved billable expense line is WIP (its recharge amount); a submitted one is not.
+    approved = await make_claim(org, owner, status="approved")
+    await make_line(org, approved, client=acme, is_billable=True, recharge_amount=2_500, net=2_000)
+    submitted = await make_claim(org, owner, status="submitted")
+    await make_line(org, submitted, client=beta, is_billable=True, recharge_amount=900, net=900)
     screen = await listed(client, owner, org, "/wip")
     report = await get_data_wip(client, owner, org)
-    assert report["totals"]["total"] == sum(r["total"] for r in screen) == 12_000 + 1_300 + 6_000
+    assert (
+        report["totals"]["total"]
+        == sum(r["total"] for r in screen)
+        == 12_000 + 1_300 + 2_500 + 6_000
+    )
     assert report["totals"]["time_value"] == sum(r["time_value"] for r in screen)
-    assert report["totals"]["disbursement_value"] == sum(r["disbursement_value"] for r in screen)
+    # The report's non-time column holds the disbursements and the expense lines.
+    assert report["totals"]["disbursement_value"] == sum(
+        r["disbursement_value"] + r["expense_value"] for r in screen
+    )
     by_client = {r["client_code"]: r["total"] for r in report["rows"]}
     assert by_client == {r["client"]["code"]: r["total"] for r in screen}
 
