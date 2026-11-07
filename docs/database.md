@@ -56,7 +56,11 @@ foreign keys that include the practice:
 ```python
 ForeignKeyConstraint(
     ["organization_id", "client_id", "job_id"],
-    ["jobs.organization_id", "jobs.client_id", "jobs.id"],   # the job must belong to the entry's client
+    [
+        "jobs.organization_id",
+        "jobs.client_id",
+        "jobs.id",
+    ],  # the job must belong to the entry's client
     name="fk_time_entries_organization_id_client_id_job_id_jobs",
 )
 ```
