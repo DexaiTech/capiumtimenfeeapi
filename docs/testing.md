@@ -143,6 +143,14 @@ two processes must never share a database. To split the suite:
 
 The same applies across git worktrees: give each worktree its own test database.
 
+## Sample data for manual checks
+
+For clicking through a local or staging database (never production; the command refuses when
+`APP_ENV=production`), `python -m app.maintenance.seed_leads --practice-slug <slug> --yes` adds
+twelve sample leads (open, converted and archived) as the practice's Owner. Without `--yes` it
+only shows what it would add; a second run adds nothing. See README "Closed deployment" and
+`tests/test_seed_leads.py`.
+
 ## Known pitfalls
 
 | Symptom | Cause and fix |
