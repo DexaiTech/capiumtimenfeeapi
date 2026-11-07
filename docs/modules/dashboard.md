@@ -87,7 +87,7 @@ Always six cards in this order; a card the caller may not see stays with `visibl
 | `my_hours` | My Hours This Week / Month / Year to Date | `time.log` | The caller's minutes in the window | `previous_period` | `target`: the caller's target for the whole week or month (year to date: up to today), from their working days, start and leaving dates |
 | `missing_timesheets` | Missing Timesheets | `time.read_all` or `timesheet.approve` | Timesheets missing in the completed weeks of the window (see below) | none | `people`: distinct people |
 | `pending_approvals` | Pending Approvals | an approve permission (below) | Everything waiting for the caller | none | none |
-| `unbilled_wip` | Unbilled WIP | `wip.read` or `report.financial` | WIP as at today (time and disbursements, as the WIP report) | `period_start` | `over_90_days`: the part older than 90 days |
+| `unbilled_wip` | Unbilled WIP | `wip.read` or `report.financial` | WIP as at today (time, disbursements and approved billable expense lines, as the WIP report) | `period_start` | `over_90_days`: the part older than 90 days |
 | `billed` | Billed This Week / Month / Year to Date | `invoice.read` or `report.financial` | Net of invoices issued in the window, before credit notes | `previous_period` | none |
 | `overdue_debtors` | Overdue Debtors | `payment.read`, `invoice.read` or `report.financial` | Balance past its due date as at today | `period_start` | `total_outstanding` |
 
@@ -236,8 +236,9 @@ caller manages and the caller). `can_remind` is true with `organization.update` 
 }
 ```
 
-WIP as at today, largest first (ties by name). `previous_amount`/`previous_total` are as at the day
-before the period began. `others_amount` is the WIP of the clients not listed.
+WIP as at today (time, disbursements and approved billable expense lines at their recharge
+amount, which count in `disbursement_value`), largest first (ties by name).
+`previous_amount`/`previous_total` are as at the day before the period began. `others_amount` is the WIP of the clients not listed.
 
 ## GET /billing-trend?months=
 

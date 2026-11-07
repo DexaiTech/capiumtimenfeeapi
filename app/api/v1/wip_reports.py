@@ -25,8 +25,8 @@ from app.schemas.wip_reports import (
     HistoricWipQuery,
     HistoricWipReport,
 )
-from app.services import report_csv
 from app.services.policy import OrgContext
+from app.services.report_export import ReportExporter
 from app.services.reports import ReportService, practice_today
 from app.services.wip_history import WipHistoryService
 from app.services.wip_report_export import WipReportExporter
@@ -48,9 +48,14 @@ def get_exporter(session: SessionDep) -> WipReportExporter:
     return WipReportExporter(session)
 
 
+def get_report_exporter(session: SessionDep) -> ReportExporter:
+    return ReportExporter(session)
+
+
 ReportServiceDep = Annotated[ReportService, Depends(get_report_service)]
 HistoryServiceDep = Annotated[WipHistoryService, Depends(get_history_service)]
 ExporterDep = Annotated[WipReportExporter, Depends(get_exporter)]
+ReportExporterDep = Annotated[ReportExporter, Depends(get_report_exporter)]
 FinancialDep = Annotated[OrgContext, Depends(require("report.financial"))]
 
 _WIP_RESPONSES: dict[int | str, dict[str, Any]] = {
@@ -63,21 +68,6 @@ _WIP_RESPONSES: dict[int | str, dict[str, Any]] = {
         },
     },
 }
-
-
-def _original_response(report: Any, fmt: str) -> Any:
-    """The original report in the envelope, or as the CSV it always was."""
-    if fmt == "csv":
-        return Response(
-            content=report_csv.render_report("wip", report),
-            media_type="text/csv; charset=utf-8",
-            headers={
-                "Content-Disposition": (
-                    f'attachment; filename="{report_csv.filename("wip", report)}"'
-                )
-            },
-        )
-    return ok(report)
 
 
 @router.get(
@@ -95,7 +85,8 @@ def _original_response(report: Any, fmt: str) -> Any:
         "row per client and job (hours, time value, disbursements, total, ages) as JSON or "
         "CSV, as at the day by item date. A date after today is 422 in both. `format` is "
         "`json`, `csv` (UTF-8 with BOM, amounts in decimal pounds) or `xlsx`; a download of "
-        "the historic report needs `report.export` as well and is audited. Filters: client, "
+        "either report needs `report.export` as well (403 `PERMISSION_DENIED`) and is "
+        "audited (`report.exported`). Filters: client, "
         "job, person (their time only), partner, manager, service. Requires "
         "`report.financial`."
     ),
@@ -107,6 +98,7 @@ async def wip_report(
     reports: ReportServiceDep,
     history: HistoryServiceDep,
     exporter: ExporterDep,
+    original_exporter: ReportExporterDep,
     ctx: ContextDep,
     query: Annotated[HistoricWipQuery, Query()],
 ) -> Any:
@@ -114,6 +106,7 @@ async def wip_report(
         raise ValidationError.for_field(
             "as_at", "The date cannot be in the future.", code="future_date"
         )
+    exporter.ensure_allowed(org, query.format)
     if query.group_by is None and query.format != "xlsx":
         original = await reports.wip(
             org,
@@ -128,12 +121,14 @@ async def wip_report(
                 format="csv" if query.format == "csv" else "json",
             ),
         )
-        return _original_response(original, query.format)
-    exporter.ensure_allowed(org, query.format)
-    report = await history.report(org, query)
-    if query.format == "json":
-        return ok(report)
-    file = await exporter.export(org, ctx, report, query.format)
+        if query.format == "json":
+            return ok(original)
+        file = await original_exporter.export(org, ctx, "wip", original, "csv")
+    else:
+        report = await history.report(org, query)
+        if query.format == "json":
+            return ok(report)
+        file = await exporter.export(org, ctx, report, query.format)
     return Response(
         content=file.content,
         media_type=file.media_type,

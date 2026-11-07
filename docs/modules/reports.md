@@ -76,7 +76,8 @@ order, so pages never overlap or skip a row between requests:
 
 ## Downloads
 
-`?format=csv`, `xlsx` or `pdf` on every report except WIP (the WIP report answers CSV only) sends the
+`?format=csv`, `xlsx` or `pdf` on every report except WIP (the original WIP report answers CSV
+only, the historic one CSV or Excel; both need `report.export` and are audited) sends the
 whole report as an attachment (`Content-Disposition: attachment; filename="<report>_<date or
 range>.<ext>"`), whatever `limit` and `offset` say. The three formats share one definition of
 columns (`report_csv.columns_of`) and one row of totals.
@@ -362,7 +363,15 @@ is worked out when it is asked for.
   `date_from` to the first of that month; job profitability defaults to all time.
 * **WIP as at a date** counts eligible items dated on or before `as_at` that were still
   unbilled at the end of that day: an item billed or written off after `as_at` counts as
-  WIP at `as_at`. Items are aged from `as_at`.
+  WIP at `as_at`. Items are aged from `as_at`. The items are billable time, billable
+  disbursements and approved billable expense lines (`docs/modules/expenses.md`, "Work in
+  progress"): a line counts at its `recharge_amount`, by its line date, once its claim was
+  approved by the end of `as_at` (practice time zone). The original report (no `group_by`) has
+  no expense column: disbursements and expense lines are both in `disbursement_value`
+  ("Disbursements" in the CSV). The dashboard's Unbilled WIP and Top clients by WIP use the
+  same items. Differences from `GET /wip` and the historic report, kept as they are: on a
+  fixed-fee job the original report counts the time at its charge value where they count the
+  recognised fee instead, and it has no WIP adjustments.
 * **Aged debtors as at a date**: for issued invoices dated on or before it, balance = gross
   − allocations of payments received by that date − credit notes issued by that date.
   Today this equals `gross − paid_total − credited_total`. "Current" is not yet due (due

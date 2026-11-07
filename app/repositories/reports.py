@@ -13,6 +13,7 @@ from typing import Any
 from sqlalchemy import (
     BigInteger,
     ColumnElement,
+    Date,
     Integer,
     Select,
     Subquery,
@@ -40,9 +41,12 @@ from app.db.models import (
     CreditNote,
     CreditNoteLine,
     Disbursement,
+    Expense,
+    ExpenseClaim,
     Invoice,
     InvoiceLine,
     Job,
+    Organization,
     OrganizationMember,
     Payment,
     PaymentAllocation,
@@ -252,7 +256,9 @@ def wip_items(
     shows what was unbilled at month end). Items ``in_draft`` are not WIP (as in the WIP
     module). Columns: ``client_id, job_id, item_date, minutes, time_value,
     disbursement_value``. Time on a timesheet that is not approved is left out when the
-    practice requires approval.
+    practice requires approval. Approved billable expense lines count at their recharge
+    amount in ``disbursement_value`` (the non-time column), dated by the line date, once their
+    claim was approved by the end of the day (as the WIP atoms, ``wip_atoms._expenses``).
     """
     time_q = _time_select(
         organization_id,
@@ -329,7 +335,53 @@ def wip_items(
             ),
         )
     )
-    return union_all(time_q, disbursement_q).subquery("wip_items")
+    claim = aliased(ExpenseClaim)
+    practice_zone = (
+        select(Organization.timezone).where(Organization.id == organization_id).scalar_subquery()
+    )
+    expense_q = (
+        select(
+            Expense.client_id.label("client_id"),
+            Expense.job_id.label("job_id"),
+            Expense.incurred_on.label("item_date"),
+            literal(0, Integer).label("minutes"),
+            literal(0, BigInteger).label("time_value"),
+            Expense.recharge_amount.label("disbursement_value"),
+        )
+        .select_from(Expense)
+        .outerjoin(
+            Job,
+            and_(Job.organization_id == Expense.organization_id, Job.id == Expense.job_id),
+        )
+        .join(
+            Client,
+            and_(Client.organization_id == Expense.organization_id, Client.id == Expense.client_id),
+        )
+        .where(
+            Expense.organization_id == organization_id,
+            Expense.is_billable.is_(True),
+            Expense.recharge_amount > 0,
+            _wip_status(organization_id, as_at, Expense.billing_status, "expense_id", Expense.id),
+            Expense.incurred_on <= as_at,
+            # The claim was approved by the end of the day, in the practice's time zone.
+            select(claim.id)
+            .where(
+                claim.organization_id == Expense.organization_id,
+                claim.id == Expense.claim_id,
+                claim.status == "approved",
+                cast(func.timezone(practice_zone, claim.decided_at), Date) <= as_at,
+            )
+            .exists(),
+            *item_conditions(
+                f,
+                client_col=Expense.client_id,
+                job_col=Expense.job_id,
+                user_col=None,
+                activity_col=None,
+            ),
+        )
+    )
+    return union_all(time_q, disbursement_q, expense_q).subquery("wip_items")
 
 
 def age_buckets(item_date: Any, value: Any, as_at: date) -> dict[str, ColumnElement[int]]:

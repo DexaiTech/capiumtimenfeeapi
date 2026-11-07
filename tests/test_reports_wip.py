@@ -13,6 +13,7 @@ from tests.domain_factories import (
     practice,
     staff,
 )
+from tests.expense_helpers import make_claim, make_line
 from tests.reports_helpers import (
     LineSpec,
     allocate,
@@ -179,6 +180,29 @@ async def test_wip_as_at_counts_items_cleared_after_that_day(client: AsyncClient
     assert then["totals"]["total"] == 13_300
     # As at today all of it is cleared (the draft's item is in_draft, not WIP).
     assert (await report(client, owner, org, "wip", as_at=AS_AT))["totals"]["total"] == 0
+
+
+async def test_wip_expense_lines_as_at_a_day(client: AsyncClient) -> None:
+    """An approved billable expense line is WIP at its recharge amount from the day its claim
+    was approved (11 September 2026, ``make_claim``), aged by the line date."""
+    owner, org = await practice(client)
+    acme = await make_client(org, "Acme")
+    claim = await make_claim(org, owner, status="approved")
+    await make_line(
+        org, claim, client=acme, is_billable=True, recharge_amount=2_500, incurred_on=ago(40)
+    )
+    await make_line(org, claim, client=acme, recharge_amount=0, incurred_on=ago(40))
+    pending = await make_claim(org, owner, status="submitted")
+    await make_line(
+        org, pending, client=acme, is_billable=True, recharge_amount=900, incurred_on=ago(40)
+    )
+
+    assert (await report(client, owner, org, "wip", as_at=ago(37)))["totals"]["total"] == 0
+    then = await report(client, owner, org, "wip", as_at=ago(36))  # the day of the approval
+    assert (then["totals"]["disbursement_value"], then["totals"]["total"]) == (2_500, 2_500)
+    assert then["rows"][0]["age_0_30"] == 2_500
+    now = await report(client, owner, org, "wip", as_at=AS_AT)
+    assert (now["totals"]["total"], now["rows"][0]["age_31_60"]) == (2_500, 2_500)
 
 
 async def test_wip_filters(client: AsyncClient) -> None:

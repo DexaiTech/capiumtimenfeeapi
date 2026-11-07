@@ -254,9 +254,13 @@ class WipClient(BaseModel):
     client_id: uuid.UUID
     client_code: str
     client_name: str
-    amount: int = Field(description="Time and disbursements, as at today")
+    amount: int = Field(
+        description="Time, disbursements and approved billable expense lines, as at today"
+    )
     time_value: int
-    disbursement_value: int
+    disbursement_value: int = Field(
+        description="Disbursements and approved billable expense lines (recharge amount)"
+    )
     minutes: int
     oldest_date: dt.date | None
     over_90_days: int = Field(description="The part of `amount` older than 90 days")

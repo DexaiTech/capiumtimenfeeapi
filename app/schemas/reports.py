@@ -185,7 +185,9 @@ class PagedReport[RowT: BaseModel, TotalsT: BaseModel](Report[RowT, TotalsT]):
 class WipAmounts(BaseModel):
     minutes: int
     time_value: int
-    disbursement_value: int
+    disbursement_value: int = Field(
+        description="Disbursements and approved billable expense lines (recharge amount)"
+    )
     total: int
     age_0_30: int = Field(description="Value of items 0-30 days old (by item date)")
     age_31_60: int

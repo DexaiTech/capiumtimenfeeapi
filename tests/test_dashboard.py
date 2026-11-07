@@ -8,6 +8,7 @@ from httpx import AsyncClient
 from sqlalchemy import event
 
 from app.db.session import get_engine
+from tests.dashboard_page_helpers import cards_by_key, get_page
 from tests.domain_factories import (
     make_client,
     make_disbursement,
@@ -16,6 +17,7 @@ from tests.domain_factories import (
     practice,
     staff,
 )
+from tests.expense_helpers import make_claim, make_line
 from tests.factories import add_member, error
 from tests.reports_helpers import (
     LineSpec,
@@ -27,6 +29,7 @@ from tests.reports_helpers import (
     pin_now,
     set_member,
 )
+from tests.time_helpers import org_url
 
 # Saturday 17 October 2026, 00:30 in London (BST); still Friday the 16th in UTC.
 NOW = datetime(2026, 10, 16, 23, 30, tzinfo=UTC)
@@ -197,6 +200,42 @@ async def test_dashboard_for_the_owner(
     assert [
         (c["client_id"], c["amount"], c["oldest_date"]) for c in financial["top_overdue_debtors"]
     ] == [(str(alpha.id), 1_200, "2026-10-16")]
+
+
+async def test_dashboard_wip_includes_approved_expense_lines(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Approved billable expense lines are WIP (their recharge amount), as on the WIP screen;
+    a line of a claim not yet approved is not."""
+    pin_now(monkeypatch, NOW)
+    owner, org = await practice(client)
+    alpha = await make_client(org, "Alpha Ltd")
+    beta = await make_client(org, "Beta LLP")
+    await make_disbursement(org, beta, 1_300, incurred_on=date(2026, 10, 1))
+    approved = await make_claim(org, owner, status="approved")
+    await make_line(
+        org,
+        approved,
+        client=alpha,
+        is_billable=True,
+        recharge_amount=2_500,
+        incurred_on=date(2026, 6, 1),
+    )
+    submitted = await make_claim(org, owner, status="submitted")
+    await make_line(org, submitted, client=beta, is_billable=True, recharge_amount=900)
+
+    financial = (await _get(client, owner, org))["financial"]
+    assert financial["wip_total"] == 2_500 + 1_300
+    assert financial["wip_over_90_days"] == 2_500
+    assert [(c["client_name"], c["amount"]) for c in financial["top_clients_by_wip"]] == [
+        ("Alpha Ltd", 2_500),
+        ("Beta LLP", 1_300),
+    ]
+    response = await client.get(org_url(org, "/wip"), headers=owner.headers)
+    assert response.status_code == 200, response.text
+    assert financial["wip_total"] == sum(r["total"] for r in response.json()["data"])
+    cards = cards_by_key(await get_page(client, owner, org, "cards"))
+    assert cards["unbilled_wip"]["value"] == 2_500 + 1_300
 
 
 async def test_dashboard_for_staff_has_no_practice_figures(
