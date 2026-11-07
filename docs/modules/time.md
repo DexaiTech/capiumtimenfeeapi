@@ -233,10 +233,12 @@ is_running, started_at, accumulated_seconds, elapsed_seconds, started_on, create
 
 **TimesheetRead**: `id, user_id, user_name, week_start, week_end, status, submitted_at,
 decided_by, decided_at, decision_note, entry_count, total_minutes, billable_minutes,
-non_billable_minutes, billable_value, zero_rate_minutes, created_at, updated_at`;
+non_billable_minutes, billable_value, zero_rate_minutes, approval_exempt, created_at, updated_at`;
 **TimesheetDetail** adds `entries[]` and `day_totals[{day, minutes}]`. `zero_rate_minutes` is the
 billable minutes whose entry found no charge-out rate (`charge_rate` 0), which go to WIP at £0
-(non-billable time is not counted).
+(non-billable time is not counted). `approval_exempt` is the sheet's stored flag that the submit
+follows (see "Time that needs no approval"): true, submitting approves the week at once; My
+Timesheet words its Submit button and question from it (TIME-02).
 
 **RevalueResult**: `entries_examined, entries_changed, charge_value_before,
 charge_value_after, value_delta, cost_value_delta` (`null` without `rate.read`).

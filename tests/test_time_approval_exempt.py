@@ -140,6 +140,49 @@ async def test_submitting_an_exempt_week_approves_it_without_asking_anybody(
     assert [row["id"] for row in queue.json()["data"]] == [theirs["timesheet_id"]]
 
 
+async def test_the_sheet_says_whether_submitting_approves_it_at_once(
+    client: AsyncClient,
+) -> None:
+    # TIME-02: My Timesheet words Submit from `approval_exempt`, the flag the submit follows.
+    owner, org = await practice(client)
+    acme = await make_client(org, "Acme Ltd")
+    partner = await staff(org, "partner")
+    person = await staff(org, "staff")
+    exempt = await log_time(client, partner, org, client_id=acme.id)
+    normal = await log_time(client, person, org, client_id=acme.id)
+    assert (await sheet_of(client, partner, org, exempt))["approval_exempt"] is True
+    assert (await sheet_of(client, person, org, normal))["approval_exempt"] is False
+    # The lists and the queue carry it too.
+    listed = await client.get(org_url(org, "/timesheets?user_id=all"), headers=owner.headers)
+    assert listed.status_code == 200, listed.text
+    flags = {row["id"]: row["approval_exempt"] for row in listed.json()["data"]}
+    assert flags == {exempt["timesheet_id"]: True, normal["timesheet_id"]: False}
+
+    # The practice setting off: the permission no longer exempts anybody.
+    await set_exemption(client, owner, org, False)
+    assert (await sheet_of(client, partner, org, exempt))["approval_exempt"] is False
+    submitted = await client.post(
+        org_url(org, f"/timesheets/{exempt['timesheet_id']}/submit"), headers=partner.headers
+    )
+    assert submitted.status_code == 200, submitted.text
+    assert submitted.json()["data"]["status"] == "submitted"
+    assert submitted.json()["data"]["approval_exempt"] is False
+
+    # The practice approves no timesheets: every week is exempt, whoever records it.
+    response = await client.patch(
+        org_url(org, ""), headers=owner.headers, json={"require_timesheet_approval": False}
+    )
+    assert response.status_code == 200, response.text
+    sheet = await sheet_of(client, person, org, normal)
+    assert sheet["approval_exempt"] is True
+    submitted = await client.post(
+        org_url(org, f"/timesheets/{normal['timesheet_id']}/submit"), headers=person.headers
+    )
+    assert submitted.status_code == 200, submitted.text
+    assert submitted.json()["data"]["status"] == "approved"
+    assert submitted.json()["data"]["approval_exempt"] is True
+
+
 async def test_people_whose_time_needs_no_approval_are_not_missing_a_timesheet(
     client: AsyncClient,
 ) -> None:

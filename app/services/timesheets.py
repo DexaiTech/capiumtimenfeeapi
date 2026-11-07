@@ -415,11 +415,18 @@ class TimesheetService:
             per_day[view.entry.entry_date] = per_day.get(view.entry.entry_date, 0) + (
                 view.entry.minutes
             )
+        # Which entries lie in a locked period, as the list and the day view say.
+        locked = await period_locks.locked_through(
+            self.session, ctx.organization_id, {v.entry.entry_date for v in views}
+        )
         return TimesheetDetail(
             **base.model_dump(),
             entries=[
                 TimeEntryRead.from_view(
-                    v, show_cost=cost, show_note=can_see_note(ctx, v.entry.user_id)
+                    v,
+                    show_cost=cost,
+                    show_note=can_see_note(ctx, v.entry.user_id),
+                    locked_through=locked.get(v.entry.entry_date),
                 )
                 for v in views
             ],
