@@ -171,7 +171,10 @@ class JobCreate(RequestModel):
         default=None, description="Default for fixed jobs: the service's default fee"
     )
     hourly_rate: Money | None = Field(
-        default=None, description="Overrides every other charge-out rate for time on this job"
+        default=None,
+        description="The job's charge-out rate for time on this job: used after the client's "
+        "rate rules (client + service + person, client + service, client + person, client) and "
+        "before the service, staff and grade rates (`app/services/charge_rates.py`)",
     )
     cost_plus_markup_bp: Markup | None = Field(default=None, description=_MARKUP)
     budget_minutes: Minutes | None = None

@@ -130,7 +130,7 @@ nothing is added. A closed or cancelled job answers 409 `JOB_CLOSED`, an unknown
 
 | `action` | `value` | Same rules as |
 |---|---|---|
-| `set_status` | `not_started`, `in_progress`, `on_hold` or `completed` | `PATCH /jobs/{id}/tasks/{id}/status`: needs `job.update`, or being one of the task's assignees |
+| `set_status` | `not_started`, `in_progress`, `on_hold` or `completed` | `POST /jobs/{id}/tasks/{id}/status`: needs `job.update`, or being one of the task's assignees |
 | `set_due_date` | `YYYY-MM-DD`, or null to clear | `PATCH /jobs/{id}/tasks/{id}` (within the job's dates) |
 | `add_assignee` / `remove_assignee` | a staff user id (an active member to add) | `PUT .../assignees` (the person is added to or taken from the current list) |
 | `delete` | none | `DELETE /jobs/{id}/tasks/{id}`: 409 `TASK_IN_USE` for a task with time or a running timer |
