@@ -140,11 +140,19 @@ class BudgetTotalsRead(BaseModel):
     budget_minutes_used_bp: int | None = Field(
         description="Time logged on the jobs with an hours budget / their budgets"
     )
+    minutes_basis_logged: int = Field(
+        description="Time logged on the jobs that have an hours budget: the numerator of "
+        "`budget_minutes_used_bp` (`logged_minutes` covers every job in the list)"
+    )
     budget_fee: int = Field(description="Sum over the jobs that have a fee budget")
     time_value: int = Field(description="Charge value of the billable time of every job")
     wip_value: int
     budget_fee_used_bp: int | None = Field(
         description="Time value of the jobs with a fee budget / their budgets"
+    )
+    fee_basis_value: int = Field(
+        description="Charge value of the billable time of the jobs that have a fee budget: the "
+        "numerator of `budget_fee_used_bp` (`time_value` covers every job in the list)"
     )
     cost_value: int | None = Field(description="Null without rate.read")
     margin_value: int | None = Field(description="Null without rate.read")
@@ -161,10 +169,12 @@ class BudgetTotalsRead(BaseModel):
             budget_minutes=totals.budget_minutes,
             logged_minutes=totals.logged_minutes,
             budget_minutes_used_bp=usage_bp(totals.minutes_basis_logged, totals.budget_minutes),
+            minutes_basis_logged=totals.minutes_basis_logged,
             budget_fee=totals.budget_fee,
             time_value=totals.time_value,
             wip_value=totals.wip_value,
             budget_fee_used_bp=usage_bp(totals.fee_basis_value, totals.budget_fee),
+            fee_basis_value=totals.fee_basis_value,
             cost_value=totals.cost_value if show_cost else None,
             margin_value=margin,
             margin_bp=percentage_bp(margin, totals.time_value) if margin is not None else None,
