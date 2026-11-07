@@ -82,7 +82,7 @@ from tests.time_helpers import ok_data, org_url
 
 async def test_staff_cannot_create_a_grade(client) -> None:
     owner, org = await practice(client)
-    member = await staff(org)                     # role "staff"
+    member = await staff(org)  # role "staff"
     response = await client.post(
         org_url(org, "/grades"), headers=member.headers, json={"code": "LEAD", "name": "Lead"}
     )
