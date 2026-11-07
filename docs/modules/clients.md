@@ -144,8 +144,8 @@ clients: [{row, code, name, id}]` (`code` null in a dry run when it will be gene
 `q` (case-insensitive substring of name, code, company number, client email or any contact
 email), `status` (repeatable; default every status except `archived`), `segment`
 (repeatable, case-insensitive), `client_type`, `aml_status`, `accounting_software`
-(repeatable), `se, `central` (`linked`: enabled from the central client service; `local`: created
-in this practice)rvice_id` (active engagement of that service), `manager_user_id`,
+(repeatable), `central` (`linked`: enabled from the central client service; `local`: created
+in this practice), `service_id` (active engagement of that service), `manager_user_id`,
 `partner_user_id`, `branch_id` (repeatable) and `without_branch=true` (clients with none; with
 `branch_id`, either matches; APT74), `include_internal=true` (the built-in Internal client too,
 for the time pickers; see "The Internal client"); `sort` = `name` (default, case-insensitive) | `code` | `segment` |
@@ -233,7 +233,8 @@ active engagements, deadline counts) regardless of page size (tested).
   `archived` by PATCH, create or import needs `client.delete` in addition. Other
   transitions are free (`client.update`).
 * **Delete** checks live jobs (soft-deleted jobs do not block), time entries, disbursements,
-  invoices of any status (drafts included), credit notes and payments. Contacts, rates and
+  expense lines, invoices of any status (drafts included), credit notes and payments (409
+  `CLIENT_IN_USE` with the counts). Contacts, rates and
   engagements stay attached to the soft-deleted row; the code becomes reusable.
 * **Contacts**: when `is_primary` is omitted, the client's first contact becomes primary.
   Deleting or un-flagging the primary leaves the client with none (no automatic promotion).
