@@ -325,3 +325,22 @@ class InvoiceRepository:
             .order_by(InvoiceApproval.created_at, InvoiceApproval.id)
         )
         return list((await self.session.execute(stmt)).scalars())
+
+    async def approvals_by_invoice(
+        self, organization_id: uuid.UUID, invoice_ids: Sequence[uuid.UUID]
+    ) -> dict[uuid.UUID, list[InvoiceApproval]]:
+        """The approval history of each invoice, oldest first, in one query (for a list page)."""
+        found: dict[uuid.UUID, list[InvoiceApproval]] = {}
+        if not invoice_ids:
+            return found
+        stmt = (
+            select(InvoiceApproval)
+            .where(
+                InvoiceApproval.organization_id == organization_id,
+                InvoiceApproval.invoice_id.in_(invoice_ids),
+            )
+            .order_by(InvoiceApproval.created_at, InvoiceApproval.id)
+        )
+        for approval in (await self.session.execute(stmt)).scalars():
+            found.setdefault(approval.invoice_id, []).append(approval)
+        return found

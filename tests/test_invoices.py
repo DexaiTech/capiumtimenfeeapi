@@ -25,7 +25,7 @@ from tests.domain_factories import (
     staff,
     vat_rate_id,
 )
-from tests.factories import audit_entries, error
+from tests.factories import Actor, audit_entries, error
 
 
 async def allocations(invoice_id: str) -> dict[str, tuple[int, int]]:
@@ -657,6 +657,62 @@ async def test_a_chosen_vat_code_stays_through_edits_and_approval(client):
     detail = (await client.get(url, headers=p.owner.headers)).json()["data"]
     assert codes(detail) == expected
     assert detail["vat_total"] == sum(line["vat_amount"] for line in detail["lines"])
+
+
+async def test_the_invoice_list_says_who_may_approve_each_invoice(client):
+    """BIL-01: each list row carries ``can_approve``, decided exactly as on the detail: an
+    approver who did not prepare or submit it (an Owner always), only while it awaits approval."""
+    p = await new_practice(client)
+    switched = await client.patch(
+        p.url(""), headers=p.owner.headers, json={"invoice_approval_required": True}
+    )
+    assert switched.status_code == 200, switched.text
+    preparer = await staff(p.org, "partner")
+    approver = await staff(p.org, "partner")
+    manager = await staff(p.org, "manager")
+    waiting = await draft(
+        client,
+        preparer,
+        p.org,
+        p.client.id,
+        time=[await make_time_entry(p.org, p.owner, client=p.client)],
+    )
+    submitted = await client.post(
+        org_url(p.org, f"/invoices/{waiting['id']}/submit"), headers=preparer.headers, json={}
+    )
+    assert submitted.status_code == 200, submitted.text
+    still_draft = await draft(
+        client,
+        preparer,
+        p.org,
+        p.client.id,
+        time=[await make_time_entry(p.org, p.owner, client=p.client)],
+    )
+
+    async def listed(actor: Actor) -> dict[str, bool]:
+        response = await client.get(p.url("/invoices"), headers=actor.headers)
+        assert response.status_code == 200, response.text
+        return {row["id"]: row["can_approve"] for row in response.json()["data"]}
+
+    async def detail(actor: Actor) -> bool:
+        url = org_url(p.org, f"/invoices/{waiting['id']}")
+        return (await client.get(url, headers=actor.headers)).json()["data"]["can_approve"]
+
+    expected = [
+        (approver, True),
+        (p.owner, True),
+        (preparer, False),  # prepared and submitted it
+        (manager, False),  # does not hold invoice.approve
+    ]
+    for actor, may in expected:
+        assert await listed(actor) == {waiting["id"]: may, still_draft["id"]: False}
+        assert await detail(actor) is may
+
+    approved = await client.post(
+        org_url(p.org, f"/invoices/{waiting['id']}/approve"), headers=approver.headers, json={}
+    )
+    assert approved.status_code == 200, approved.text
+    assert await listed(p.owner) == {waiting["id"]: False, still_draft["id"]: False}
 
 
 async def test_vat_is_rounded_per_line_half_up(client):

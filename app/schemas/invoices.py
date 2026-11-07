@@ -456,6 +456,12 @@ class InvoiceSummaryRead(BaseModel):
             "settings (false once issued or void)"
         )
     )
+    can_approve: bool = Field(
+        description=(
+            "The caller may approve it now: holds `invoice.approve`, the invoice is awaiting "
+            "approval and the caller is not its preparer or submitter (an Owner may be)"
+        )
+    )
     sent_at: datetime | None
     created_at: datetime
 
@@ -466,6 +472,7 @@ class InvoiceSummaryRead(BaseModel):
         client: Client | None,
         display_status: DisplayStatus,
         approval_required: bool = False,
+        can_approve: bool = False,
     ) -> "InvoiceSummaryRead":
         return cls(
             id=invoice.id,
@@ -484,6 +491,7 @@ class InvoiceSummaryRead(BaseModel):
             credited_total=invoice.credited_total,
             balance=invoice.balance,
             approval_required=approval_required,
+            can_approve=can_approve,
             sent_at=invoice.sent_at,
             created_at=invoice.created_at,
         )
@@ -523,12 +531,6 @@ class InvoiceRead(InvoiceSummaryRead):
     )
     created_by: uuid.UUID | None
     approvals: list[ApprovalEventRead]
-    can_approve: bool = Field(
-        description=(
-            "The caller may approve it now: holds `invoice.approve`, the invoice is awaiting "
-            "approval and the caller is not its preparer or submitter (an Owner may be)"
-        )
-    )
     lines: list[LineRead]
     vat_summary: list[VatSummaryRow]
     wip: InvoiceWipTotals
