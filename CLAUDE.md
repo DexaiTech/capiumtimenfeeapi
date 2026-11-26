@@ -34,6 +34,7 @@ Pinned in `requirements.txt` / `requirements-dev.txt`; tool config in `pyproject
 | `app/maintenance/` | `bootstrap.py` (first practice), `reset_data.py` |
 | `alembic/versions/` | Migrations `NNN_description.py` (001-079, linear) |
 | `tests/` | pytest suite, `conftest.py`, factories, `*_helpers.py` |
+| `infra/` | Azure infrastructure (Bicep): Container Apps, MySQL, Blob Storage, Key Vault ([infra/README.md](infra/README.md)) |
 | `docs/` | Documentation (index below); `docs/implementation-plans/` for ticket plans |
 
 ## Run locally

@@ -1,7 +1,10 @@
 # Deployment
 
-How to run Capium Time & Fees on a container platform (Coolify, Dokku, Render, a plain
-Docker host). Two repositories, three containers:
+How to run Capium Time & Fees on a container platform. The target platform is **Azure**
+(Container Apps, Database for MySQL Flexible Server, Blob Storage, Key Vault), described as Bicep
+in [`infra/`](../infra/README.md) and released with the manual *Deploy to Azure* workflow
+(`.github/workflows/deploy-azure.yml`). The same images also run on any Docker host (Coolify,
+Dokku, a plain server). Two repositories, three containers:
 
 | Container | Repository | Build | Port | Health check |
 |---|---|---|---|---|
@@ -79,7 +82,8 @@ image declares `/var/lib/capium/storage` as a volume and owns it for its unprivi
 ## Releases
 
 1. Run migrations once per release, before the new API starts:
-   `alembic upgrade head` (on Coolify: *Pre-deployment command* of the API).
+   `alembic upgrade head` (on Azure: the `capium-<env>-migrate` job, run by the deploy workflow;
+   on Coolify: *Pre-deployment command* of the API).
 2. Deploy the API and the worker from the same commit, then the UI.
 3. A new installation needs its first practice and Owner:
    `python -m app.maintenance.bootstrap --practice-name "..." --admin-name "..." --admin-email ...`

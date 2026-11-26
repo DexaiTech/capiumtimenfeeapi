@@ -57,3 +57,21 @@ jobs:
           alembic upgrade head
       - name: Tests
         run: pytest -q
+
+  infra:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      # Placeholders so the parameter files compile; nothing is deployed.
+      MYSQL_ADMIN_PASSWORD: ci-placeholder-password
+      JWT_SECRET_KEY: ci-placeholder-0123456789-0123456789
+    steps:
+      - uses: actions/checkout@v4
+      - name: Bicep compiles and lints
+        run: |
+          az bicep install
+          az bicep build --file infra/main.bicep --stdout > /dev/null
+          az bicep lint --file infra/main.bicep
+          for params in infra/env/*.bicepparam; do
+            az bicep build-params --file "$params" --stdout > /dev/null
+          done
