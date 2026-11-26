@@ -224,3 +224,7 @@ __marimo__/
 !.env.example
 # Scratch output of local runs.
 /storage/
+
+# Bicep parameter files of infra/ (the ENV/ pattern above, for virtualenvs, also matches them
+# on case-insensitive checkouts).
+!infra/env/
