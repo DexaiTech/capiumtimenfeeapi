@@ -145,10 +145,12 @@ class Client(Base, IdMixin, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
         Index(
             "uq_clients_organization_id_central_client_id",
             text(
-                "(CASE WHEN central_client_id IS NOT NULL AND deleted_at IS NULL THEN `organization_id` END)"
+                "(CASE WHEN central_client_id IS NOT NULL AND deleted_at IS NULL"
+                " THEN `organization_id` END)"
             ),
             text(
-                "(CASE WHEN central_client_id IS NOT NULL AND deleted_at IS NULL THEN `central_client_id` END)"
+                "(CASE WHEN central_client_id IS NOT NULL AND deleted_at IS NULL"
+                " THEN `central_client_id` END)"
             ),
             unique=True,
         ),

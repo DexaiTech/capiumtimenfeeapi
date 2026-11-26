@@ -165,7 +165,8 @@ class EmailTemplate(Base, IdMixin, OrgScopedMixin, TimestampMixin):
             "REGEXP_LIKE(template_key, '^[a-z][a-z0-9_]{1,49}$', 'c')", name="key_format"
         ),
         CheckConstraint(
-            "char_length(subject) BETWEEN 1 AND 200 AND NOT REGEXP_LIKE(subject, '[[:cntrl:]]', 'c')",
+            "char_length(subject) BETWEEN 1 AND 200"
+            " AND NOT REGEXP_LIKE(subject, '[[:cntrl:]]', 'c')",
             name="subject_valid",
         ),
         CheckConstraint("char_length(html_body) BETWEEN 1 AND 100000", name="html_body_length"),

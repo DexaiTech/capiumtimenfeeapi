@@ -490,7 +490,8 @@ class OrganizationMember(Base, IdMixin, TimestampMixin):
         Index(
             "uq_organization_members_organization_id_initials",
             text(
-                "(CASE WHEN initials IS NOT NULL AND status <> 'removed' THEN `organization_id` END)"
+                "(CASE WHEN initials IS NOT NULL AND status <> 'removed'"
+                " THEN `organization_id` END)"
             ),
             text(
                 "(CASE WHEN initials IS NOT NULL AND status <> 'removed' THEN upper(initials) END)"
@@ -507,10 +508,12 @@ class OrganizationMember(Base, IdMixin, TimestampMixin):
         Index(
             "uq_organization_members_organization_id_work_email_active",
             text(
-                "(CASE WHEN work_email IS NOT NULL AND status = 'active' THEN `organization_id` END)"
+                "(CASE WHEN work_email IS NOT NULL AND status = 'active'"
+                " THEN `organization_id` END)"
             ),
             text(
-                "(CASE WHEN work_email IS NOT NULL AND status = 'active' THEN lower(work_email) END)"
+                "(CASE WHEN work_email IS NOT NULL AND status = 'active'"
+                " THEN lower(work_email) END)"
             ),
             unique=True,
         ),

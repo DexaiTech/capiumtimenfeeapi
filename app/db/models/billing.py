@@ -324,14 +324,16 @@ class WipAllocation(Base, IdMixin, OrgScopedMixin, TimestampMixin):
         Index(
             "uq_wip_allocations_time_entry_live",
             text(
-                "(CASE WHEN time_entry_id IS NOT NULL AND reversed_at IS NULL THEN `time_entry_id` END)"
+                "(CASE WHEN time_entry_id IS NOT NULL AND reversed_at IS NULL"
+                " THEN `time_entry_id` END)"
             ),
             unique=True,
         ),
         Index(
             "uq_wip_allocations_disbursement_live",
             text(
-                "(CASE WHEN disbursement_id IS NOT NULL AND reversed_at IS NULL THEN `disbursement_id` END)"
+                "(CASE WHEN disbursement_id IS NOT NULL AND reversed_at IS NULL"
+                " THEN `disbursement_id` END)"
             ),
             unique=True,
         ),

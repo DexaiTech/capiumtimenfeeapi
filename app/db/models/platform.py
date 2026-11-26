@@ -41,7 +41,8 @@ class BackgroundJob(Base, IdMixin, TimestampMixin):
         Index(
             "uq_background_jobs_dedupe_key",
             text(
-                "(CASE WHEN dedupe_key IS NOT NULL AND status IN ('queued', 'running') THEN `dedupe_key` END)"
+                "(CASE WHEN dedupe_key IS NOT NULL AND status IN ('queued', 'running')"
+                " THEN `dedupe_key` END)"
             ),
             unique=True,
         ),

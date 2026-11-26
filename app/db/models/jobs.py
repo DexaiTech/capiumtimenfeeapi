@@ -98,7 +98,8 @@ class Job(Base, IdMixin, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
         Index(
             "uq_jobs_organization_id_pm_job_id",
             text(
-                "(CASE WHEN pm_job_id IS NOT NULL AND deleted_at IS NULL THEN `organization_id` END)"
+                "(CASE WHEN pm_job_id IS NOT NULL AND deleted_at IS NULL"
+                " THEN `organization_id` END)"
             ),
             text("(CASE WHEN pm_job_id IS NOT NULL AND deleted_at IS NULL THEN `pm_job_id` END)"),
             unique=True,
