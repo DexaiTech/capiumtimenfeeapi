@@ -53,6 +53,22 @@ async def test_five_wrong_passwords_lock_the_account_even_for_the_right_password
     assert await audit_count("auth.login_failed") == 5
 
 
+async def test_once_locked_the_account_answers_423_not_the_rate_limit(
+    client: AsyncClient, verified_user, monkeypatch
+):
+    """With the real per-email limit (5 attempts per 15 minutes, successes included) a locked
+    account answers 423 with its retry time on every later attempt, not the generic 429 of the
+    limit. Starts from a fresh limit window: the fixture's own sign-in used one attempt."""
+    monkeypatch.setattr(get_settings(), "auth_rate_limit_factor", 1)
+    await sql("DELETE FROM rate_limit_counters")
+    statuses = [(await login(client, password=WRONG)).status_code for _ in range(5)]
+    assert statuses == [401, 401, 401, 401, 423]
+    for password in (WRONG, PASSWORD, PASSWORD):
+        again = await login(client, password=password)
+        assert again.status_code == 423
+        assert again.json()["error"]["code"] == "AUTH_ACCOUNT_LOCKED"
+
+
 async def test_a_successful_sign_in_starts_the_count_again(client: AsyncClient, verified_user):
     for _ in range(4):
         assert (await login(client, password=WRONG)).status_code == 401

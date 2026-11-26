@@ -318,8 +318,10 @@ Time & Fees' own sign-in follows the account rules of the Capium OneLogin servic
   account is locked for `LOGIN_LOCKOUT_MINUTES` (15): every sign-in answers 423
   `AUTH_ACCOUNT_LOCKED`, the right password too. A successful sign-in resets the count; a
   password reset or an administrator's `unlock-login` ends the lock. An unknown email counts
-  nothing and answers the same 401 as a wrong password. The per-email rate limit (5 per 15
-  minutes, 429) stays in front of it.
+  nothing and answers the same 401 as a wrong password. The per-email rate limit (5 attempts
+  per 15 minutes, successes included, 429) still throttles sign-ins, but a locked account is
+  answered before it: every attempt during the lock gets the 423 and its retry time. The failure
+  count lasts across limit windows until a successful sign-in.
 * **Two-factor sign-in** (TOTP, any authenticator app), optional per person. With it on, a
   right password opens a challenge (`mfa_challenges`) instead of a session: it lasts
   `MFA_CHALLENGE_MINUTES` (5), takes `MFA_CHALLENGE_MAX_ATTEMPTS` (5) wrong codes (then it is

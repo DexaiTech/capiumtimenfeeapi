@@ -240,20 +240,23 @@ class AuthService:
     ) -> TokenBundle | TwoFactorRequired:
         email = data.email.lower()
         await self.limiter.hit(f"login:ip:{ctx.ip_address}", limit=10, window_seconds=QUARTER_HOUR)
-        await self.limiter.hit(f"login:email:{email}", limit=5, window_seconds=QUARTER_HOUR)
-
         user = await self.users.get_by_email(email)
-        # Always verified, so a locked or unknown account takes as long as any other.
-        valid, upgraded_hash = await verify_password(
-            data.password, user.password_hash if user else None
-        )
         now = datetime.now(UTC)
+        # A locked account answers 423 before the per-email limit: otherwise that limit (429,
+        # counting the very failures that locked it) would hide the lock and its retry time.
+        # Answering without checking the password tells nothing the 423 does not already say.
         if user is not None and user.locked_at(now):
             async with unit_of_work(self.session):
                 await audit.record(
                     self.session, "auth.login_locked", ctx=ctx, actor_user_id=user.id
                 )
             raise locked_error(user, now)
+        await self.limiter.hit(f"login:email:{email}", limit=5, window_seconds=QUARTER_HOUR)
+
+        # Always verified, so an unknown account takes as long as a known one.
+        valid, upgraded_hash = await verify_password(
+            data.password, user.password_hash if user else None
+        )
         if user is None or not valid:
             error: AppException = _invalid_credentials()
             async with unit_of_work(self.session):
