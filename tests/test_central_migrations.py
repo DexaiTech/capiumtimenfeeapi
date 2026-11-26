@@ -160,15 +160,15 @@ async def two_clients(client):
         ("invoice_email = 'ab'", "ck_clients_invoice_email_length"),
         ("invoice_email = repeat('a', 255)", "ck_clients_invoice_email_length"),
         (
-            "default_service_id = gen_random_uuid()",
+            "default_service_id = UUID()",
             "fk_clients_organization_id_default_service_id_services",
         ),
         (
-            "invoice_template_id = gen_random_uuid()",
+            "invoice_template_id = UUID()",
             "fk_clients_invoice_template_invoice_templates",
         ),
         (
-            "merged_into_client_id = gen_random_uuid()",
+            "merged_into_client_id = UUID()",
             "fk_clients_organization_id_merged_into_client_id_clients",
         ),
     ],
@@ -215,7 +215,7 @@ async def test_the_sync_log_constraints(client):
     ):
         await sql(
             "INSERT INTO integration_sync_logs (id, organization_id, integration, direction, "
-            "operation, status, external_event_id, attempt) VALUES (gen_random_uuid(), :o, "
+            "operation, status, external_event_id, attempt) VALUES (UUID(), :o, "
             ":integration, :direction, 'sync', :status, :event, :attempt)",
             o=team.id,
             integration=integration,
@@ -244,7 +244,7 @@ async def test_the_sync_log_constraints(client):
     other = await new_team(client, "Second Practice")
     await sql(
         "INSERT INTO integration_sync_logs (id, organization_id, integration, operation, status, "
-        "external_event_id) VALUES (gen_random_uuid(), :o, 'central_client', 'sync', 'ok', 'evt-1')",
+        "external_event_id) VALUES (UUID(), :o, 'central_client', 'sync', 'ok', 'evt-1')",
         o=other.id,
     )
 
@@ -253,7 +253,7 @@ async def test_the_invoice_template_constraints(client):
     team = await new_team(client)
     insert = (
         "INSERT INTO invoice_templates (id, organization_id, name, layout, is_default, status, footer_text, deleted_at) "
-        "VALUES (gen_random_uuid(), :o, :name, :layout, :default, :status, :footer, :deleted)"
+        "VALUES (UUID(), :o, :name, :layout, :default, :status, :footer, :deleted)"
     )
 
     async def add(
@@ -308,7 +308,7 @@ async def test_a_central_cache_row_is_unique_per_practice_and_central_client(cli
     team = await new_team(client)
     insert = (
         "INSERT INTO central_client_cache (id, organization_id, central_id, name, status, source_updated_at) "
-        "VALUES (gen_random_uuid(), :o, :c, :n, :s, now())"
+        "VALUES (UUID(), :o, :c, :n, :s, now())"
     )
     await sql(insert, o=team.id, c=BAKERY, n="Northgate Bakery Ltd", s="active")
     with pytest.raises(IntegrityError, match="uq_central_client_cache_organization_id_central_id"):

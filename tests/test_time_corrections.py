@@ -539,7 +539,7 @@ async def test_corrections_at_the_same_time_form_one_chain(client: AsyncClient) 
     [
         "UPDATE time_entry_history SET reason = 'Changed'",
         "UPDATE time_entry_history SET after = '{}'",
-        "UPDATE time_entry_history SET corrected_by = gen_random_uuid()",
+        "UPDATE time_entry_history SET corrected_by = UUID()",
         "DELETE FROM time_entry_history",
     ],
 )
@@ -557,7 +557,7 @@ async def test_history_rows_cannot_be_changed_or_deleted(
     await sql(
         "INSERT INTO time_entry_history (id, organization_id, time_entry_id, user_id, "
         "corrected_by, reason, before, after) "
-        "VALUES (gen_random_uuid(), :o, :e, :u, :c, 'Direct', '{}', '{}')",
+        "VALUES (UUID(), :o, :e, :u, :c, 'Direct', '{}', '{}')",
         o=org["id"], e=str(entry["id"]), u=str(person.id), c=str(approver.id),
     )  # fmt: skip
     assert len(await history_rows(org, entry["id"])) == 2
@@ -590,7 +590,7 @@ async def test_the_history_table_refuses_bad_rows(
     with pytest.raises(IntegrityError, match=constraint):
         await sql(
             "INSERT INTO time_entry_history (id, organization_id, time_entry_id, user_id, "
-            "corrected_by, reason, before, after) VALUES (gen_random_uuid(), :o, :e, :u, :c, :r, "
+            "corrected_by, reason, before, after) VALUES (UUID(), :o, :e, :u, :c, :r, "
             "CAST(:b AS jsonb), CAST(:a AS jsonb))",
             o=org["id"], e=str(entry["id"]), u=str(person.id), c=str(approver.id),
             r=reason, b=before, a=after,

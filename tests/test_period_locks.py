@@ -442,7 +442,7 @@ async def test_the_period_checks(client, period_type, start, end):
     with pytest.raises(IntegrityError):
         await sql(
             "INSERT INTO locked_periods (id, organization_id, period_type, start_date, end_date) "
-            "VALUES (gen_random_uuid(), :o, :t, :s, :e)",
+            "VALUES (UUID(), :o, :t, :s, :e)",
             o=org["id"],
             t=period_type,
             s=date.fromisoformat(start),

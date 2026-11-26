@@ -102,4 +102,5 @@ def attach(tables: dict[str, Table]) -> None:
     """Create each table's triggers right after the table (``metadata.create_all``)."""
     for name in {rule.table for rule in NO_OVERLAP} | set(APPEND_ONLY):
         for statement in create_statements(name):
-            event.listen(tables[name], "after_create", DDL(statement))
+            ddl = DDL(statement)  # type: ignore[no-untyped-call]
+            event.listen(tables[name], "after_create", ddl)

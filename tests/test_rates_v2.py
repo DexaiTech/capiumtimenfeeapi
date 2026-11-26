@@ -454,7 +454,7 @@ async def test_the_database_refuses_overlapping_rules_whatever_the_application_d
     )
     insert = (
         "INSERT INTO rate_rules (id, organization_id, kind, level, user_id, rate, effective_from, "
-        "effective_to) VALUES (gen_random_uuid(), :o, 'charge', 'staff', :u, 1, :f, :t)"
+        "effective_to) VALUES (UUID(), :o, 'charge', 'staff', :u, 1, :f, :t)"
     )
     with pytest.raises(IntegrityError) as caught:
         await sql(insert, o=org["id"], u=str(person.id), f=date(2026, 6, 30), t=None)

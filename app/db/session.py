@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from app.core.config import Settings, get_settings
+from app.db import mysql_sql  # noqa: F401  (MySQL spellings, registered before use)
 
 _UOW_DEPTH = "uow_depth"
 

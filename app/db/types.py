@@ -12,7 +12,7 @@
 """
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, time
 from typing import Any
 
 from sqlalchemy import Dialect, TypeDecorator, text
@@ -28,15 +28,20 @@ class UTCDateTime(TypeDecorator[datetime]):
     """An aware datetime stored as UTC in ``DATETIME(6)``.
 
     A naive value is taken to be UTC already, as PostgreSQL's ``timestamptz`` did in a UTC
-    session, so existing callers keep their meaning.
+    session, and a ``date`` is its midnight UTC, so existing callers keep their meaning.
     """
 
     impl = DATETIME(fsp=6)
     cache_ok = True
 
-    def process_bind_param(self, value: datetime | None, dialect: Dialect) -> datetime | None:
+    def process_bind_param(
+        self, value: datetime | date | None, dialect: Dialect
+    ) -> datetime | None:
         if value is None:
             return None
+        if not isinstance(value, datetime):
+            # A date compared with a timestamp is its midnight UTC, as PostgreSQL cast it.
+            return datetime.combine(value, time.min)
         if value.tzinfo is not None:
             value = value.astimezone(UTC)
         return value.replace(tzinfo=None)

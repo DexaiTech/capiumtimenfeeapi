@@ -270,9 +270,9 @@ async def test_the_database_refuses_claims_in_an_impossible_state(client):
         ("UPDATE expense_claims SET title = '' WHERE id = :c", {"c": draft}),
         ("UPDATE expense_claims SET title = repeat('x', 201) WHERE id = :c", {"c": draft}),
         # Nobody outside the practice may be the claimant, its creator or its decider.
-        ("UPDATE expense_claims SET user_id = gen_random_uuid() WHERE id = :c", {"c": draft}),
-        ("UPDATE expense_claims SET created_by = gen_random_uuid() WHERE id = :c", {"c": draft}),
-        ("UPDATE expense_claims SET decided_by = gen_random_uuid() WHERE id = :c", {"c": approved}),
+        ("UPDATE expense_claims SET user_id = UUID() WHERE id = :c", {"c": draft}),
+        ("UPDATE expense_claims SET created_by = UUID() WHERE id = :c", {"c": draft}),
+        ("UPDATE expense_claims SET decided_by = UUID() WHERE id = :c", {"c": approved}),
     ):
         await refused(statement, **params)
     assert [
@@ -306,12 +306,12 @@ async def test_one_practice_cannot_reach_the_rows_of_another(client):
         ("UPDATE expense_claims SET user_id = :x WHERE id = :i", {"i": mine, "x": their_staff.id}),
         (
             "INSERT INTO expense_claim_events (id, organization_id, claim_id, action, actor_user_id) "
-            "VALUES (gen_random_uuid(), :o, :c, 'submitted', :u)",
+            "VALUES (UUID(), :o, :c, 'submitted', :u)",
             {"o": team.id, "c": their_claim, "u": staff.id},
         ),
         (
             "INSERT INTO expense_receipts (id, organization_id, expense_id, file_name, content_type, "
-            "size_bytes, storage_key, sha256, uploaded_by) VALUES (gen_random_uuid(), :o, :e, 'r.png', "
+            "size_bytes, storage_key, sha256, uploaded_by) VALUES (UUID(), :o, :e, 'r.png', "
             "'image/png', 10, :k, :s, :u)",
             {"o": team.id, "e": their_line, "k": "k" * 20, "s": "a" * 64, "u": staff.id},
         ),
@@ -330,7 +330,7 @@ async def test_expense_types_are_unique_by_code_and_by_active_name(client):
     team = await expense_team(client)
     insert = (
         "INSERT INTO expense_types (id, organization_id, name, code, is_active) "
-        "VALUES (gen_random_uuid(), :o, :n, :c, :a)"
+        "VALUES (UUID(), :o, :n, :c, :a)"
     )
     # The same code twice, the same name twice while both are active (whatever the case).
     await refused(insert, o=team.id, n="Another", c="TRAVEL", a=True)
@@ -362,7 +362,7 @@ async def test_receipts_and_history_rows_obey_their_limits_and_go_with_their_cla
     line = await make_line(org, claim)
     insert_receipt = (
         "INSERT INTO expense_receipts (id, organization_id, expense_id, file_name, content_type, "
-        "size_bytes, storage_key, sha256, uploaded_by) VALUES (gen_random_uuid(), :o, :e, :n, :t, "
+        "size_bytes, storage_key, sha256, uploaded_by) VALUES (UUID(), :o, :e, :n, :t, "
         ":size, :k, :s, :u)"
     )
     good = {
@@ -393,7 +393,7 @@ async def test_receipts_and_history_rows_obey_their_limits_and_go_with_their_cla
     await refused(insert_receipt, **{**good, "n": "again.png"})  # the key is unique
     insert_event = (
         "INSERT INTO expense_claim_events (id, organization_id, claim_id, action, actor_user_id, note) "
-        "VALUES (gen_random_uuid(), :o, :c, :a, :u, :n)"
+        "VALUES (UUID(), :o, :c, :a, :u, :n)"
     )
     event = {"o": team.id, "c": claim, "a": "submitted", "u": staff.id, "n": None}
     for change in ({"a": "paid"}, {"n": ""}, {"n": "n" * 2001}, {"u": uuid.uuid4()}):

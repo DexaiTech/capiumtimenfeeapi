@@ -35,7 +35,7 @@ async def test_the_migration_gives_every_practice_one_internal_client_and_its_jo
     # Plain: a code of its own that is not chargeable, and holiday switched off.
     await sql(
         "INSERT INTO activity_codes (id, organization_id, code, name, is_chargeable) "
-        "VALUES (gen_random_uuid(), :o, 'SICK', 'Sickness', false)",
+        "VALUES (UUID(), :o, 'SICK', 'Sickness', false)",
         o=plain["id"],
     )
     await sql(

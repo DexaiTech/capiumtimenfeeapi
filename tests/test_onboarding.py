@@ -84,8 +84,7 @@ async def _footer(client, owner, org):
 
 async def _second_template(client, owner, org):
     await sql(
-        "INSERT INTO invoice_templates (id, organization_id, name) "
-        "VALUES (gen_random_uuid(), :o, 'Detailed')",
+        "INSERT INTO invoice_templates (id, organization_id, name) VALUES (UUID(), :o, 'Detailed')",
         o=org["id"],
     )
 
@@ -507,7 +506,7 @@ async def test_the_table_refuses_a_bad_state_a_bad_key_and_a_second_row(client):
     _owner, org = await practice(client)
     insert = (
         "INSERT INTO onboarding_progress (id, organization_id, step_key, state) "
-        "VALUES (gen_random_uuid(), :o, :k, :s)"
+        "VALUES (UUID(), :o, :k, :s)"
     )
     await sql(insert, o=org["id"], k="period_lock", s="done")
     for key, state in (("period_lock", "skipped"), ("other", "finished"), ("Bad-Key", "done")):

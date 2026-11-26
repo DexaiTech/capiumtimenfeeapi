@@ -352,13 +352,13 @@ async def test_list_is_one_query_plus_batched_lookups(client):
             await make_time_entry(org, member, client=row)
             await sql(
                 "INSERT INTO client_contacts (id, organization_id, client_id, name, is_primary) "
-                "VALUES (gen_random_uuid(), :o, :c, 'P', true)",
+                "VALUES (UUID(), :o, :c, 'P', true)",
                 o=org["id"],
                 c=str(row.id),
             )
             await sql(
                 "INSERT INTO client_services (id, organization_id, client_id, service_id) "
-                "VALUES (gen_random_uuid(), :o, :c, :s)",
+                "VALUES (UUID(), :o, :c, :s)",
                 o=org["id"],
                 c=str(row.id),
                 s=str(vat),

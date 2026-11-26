@@ -105,7 +105,7 @@ async def set_lock(org: dict, day: date | None) -> None:
             await session.execute(
                 text(
                     "INSERT INTO locked_periods (id, organization_id, period_type, start_date, "
-                    "end_date) VALUES (gen_random_uuid(), :org, 'legacy', DATE '2000-01-01', :day)"
+                    "end_date) VALUES (UUID(), :org, 'legacy', DATE '2000-01-01', :day)"
                 ),
                 {"org": uuid.UUID(org["id"]), "day": day},
             )

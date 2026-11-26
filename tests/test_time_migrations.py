@@ -79,7 +79,7 @@ async def test_the_note_and_reminder_constraints(client):
 
     insert = (
         "INSERT INTO timesheet_reminders (id, organization_id, user_id, week_start, kind) "
-        "VALUES (gen_random_uuid(), :o, :u, '2026-09-07', :k)"
+        "VALUES (UUID(), :o, :u, '2026-09-07', :k)"
     )
     params = {"o": org["id"], "u": str(person.id)}
     with pytest.raises(IntegrityError, match="ck_timesheet_reminders_kind"):

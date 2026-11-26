@@ -381,14 +381,14 @@ async def test_client_in_use_cannot_be_deleted(client, kind):
     elif kind == "invoice":
         await sql(
             "INSERT INTO invoices (id, organization_id, client_id, status, currency) "
-            "VALUES (gen_random_uuid(), :o, :c, 'draft', 'GBP')",
+            "VALUES (UUID(), :o, :c, 'draft', 'GBP')",
             o=org["id"],
             c=str(acme.id),
         )
     else:
         await sql(
             "INSERT INTO payments (id, organization_id, client_id, received_on, amount) "
-            "VALUES (gen_random_uuid(), :o, :c, '2026-09-01', 100)",
+            "VALUES (UUID(), :o, :c, '2026-09-01', 100)",
             o=org["id"],
             c=str(acme.id),
         )
@@ -479,7 +479,7 @@ async def _money_fixture(client):
         await sql(
             "INSERT INTO invoices (id, organization_id, client_id, number, status, issue_date, "
             "due_date, currency, net_total, vat_total, gross_total, paid_total) VALUES "
-            "(gen_random_uuid(), :o, :c, :n, :s, :i, :d, 'GBP', :g, 0, :g, :p)",
+            "(UUID(), :o, :c, :n, :s, :i, :d, 'GBP', :g, 0, :g, :p)",
             o=org["id"],
             c=str(acme.id),
             n=number,
@@ -491,8 +491,8 @@ async def _money_fixture(client):
         )
     await sql(
         "INSERT INTO payments (id, organization_id, client_id, received_on, amount, "
-        "allocated_total) VALUES (gen_random_uuid(), :o, :c, :d, 5000, 2000), "
-        "(gen_random_uuid(), :o, :c, :d, 800, 0)",
+        "allocated_total) VALUES (UUID(), :o, :c, :d, 5000, 2000), "
+        "(UUID(), :o, :c, :d, 800, 0)",
         o=org["id"],
         c=str(acme.id),
         d=past,

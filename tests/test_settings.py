@@ -554,7 +554,7 @@ async def test_sequence_next_number_already_used_is_409(client):
     acme = await make_client(org)
     await sql(
         "INSERT INTO invoices (id, organization_id, client_id, number, status, issue_date, "
-        "due_date, currency) VALUES (gen_random_uuid(), :o, :c, 'INV-00007', 'issued', "
+        "due_date, currency) VALUES (UUID(), :o, :c, 'INV-00007', 'issued', "
         ":d, :d, 'GBP')",
         o=org["id"],
         c=str(acme.id),

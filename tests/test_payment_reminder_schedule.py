@@ -198,7 +198,7 @@ async def test_a_manual_reminder_counts_for_the_day_it_covers(client):
     await sql(
         "INSERT INTO payment_reminders (id, organization_id, invoice_id, batch_id, template, "
         "source, status, sent_on, recipients, days_overdue, amount_due, sent_by, sent_at) "
-        "SELECT gen_random_uuid(), :o, :i, gen_random_uuid(), 'client_payment_reminder', 'manual', "
+        "SELECT UUID(), :o, :i, UUID(), 'client_payment_reminder', 'manual', "
         "'sent', :d, ARRAY['billing@widgets.example'], 8, 100, :u, now()",
         o=p.id,
         i=invoice["id"],
