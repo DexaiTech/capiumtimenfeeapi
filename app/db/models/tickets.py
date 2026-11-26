@@ -23,20 +23,19 @@ from datetime import datetime
 from sqlalchemy import (
     BigInteger,
     CheckConstraint,
-    DateTime,
     ForeignKeyConstraint,
     Index,
     Integer,
     PrimaryKeyConstraint,
+    String,
     Text,
     UniqueConstraint,
-    func,
     text,
 )
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, IdMixin, OrgScopedMixin, TimestampMixin
+from app.db.types import NOW, UTCDateTime, Uuid36
 
 TICKET_STATUSES = (
     "open",
@@ -75,18 +74,18 @@ class TicketTag(Base, IdMixin, OrgScopedMixin, TimestampMixin):
     __tablename__ = "ticket_tags"
     __table_args__ = (
         UniqueConstraint("organization_id", "id", name="uq_ticket_tags_organization_id_id"),
-        CheckConstraint("length(name) BETWEEN 1 AND 40", name="name_length"),
+        CheckConstraint("char_length(name) BETWEEN 1 AND 40", name="name_length"),
         CheckConstraint(_in("color", TAG_COLORS), name="color"),
         Index(
             "uq_ticket_tags_organization_id_name_lower",
             "organization_id",
-            text("lower(name)"),
+            text("(lower(name))"),
             unique=True,
         ),
     )
 
-    name: Mapped[str] = mapped_column(Text, nullable=False)
-    color: Mapped[str] = mapped_column(Text, nullable=False, server_default="grey")
+    name: Mapped[str] = mapped_column(String(40), nullable=False)
+    color: Mapped[str] = mapped_column(String(255), nullable=False, server_default="grey")
 
 
 class Ticket(Base, IdMixin, OrgScopedMixin, TimestampMixin):
@@ -96,14 +95,14 @@ class Ticket(Base, IdMixin, OrgScopedMixin, TimestampMixin):
         _member_fk("assignee_user_id", "fk_tickets_organization_id_assignee_members"),
         _member_fk("created_by", "fk_tickets_organization_id_created_by_members"),
         CheckConstraint("number >= 1", name="number"),
-        CheckConstraint("length(code) BETWEEN 1 AND 30", name="code_length"),
+        CheckConstraint("char_length(code) BETWEEN 1 AND 30", name="code_length"),
         CheckConstraint(_in("category", TICKET_CATEGORIES), name="category"),
-        CheckConstraint("length(subject) BETWEEN 1 AND 200", name="subject_length"),
+        CheckConstraint("char_length(subject) BETWEEN 1 AND 200", name="subject_length"),
         CheckConstraint(
-            "description IS NULL OR length(description) <= 10000", name="description_length"
+            "description IS NULL OR char_length(description) <= 10000", name="description_length"
         ),
         CheckConstraint(
-            "description_html IS NULL OR length(description_html) <= 40000",
+            "description_html IS NULL OR char_length(description_html) <= 40000",
             name="description_html_length",
         ),
         CheckConstraint(_in("status", TICKET_STATUSES), name="status"),
@@ -119,28 +118,27 @@ class Ticket(Base, IdMixin, OrgScopedMixin, TimestampMixin):
             "organization_id",
             "assignee_user_id",
             "created_at",
-            postgresql_where=text("assignee_user_id IS NOT NULL"),
         ),
         Index(
             "ix_tickets_organization_id_subject_lower",
             "organization_id",
-            text("lower(subject)"),
+            text("(lower(subject))"),
             "id",
         ),
     )
 
     number: Mapped[int] = mapped_column(Integer, nullable=False)
-    code: Mapped[str] = mapped_column(Text, nullable=False)
-    category: Mapped[str] = mapped_column(Text, nullable=False, server_default="application")
-    subject: Mapped[str] = mapped_column(Text, nullable=False)
+    code: Mapped[str] = mapped_column(String(30), nullable=False)
+    category: Mapped[str] = mapped_column(String(255), nullable=False, server_default="application")
+    subject: Mapped[str] = mapped_column(String(200), nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
     # The editor's sanitised HTML; ``description`` holds its text. Null for plain-text tickets.
     description_html: Mapped[str | None] = mapped_column(Text)
-    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="open")
-    priority: Mapped[str] = mapped_column(Text, nullable=False, server_default="not_set")
-    assignee_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
-    created_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(String(255), nullable=False, server_default="open")
+    priority: Mapped[str] = mapped_column(String(255), nullable=False, server_default="not_set")
+    assignee_user_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
+    created_by: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
+    closed_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
 
 
 class TicketTagLink(Base, OrgScopedMixin):
@@ -162,11 +160,9 @@ class TicketTagLink(Base, OrgScopedMixin):
         Index("ix_ticket_tag_links_organization_id_tag_id", "organization_id", "tag_id"),
     )
 
-    ticket_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    tag_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now()
-    )
+    ticket_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
+    tag_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False, server_default=NOW)
 
 
 class TicketComment(Base, IdMixin, OrgScopedMixin, TimestampMixin):
@@ -187,8 +183,10 @@ class TicketComment(Base, IdMixin, OrgScopedMixin, TimestampMixin):
             ondelete="CASCADE",
         ),
         _member_fk("author_user_id", "fk_ticket_comments_organization_id_author_members"),
-        CheckConstraint("length(body) <= 5000", name="body_length"),
-        CheckConstraint("body_html IS NULL OR length(body_html) <= 20000", name="body_html_length"),
+        CheckConstraint("char_length(body) <= 5000", name="body_length"),
+        CheckConstraint(
+            "body_html IS NULL OR char_length(body_html) <= 20000", name="body_html_length"
+        ),
         Index(
             "ix_ticket_comments_organization_id_ticket_id_created_at",
             "organization_id",
@@ -197,13 +195,13 @@ class TicketComment(Base, IdMixin, OrgScopedMixin, TimestampMixin):
         ),
     )
 
-    ticket_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    author_user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    ticket_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
+    author_user_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
     # May be empty only when the comment carries attachments (a rule of the service).
-    body: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
+    body: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("('')"))
     # The editor's sanitised HTML; ``body`` holds its text. Null for plain-text comments.
     body_html: Mapped[str | None] = mapped_column(Text)
-    edited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    edited_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
 
 
 class TicketAttachment(Base, IdMixin, OrgScopedMixin):
@@ -227,34 +225,31 @@ class TicketAttachment(Base, IdMixin, OrgScopedMixin):
             ondelete="CASCADE",
         ),
         _member_fk("uploaded_by", "fk_ticket_attachments_organization_id_uploader_members"),
-        CheckConstraint("length(file_name) BETWEEN 1 AND 200", name="file_name_length"),
-        CheckConstraint("length(content_type) BETWEEN 3 AND 100", name="content_type_length"),
+        CheckConstraint("char_length(file_name) BETWEEN 1 AND 200", name="file_name_length"),
+        CheckConstraint("char_length(content_type) BETWEEN 3 AND 100", name="content_type_length"),
         CheckConstraint(f"size_bytes BETWEEN 1 AND {MAX_ATTACHMENT_BYTES}", name="size_bytes"),
-        CheckConstraint("length(storage_key) BETWEEN 16 AND 128", name="storage_key_length"),
-        CheckConstraint("sha256 ~ '^[0-9a-f]{64}$'", name="sha256_format"),
+        CheckConstraint("char_length(storage_key) BETWEEN 16 AND 128", name="storage_key_length"),
+        CheckConstraint("REGEXP_LIKE(sha256, '^[0-9a-f]{64}$', 'c')", name="sha256_format"),
         Index("uq_ticket_attachments_storage_key", "storage_key", unique=True),
         Index("ix_ticket_attachments_organization_id_ticket_id", "organization_id", "ticket_id"),
         Index(
             "ix_ticket_attachments_organization_id_comment_id",
             "organization_id",
             "comment_id",
-            postgresql_where=text("comment_id IS NOT NULL"),
         ),
     )
 
-    ticket_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    comment_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    ticket_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
+    comment_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
     # The sanitised name the person gave the file.
-    file_name: Mapped[str] = mapped_column(Text, nullable=False)
+    file_name: Mapped[str] = mapped_column(String(200), nullable=False)
     # What the content really is (sniffed), never what the client claimed.
-    content_type: Mapped[str] = mapped_column(Text, nullable=False)
+    content_type: Mapped[str] = mapped_column(String(100), nullable=False)
     size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    storage_key: Mapped[str] = mapped_column(Text, nullable=False)
-    sha256: Mapped[str] = mapped_column(Text, nullable=False)
-    uploaded_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now()
-    )
+    storage_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    uploaded_by: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False, server_default=NOW)
 
 
 class TicketStatusHistory(Base, IdMixin, OrgScopedMixin):
@@ -280,14 +275,12 @@ class TicketStatusHistory(Base, IdMixin, OrgScopedMixin):
         ),
     )
 
-    ticket_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    ticket_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
     # Null for the row written when the ticket is created.
     from_status: Mapped[str | None] = mapped_column(Text)
     to_status: Mapped[str] = mapped_column(Text, nullable=False)
-    changed_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    changed_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now()
-    )
+    changed_by: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
+    changed_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False, server_default=NOW)
 
 
 __all__ = [

@@ -184,7 +184,7 @@ async def run_reminders(
 async def reminder_rows(org: dict, kind: str | None = None) -> list[dict[str, Any]]:
     return await sql(
         "SELECT user_id, week_start, kind, reminded_at FROM timesheet_reminders "
-        "WHERE organization_id = :o AND (CAST(:k AS text) IS NULL OR kind = :k) "
+        "WHERE organization_id = :o AND (CAST(:k AS CHAR) IS NULL OR kind = :k) "
         "ORDER BY week_start, kind, user_id",
         o=org["id"],
         k=kind,

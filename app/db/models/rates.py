@@ -25,24 +25,23 @@ from datetime import date, datetime
 from typing import Any
 
 from sqlalchemy import (
+    JSON,
     BigInteger,
     CheckConstraint,
     Date,
-    DateTime,
     ForeignKey,
     ForeignKeyConstraint,
     Index,
     Integer,
+    String,
     Text,
     UniqueConstraint,
-    func,
-    text,
 )
-from sqlalchemy.dialects.postgresql import JSONB, UUID, ExcludeConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, IdMixin, OrgScopedMixin, TimestampMixin
 from app.db.models.clients import _member_fk
+from app.db.types import JSON_EMPTY_OBJECT, NOW, UTCDateTime, Uuid36
 
 RATE_KINDS = ("charge", "cost")
 RATE_LEVELS = (
@@ -71,7 +70,6 @@ RATE_SOURCES = (
     "default",
     "none",
 )
-_NIL = "'00000000-0000-0000-0000-000000000000'::uuid"
 
 
 def _scope_check() -> str:
@@ -133,35 +131,24 @@ class RateRule(Base, IdMixin, OrgScopedMixin, TimestampMixin):
         CheckConstraint("kind = 'charge' OR level IN ('staff', 'grade')", name="cost_level"),
         CheckConstraint("rate >= 0", name="rate"),
         CheckConstraint("effective_to IS NULL OR effective_to >= effective_from", name="period"),
-        # Concurrency-safe: two rules of one scope can never cover the same day.
-        ExcludeConstraint(
-            ("organization_id", "="),
-            ("kind", "="),
-            (text(f"coalesce(client_id, {_NIL})"), "="),
-            (text(f"coalesce(service_id, {_NIL})"), "="),
-            (text(f"coalesce(user_id, {_NIL})"), "="),
-            (text(f"coalesce(grade_id, {_NIL})"), "="),
-            (text("daterange(effective_from, effective_to, '[]')"), "&&"),
-            name="ex_rate_rules_scope_period",
-            using="gist",
-        ),
+        # No two periods of one scope share a day: a trigger, app/db/triggers.py.
         Index("ix_rate_rules_organization_id_user_id", "organization_id", "user_id"),
         Index("ix_rate_rules_organization_id_client_id", "organization_id", "client_id"),
         Index("ix_rate_rules_organization_id_grade_id", "organization_id", "grade_id"),
         Index("ix_rate_rules_organization_id_service_id", "organization_id", "service_id"),
     )
 
-    kind: Mapped[str] = mapped_column(Text, nullable=False)
-    level: Mapped[str] = mapped_column(Text, nullable=False)
-    client_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
-    service_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
-    user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
-    grade_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    level: Mapped[str] = mapped_column(String(32), nullable=False)
+    client_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
+    service_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
+    user_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
+    grade_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
     # Pence per hour.
     rate: Mapped[int] = mapped_column(BigInteger, nullable=False)
     effective_from: Mapped[date] = mapped_column(Date, nullable=False)
     effective_to: Mapped[date | None] = mapped_column(Date)
-    created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
+    created_by: Mapped[uuid.UUID | None] = mapped_column(Uuid36(), ForeignKey("users.id"))
 
 
 class RateChange(Base, IdMixin, OrgScopedMixin):
@@ -197,23 +184,21 @@ class RateChange(Base, IdMixin, OrgScopedMixin):
         Index("ix_rate_changes_rule_id", "rule_id"),
     )
 
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now()
-    )
-    rule_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
-    action: Mapped[str] = mapped_column(Text, nullable=False)
-    kind: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False, server_default=NOW)
+    rule_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
+    action: Mapped[str] = mapped_column(String(32), nullable=False)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
     level: Mapped[str] = mapped_column(Text, nullable=False)
-    client_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
-    service_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
-    user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
-    grade_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
-    old: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
-    new: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
-    actor_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    client_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
+    service_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
+    user_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
+    grade_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
+    old: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    new: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    actor_user_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
     # Which door the change came through: ``rates`` (the V2 endpoints), ``staff_rates`` /
     # ``client_rates`` (the V1 endpoints) or ``grade_default``.
-    source: Mapped[str] = mapped_column(Text, nullable=False, server_default="rates")
+    source: Mapped[str] = mapped_column(String(255), nullable=False, server_default="rates")
 
 
 class RateRerun(Base, IdMixin, OrgScopedMixin):
@@ -226,27 +211,23 @@ class RateRerun(Base, IdMixin, OrgScopedMixin):
         Index("ix_rate_reruns_organization_id_created_at", "organization_id", "created_at"),
     )
 
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False, server_default=NOW)
     # ``rerate`` = previewed and applied; ``revalue`` = the V1 endpoint (no preview).
-    source: Mapped[str] = mapped_column(Text, nullable=False)
-    scope: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    source: Mapped[str] = mapped_column(String(32), nullable=False)
+    scope: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     scope_hash: Mapped[str] = mapped_column(Text, nullable=False)
     entries_examined: Mapped[int] = mapped_column(Integer, nullable=False)
     entries_changed: Mapped[int] = mapped_column(Integer, nullable=False)
     entries_skipped: Mapped[int] = mapped_column(Integer, nullable=False)
     # Why entries in scope were left alone: {"billed": n, "in_draft": n, ...}.
     skipped: Mapped[dict[str, Any]] = mapped_column(
-        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+        JSON, nullable=False, server_default=JSON_EMPTY_OBJECT
     )
     charge_value_before: Mapped[int] = mapped_column(BigInteger, nullable=False)
     charge_value_after: Mapped[int] = mapped_column(BigInteger, nullable=False)
     cost_value_before: Mapped[int] = mapped_column(BigInteger, nullable=False)
     cost_value_after: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    requested_by: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id")
-    )
+    requested_by: Mapped[uuid.UUID | None] = mapped_column(Uuid36(), ForeignKey("users.id"))
     note: Mapped[str | None] = mapped_column(Text)
 
 
@@ -265,15 +246,15 @@ class RateRerunItem(Base, IdMixin, OrgScopedMixin):
         Index("ix_rate_rerun_items_organization_id_run_id", "organization_id", "run_id"),
     )
 
-    run_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    run_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
     # No foreign key: an unbilled entry may be deleted later; the run keeps its record.
-    time_entry_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    client_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
-    job_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    time_entry_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
+    client_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
+    job_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
     entry_date: Mapped[date] = mapped_column(Date, nullable=False)
     minutes: Mapped[int] = mapped_column(Integer, nullable=False)
-    outcome: Mapped[str] = mapped_column(Text, nullable=False)
+    outcome: Mapped[str] = mapped_column(String(32), nullable=False)
     skip_reason: Mapped[str | None] = mapped_column(Text)
     old_charge_rate: Mapped[int] = mapped_column(BigInteger, nullable=False)
     new_charge_rate: Mapped[int] = mapped_column(BigInteger, nullable=False)

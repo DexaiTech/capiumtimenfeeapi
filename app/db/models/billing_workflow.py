@@ -10,23 +10,23 @@ import uuid
 from datetime import date, datetime
 
 from sqlalchemy import (
+    JSON,
     BigInteger,
     CheckConstraint,
     Date,
-    DateTime,
     ForeignKey,
     ForeignKeyConstraint,
     Index,
     Integer,
+    String,
     Text,
     UniqueConstraint,
-    func,
     text,
 )
-from sqlalchemy.dialects.postgresql import ARRAY, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, IdMixin, OrgScopedMixin, TimestampMixin
+from app.db.types import NOW, UTCDateTime, Uuid36
 
 APPROVAL_ACTIONS = ("submitted", "approved", "rejected")
 REMINDER_STATUSES = ("queued", "sent", "failed", "skipped")
@@ -51,21 +51,19 @@ class InvoiceApproval(Base, IdMixin, OrgScopedMixin):
             name="fk_invoice_approvals_organization_id_actor_members",
         ),
         CheckConstraint("action IN ('submitted', 'approved', 'rejected')", name="action"),
-        CheckConstraint("note IS NULL OR length(note) BETWEEN 1 AND 500", name="note_length"),
+        CheckConstraint("note IS NULL OR char_length(note) BETWEEN 1 AND 500", name="note_length"),
         CheckConstraint("action <> 'rejected' OR note IS NOT NULL", name="rejection_has_reason"),
         CheckConstraint("gross_total >= 0", name="gross_total"),
         Index("ix_invoice_approvals_invoice_id_created_at", "invoice_id", "created_at", "id"),
     )
 
-    invoice_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    action: Mapped[str] = mapped_column(Text, nullable=False)
-    actor_user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    note: Mapped[str | None] = mapped_column(Text)
+    invoice_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
+    action: Mapped[str] = mapped_column(String(32), nullable=False)
+    actor_user_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
+    note: Mapped[str | None] = mapped_column(String(500))
     # The invoice total when the step happened: an approval is of this amount.
     gross_total: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
-    )
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), server_default=NOW, nullable=False)
 
 
 class PaymentReminder(Base, IdMixin, OrgScopedMixin, TimestampMixin):
@@ -86,18 +84,20 @@ class PaymentReminder(Base, IdMixin, OrgScopedMixin, TimestampMixin):
         ),
         CheckConstraint("source IN ('manual', 'scheduled')", name="source"),
         CheckConstraint("status IN ('queued', 'sent', 'failed', 'skipped')", name="status"),
-        CheckConstraint("length(template) BETWEEN 1 AND 80", name="template_length"),
+        CheckConstraint("char_length(template) BETWEEN 1 AND 80", name="template_length"),
         CheckConstraint("(source = 'scheduled') = (sent_by IS NULL)", name="sender"),
         CheckConstraint("(status = 'sent') = (sent_at IS NOT NULL)", name="sent_at"),
-        CheckConstraint("cardinality(recipients) >= 1", name="has_recipients"),
+        CheckConstraint(
+            "JSON_TYPE(recipients) = 'ARRAY' AND JSON_LENGTH(recipients) >= 1",
+            name="has_recipients",
+        ),
         CheckConstraint("days_overdue >= 0 AND amount_due >= 0", name="figures"),
         Index(
             "uq_payment_reminders_organization_id_invoice_id_sent_on",
-            "organization_id",
-            "invoice_id",
-            "sent_on",
+            text("(CASE WHEN status IN ('queued', 'sent') THEN `organization_id` END)"),
+            text("(CASE WHEN status IN ('queued', 'sent') THEN `invoice_id` END)"),
+            text("(CASE WHEN status IN ('queued', 'sent') THEN `sent_on` END)"),
             unique=True,
-            postgresql_where=text("status IN ('queued', 'sent')"),
         ),
         Index(
             "ix_payment_reminders_organization_id_created_at", "organization_id", "created_at", "id"
@@ -106,18 +106,18 @@ class PaymentReminder(Base, IdMixin, OrgScopedMixin, TimestampMixin):
         Index("ix_payment_reminders_batch_id", "batch_id"),
     )
 
-    invoice_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    invoice_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
     # The reminders that went out in one email.
-    batch_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    template: Mapped[str] = mapped_column(Text, nullable=False)
-    source: Mapped[str] = mapped_column(Text, nullable=False)
-    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="queued")
+    batch_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
+    template: Mapped[str] = mapped_column(String(80), nullable=False)
+    source: Mapped[str] = mapped_column(String(32), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, server_default="queued")
     sent_on: Mapped[date] = mapped_column(Date, nullable=False)
-    recipients: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False)
+    recipients: Mapped[list[str]] = mapped_column(JSON, nullable=False)
     days_overdue: Mapped[int] = mapped_column(Integer, nullable=False)
     amount_due: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    sent_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
-    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    sent_by: Mapped[uuid.UUID | None] = mapped_column(Uuid36(), ForeignKey("users.id"))
+    sent_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     error: Mapped[str | None] = mapped_column(Text)
 
 
@@ -134,7 +134,10 @@ class StatementSend(Base, IdMixin, OrgScopedMixin, TimestampMixin):
         ),
         CheckConstraint("status IN ('queued', 'sent', 'failed')", name="status"),
         CheckConstraint("date_from IS NULL OR date_from <= date_to", name="period"),
-        CheckConstraint("cardinality(recipients) >= 1", name="has_recipients"),
+        CheckConstraint(
+            "JSON_TYPE(recipients) = 'ARRAY' AND JSON_LENGTH(recipients) >= 1",
+            name="has_recipients",
+        ),
         CheckConstraint("(status = 'sent') = (sent_at IS NOT NULL)", name="sent_at"),
         Index(
             "ix_statement_sends_organization_id_client_id_created_at",
@@ -144,17 +147,15 @@ class StatementSend(Base, IdMixin, OrgScopedMixin, TimestampMixin):
         ),
     )
 
-    client_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    client_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
     date_from: Mapped[date | None] = mapped_column(Date)
     date_to: Mapped[date] = mapped_column(Date, nullable=False)
-    recipients: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False)
+    recipients: Mapped[list[str]] = mapped_column(JSON, nullable=False)
     # What the client owed (negative: was owed to the client) when the statement was queued.
     closing_balance: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="queued")
-    sent_by: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id"), nullable=False
-    )
-    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(String(32), nullable=False, server_default="queued")
+    sent_by: Mapped[uuid.UUID] = mapped_column(Uuid36(), ForeignKey("users.id"), nullable=False)
+    sent_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     error: Mapped[str | None] = mapped_column(Text)
 
 

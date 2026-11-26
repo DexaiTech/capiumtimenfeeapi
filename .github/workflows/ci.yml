@@ -14,21 +14,22 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     services:
-      postgres:
-        image: postgres:18
+      mysql:
+        image: mysql:8.4
         env:
-          POSTGRES_USER: capium
-          POSTGRES_PASSWORD: capium
-          POSTGRES_DB: capium_test
-        ports: ["5432:5432"]
+          MYSQL_ROOT_PASSWORD: capium-root
+          MYSQL_USER: capium
+          MYSQL_PASSWORD: capium
+          MYSQL_DATABASE: capium_test
+        ports: ["3306:3306"]
         options: >-
-          --health-cmd "pg_isready -U capium -d capium_test"
-          --health-interval 5s --health-timeout 5s --health-retries 10
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -ucapium -pcapium"
+          --health-interval 5s --health-timeout 5s --health-retries 20
     env:
       # Throwaway CI values: nothing here is a real secret.
       APP_ENV: development
-      DB_URL: postgresql://capium:capium@localhost:5432/capium_test
-      TEST_DB_URL: postgresql://capium:capium@localhost:5432/capium_test
+      DB_URL: mysql://capium:capium@127.0.0.1:3306/capium_test
+      TEST_DB_URL: mysql://capium:capium@127.0.0.1:3306/capium_test
       JWT_SECRET_KEY: ci-only-secret-0123456789-0123456789-0123456789
       FRONTEND_URL: http://localhost:5173
       BACKEND_URL: http://localhost:8000
@@ -43,6 +44,12 @@ jobs:
           cache-dependency-path: requirements*.txt
       - name: Install
         run: pip install -r requirements-dev.txt
+      - name: Configure MySQL like Azure (collation, isolation, triggers)
+        run: |
+          mysql -h 127.0.0.1 -uroot -pcapium-root -e "
+            SET PERSIST transaction_isolation = 'READ-COMMITTED';
+            SET PERSIST log_bin_trust_function_creators = ON;
+            ALTER DATABASE capium_test CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs;"
       - name: Lint
         run: ruff check .
       - name: Format

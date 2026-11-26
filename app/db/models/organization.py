@@ -6,27 +6,27 @@ from datetime import date, datetime
 from typing import TYPE_CHECKING, Literal
 
 from sqlalchemy import (
+    JSON,
     BigInteger,
     Boolean,
     CheckConstraint,
     Date,
-    DateTime,
     ForeignKey,
     ForeignKeyConstraint,
     Index,
     Integer,
     PrimaryKeyConstraint,
     SmallInteger,
+    String,
     Text,
     UniqueConstraint,
-    func,
     text,
 )
-from sqlalchemy.dialects.postgresql import ARRAY, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 
 from app.db.base import Base, IdMixin, SoftDeleteMixin, TimestampMixin
 from app.db.models.user import User
+from app.db.types import JSON_EMPTY_ARRAY, NOW, UTCDateTime, Uuid36
 
 if TYPE_CHECKING:
     from app.db.models.practice import Grade
@@ -67,10 +67,11 @@ def rate_mode_of(sources: Sequence[str]) -> RateMode:
 
 # 1 to 4 of the sources, each at most once (migration 080).
 WIP_VALUATION_CHECK = (
-    "cardinality(wip_valuation_sources) BETWEEN 1 AND 4 "
-    "AND wip_valuation_sources <@ ARRAY['client', 'service', 'grade', 'staff']::text[] "
+    "JSON_TYPE(wip_valuation_sources) = 'ARRAY' "
+    "AND JSON_LENGTH(wip_valuation_sources) BETWEEN 1 AND 4 "
+    "AND JSON_CONTAINS(JSON_ARRAY('client', 'service', 'grade', 'staff'), wip_valuation_sources) "
     + " ".join(
-        f"AND cardinality(array_positions(wip_valuation_sources, '{source}')) <= 1"
+        f"AND COALESCE(JSON_LENGTH(JSON_SEARCH(wip_valuation_sources, 'all', '{source}')), 0) <= 1"
         for source in WIP_VALUATION_SOURCES
     )
 )
@@ -84,11 +85,13 @@ class Organization(Base, IdMixin, TimestampMixin, SoftDeleteMixin):
 
     __tablename__ = "organizations"
     __table_args__ = (
-        CheckConstraint("slug ~ '^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$'", name="slug_format"),
+        CheckConstraint(
+            "REGEXP_LIKE(slug, '^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$', 'c')", name="slug_format"
+        ),
         CheckConstraint("week_start BETWEEN 1 AND 7", name="week_start"),
         CheckConstraint("minutes_per_day BETWEEN 1 AND 1440", name="minutes_per_day"),
-        CheckConstraint("length(name) BETWEEN 1 AND 120", name="name_length"),
-        CheckConstraint("currency ~ '^[A-Z]{3}$'", name="currency_format"),
+        CheckConstraint("char_length(name) BETWEEN 1 AND 120", name="name_length"),
+        CheckConstraint("REGEXP_LIKE(currency, '^[A-Z]{3}$', 'c')", name="currency_format"),
         CheckConstraint("payment_terms_days BETWEEN 0 AND 365", name="payment_terms_days"),
         CheckConstraint("default_charge_rate >= 0", name="default_charge_rate"),
         CheckConstraint("time_increment_minutes IN (1, 5, 6, 10, 15, 30, 60)", name="increment"),
@@ -111,14 +114,16 @@ class Organization(Base, IdMixin, TimestampMixin, SoftDeleteMixin):
             name="payment_reminder_days_after_due",
         ),
         CheckConstraint(
-            "cardinality(payment_reminder_schedule) <= 12", name="payment_reminder_schedule"
+            "JSON_TYPE(payment_reminder_schedule) = 'ARRAY' "
+            "AND JSON_LENGTH(payment_reminder_schedule) <= 12",
+            name="payment_reminder_schedule",
         ),
         CheckConstraint("mileage_rate >= 0", name="mileage_rate"),
         CheckConstraint("expense_markup_bp BETWEEN 0 AND 100000", name="expense_markup_bp"),
         CheckConstraint("cost_plus_markup_bp BETWEEN 0 AND 100000", name="cost_plus_markup_bp"),
         CheckConstraint(
-            "cardinality(recovery_rate_order) = 3 "
-            "AND recovery_rate_order @> ARRAY['client_job', 'task', 'staff']::text[]",
+            "JSON_TYPE(recovery_rate_order) = 'ARRAY' AND JSON_LENGTH(recovery_rate_order) = 3 "
+            "AND JSON_CONTAINS(recovery_rate_order, JSON_ARRAY('client_job', 'task', 'staff'))",
             name="recovery_rate_order",
         ),
         CheckConstraint(WIP_VALUATION_CHECK, name="wip_valuation_sources"),
@@ -139,24 +144,25 @@ class Organization(Base, IdMixin, TimestampMixin, SoftDeleteMixin):
         ),
         Index(
             "uq_organizations_slug",
-            "slug",
+            text("(CASE WHEN deleted_at IS NULL THEN `slug` END)"),
             unique=True,
-            postgresql_where=text("deleted_at IS NULL"),
         ),
     )
 
-    name: Mapped[str] = mapped_column(Text, nullable=False)
-    slug: Mapped[str] = mapped_column(Text, nullable=False)
-    timezone: Mapped[str] = mapped_column(Text, nullable=False, server_default="Europe/London")
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    slug: Mapped[str] = mapped_column(String(255), nullable=False)
+    timezone: Mapped[str] = mapped_column(
+        String(255), nullable=False, server_default="Europe/London"
+    )
     week_start: Mapped[int] = mapped_column(SmallInteger, nullable=False, server_default=text("1"))
     working_days: Mapped[list[int]] = mapped_column(
-        ARRAY(SmallInteger), nullable=False, server_default=text("'{1,2,3,4,5}'")
+        JSON, nullable=False, server_default=text("(JSON_ARRAY(1, 2, 3, 4, 5))")
     )
     minutes_per_day: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default=text("450")
     )
     # Billing settings
-    currency: Mapped[str] = mapped_column(Text, nullable=False, server_default="GBP")
+    currency: Mapped[str] = mapped_column(String(3), nullable=False, server_default="GBP")
     vat_registered: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("true")
     )
@@ -186,7 +192,7 @@ class Organization(Base, IdMixin, TimestampMixin, SoftDeleteMixin):
     # How the unbilled part of a fixed fee counts as work in progress: once the job is completed
     # (``on_completion``) or in step with the budget hours used (``by_budget_progress``).
     fixed_fee_wip_mode: Mapped[FixedFeeWipMode] = mapped_column(
-        Text, nullable=False, server_default="on_completion"
+        String(32), nullable=False, server_default="on_completion"
     )
     # A WIP write-on or write-off above this many pence needs approval (0: every adjustment does).
     wip_adjustment_approval_threshold: Mapped[int] = mapped_column(
@@ -231,7 +237,7 @@ class Organization(Base, IdMixin, TimestampMixin, SoftDeleteMixin):
     # The days, from the due date, on which an unpaid invoice is reminded about (negative: before).
     # Empty: the single reminder ``payment_reminder_days_after_due`` days after the due date.
     payment_reminder_schedule: Mapped[list[int]] = mapped_column(
-        ARRAY(SmallInteger), nullable=False, server_default=text("'{}'")
+        JSON, nullable=False, server_default=JSON_EMPTY_ARRAY
     )
     # Pence per mile claimed, and the markup in basis points added when an expense is recharged.
     mileage_rate: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default=text("45"))
@@ -242,19 +248,21 @@ class Organization(Base, IdMixin, TimestampMixin, SoftDeleteMixin):
     # client's rates and the job's own rate, ``service``, ``grade``, ``staff``). A source left out
     # is switched off. It replaced ``rate_mode``, which is now derived from it (below).
     wip_valuation_sources: Mapped[list[str]] = mapped_column(
-        ARRAY(Text), nullable=False, server_default=text("'{client,service,grade,staff}'::text[]")
+        JSON,
+        nullable=False,
+        server_default=text("(JSON_ARRAY('client', 'service', 'grade', 'staff'))"),
     )
     # The former ``rate_mode`` column, kept for one release (APT84) so an API of the previous
     # release still reads it during a deploy; kept equal to ``rate_mode_of`` the sources on every
     # write of them. Nothing reads it; a later migration drops it.
     legacy_rate_mode: Mapped[RateMode] = mapped_column(
-        "rate_mode", Text, nullable=False, server_default="staff_first"
+        "rate_mode", String(32), nullable=False, server_default="staff_first"
     )
     # Period locks: locks are exactly one period of this length inside the accounting year that
     # starts on ``financial_year_start_month``/``_day`` (1 January: the calendar year). It stays
     # unconfirmed (``period_lock_configured`` false) until someone makes the choice.
     period_lock_granularity: Mapped[LockGranularity] = mapped_column(
-        Text, nullable=False, server_default="weekly"
+        String(32), nullable=False, server_default="weekly"
     )
     financial_year_start_month: Mapped[int] = mapped_column(
         SmallInteger, nullable=False, server_default=text("1")
@@ -283,7 +291,7 @@ class Organization(Base, IdMixin, TimestampMixin, SoftDeleteMixin):
     # for: ``client_job`` (agreed with the client for the job), ``task`` (the service's rate),
     # ``staff`` (the person's charge-out rate). Each once.
     recovery_rate_order: Mapped[list[str]] = mapped_column(
-        ARRAY(Text), nullable=False, server_default=text("'{client_job,task,staff}'::text[]")
+        JSON, nullable=False, server_default=text("(JSON_ARRAY('client_job', 'task', 'staff'))")
     )
     # Whether the practice uses client segments. Off, the UI hides them everywhere and the client
     # export leaves the column out; the segments and the clients' values are kept.
@@ -301,12 +309,10 @@ class Organization(Base, IdMixin, TimestampMixin, SoftDeleteMixin):
     address_line2: Mapped[str | None] = mapped_column(Text)
     city: Mapped[str | None] = mapped_column(Text)
     postcode: Mapped[str | None] = mapped_column(Text)
-    country: Mapped[str] = mapped_column(Text, nullable=False, server_default="GB")
+    country: Mapped[str] = mapped_column(String(255), nullable=False, server_default="GB")
     bank_details: Mapped[str | None] = mapped_column(Text)
     invoice_footer: Mapped[str | None] = mapped_column(Text)
-    created_by: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id"), nullable=False
-    )
+    created_by: Mapped[uuid.UUID] = mapped_column(Uuid36(), ForeignKey("users.id"), nullable=False)
 
     @property
     def rate_mode(self) -> RateMode:
@@ -330,7 +336,7 @@ class Permission(Base, IdMixin, TimestampMixin):
     __tablename__ = "permissions"
     __table_args__ = (UniqueConstraint("code", name="uq_permissions_code"),)
 
-    code: Mapped[str] = mapped_column(Text, nullable=False)
+    code: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False)
     category: Mapped[str] = mapped_column(Text, nullable=False)
 
@@ -339,28 +345,26 @@ class Role(Base, IdMixin, TimestampMixin, SoftDeleteMixin):
     __tablename__ = "roles"
     __table_args__ = (
         UniqueConstraint("organization_id", "id", name="uq_roles_organization_id_id"),
-        CheckConstraint("length(name) BETWEEN 1 AND 60", name="name_length"),
+        CheckConstraint("char_length(name) BETWEEN 1 AND 60", name="name_length"),
         Index(
             "uq_roles_organization_id_name_lower",
-            "organization_id",
-            text("lower(name)"),
+            text("(CASE WHEN deleted_at IS NULL THEN `organization_id` END)"),
+            text("(CASE WHEN deleted_at IS NULL THEN lower(name) END)"),
             unique=True,
-            postgresql_where=text("deleted_at IS NULL"),
         ),
         Index(
             "uq_roles_organization_id_system_key",
-            "organization_id",
-            "system_key",
+            text("(CASE WHEN system_key IS NOT NULL THEN `organization_id` END)"),
+            text("(CASE WHEN system_key IS NOT NULL THEN `system_key` END)"),
             unique=True,
-            postgresql_where=text("system_key IS NOT NULL"),
         ),
     )
 
     organization_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+        Uuid36(), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
     )
-    name: Mapped[str] = mapped_column(Text, nullable=False)
-    system_key: Mapped[str | None] = mapped_column(Text)
+    name: Mapped[str] = mapped_column(String(60), nullable=False)
+    system_key: Mapped[str | None] = mapped_column(String(255))
     description: Mapped[str | None] = mapped_column(Text)
 
     permissions: Mapped[list[Permission]] = relationship(
@@ -377,14 +381,12 @@ class RolePermission(Base):
     __table_args__ = (PrimaryKeyConstraint("role_id", "permission_id"),)
 
     role_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("roles.id", ondelete="CASCADE"), nullable=False
+        Uuid36(), ForeignKey("roles.id", ondelete="CASCADE"), nullable=False
     )
     permission_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("permissions.id", ondelete="CASCADE"), nullable=False
+        Uuid36(), ForeignKey("permissions.id", ondelete="CASCADE"), nullable=False
     )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
-    )
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), server_default=NOW, nullable=False)
 
 
 class MemberPermissionOverride(Base, IdMixin):
@@ -408,16 +410,14 @@ class MemberPermissionOverride(Base, IdMixin):
         CheckConstraint("effect IN ('grant', 'deny')", name="effect"),
     )
 
-    organization_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    organization_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
     permission_code: Mapped[str] = mapped_column(
-        Text, ForeignKey("permissions.code", ondelete="CASCADE"), nullable=False
+        String(255), ForeignKey("permissions.code", ondelete="CASCADE"), nullable=False
     )
-    effect: Mapped[str] = mapped_column(Text, nullable=False)
-    created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
-    )
+    effect: Mapped[str] = mapped_column(String(32), nullable=False)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), server_default=NOW, nullable=False)
 
 
 class OrganizationMember(Base, IdMixin, TimestampMixin):
@@ -461,20 +461,23 @@ class OrganizationMember(Base, IdMixin, TimestampMixin):
         CheckConstraint("weekly_capacity_minutes BETWEEN 0 AND 10080", name="weekly_capacity"),
         CheckConstraint("working_minutes_per_day BETWEEN 1 AND 1440", name="working_minutes"),
         CheckConstraint(
-            "cardinality(working_days) BETWEEN 1 AND 7 "
-            "AND working_days <@ ARRAY[1, 2, 3, 4, 5, 6, 7]::smallint[]",
+            "JSON_TYPE(working_days) = 'ARRAY' AND JSON_LENGTH(working_days) BETWEEN 1 AND 7 "
+            "AND JSON_CONTAINS(JSON_ARRAY(1, 2, 3, 4, 5, 6, 7), working_days)",
             name="working_days",
         ),
         CheckConstraint(
             "leaving_date IS NULL OR start_date IS NULL OR leaving_date >= start_date",
             name="leaving_after_start",
         ),
-        CheckConstraint("staff_code ~ '^[A-Z0-9_-]{1,20}$'", name="staff_code_format"),
         CheckConstraint(
-            "work_email IS NULL OR length(work_email) BETWEEN 3 AND 254", name="work_email_length"
+            "REGEXP_LIKE(staff_code, '^[A-Z0-9_-]{1,20}$', 'c')", name="staff_code_format"
         ),
         CheckConstraint(
-            "mobile_number IS NULL OR mobile_number ~ '^[+]?[0-9]{7,15}$'",
+            "work_email IS NULL OR char_length(work_email) BETWEEN 3 AND 254",
+            name="work_email_length",
+        ),
+        CheckConstraint(
+            "mobile_number IS NULL OR REGEXP_LIKE(mobile_number, '^[+]?[0-9]{7,15}$', 'c')",
             name="mobile_number_format",
         ),
         Index("ix_organization_members_user_id", "user_id"),
@@ -486,37 +489,41 @@ class OrganizationMember(Base, IdMixin, TimestampMixin):
         Index("ix_organization_members_organization_id_grade_id", "organization_id", "grade_id"),
         Index(
             "uq_organization_members_organization_id_initials",
-            "organization_id",
-            text("upper(initials)"),
+            text(
+                "(CASE WHEN initials IS NOT NULL AND status <> 'removed' THEN `organization_id` END)"
+            ),
+            text(
+                "(CASE WHEN initials IS NOT NULL AND status <> 'removed' THEN upper(initials) END)"
+            ),
             unique=True,
-            postgresql_where=text("initials IS NOT NULL AND status <> 'removed'"),
         ),
         Index(
             "uq_organization_members_organization_id_staff_code",
             "organization_id",
-            text("upper(staff_code)"),
+            text("(upper(staff_code))"),
             unique=True,
         ),
         # No two active staff share a work email.
         Index(
             "uq_organization_members_organization_id_work_email_active",
-            "organization_id",
-            text("lower(work_email)"),
+            text(
+                "(CASE WHEN work_email IS NOT NULL AND status = 'active' THEN `organization_id` END)"
+            ),
+            text(
+                "(CASE WHEN work_email IS NOT NULL AND status = 'active' THEN lower(work_email) END)"
+            ),
             unique=True,
-            postgresql_where=text("work_email IS NOT NULL AND status = 'active'"),
         ),
     )
 
     organization_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+        Uuid36(), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
     )
-    user_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id"), nullable=False
-    )
-    role_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="active")
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), ForeignKey("users.id"), nullable=False)
+    role_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, server_default="active")
     # The person who approves this member's timesheets.
-    manager_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    manager_user_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
     weekly_capacity_minutes: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default=text("2250")
     )
@@ -527,20 +534,18 @@ class OrganizationMember(Base, IdMixin, TimestampMixin):
     # Retired (APT81): the person's own overtime multiplier of migration 061; never applied.
     overtime_multiplier_bp: Mapped[int | None] = mapped_column(Integer)
     job_title: Mapped[str | None] = mapped_column(Text)
-    initials: Mapped[str | None] = mapped_column(Text)
-    joined_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now()
-    )
+    initials: Mapped[str | None] = mapped_column(String(255))
+    joined_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False, server_default=NOW)
     # Staff profile. The code is unique per practice (case-insensitively) and comes from the
     # ``staff`` number sequence when it is not given.
-    staff_code: Mapped[str] = mapped_column(Text, nullable=False)
-    work_email: Mapped[str | None] = mapped_column(Text)
-    grade_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    staff_code: Mapped[str] = mapped_column(String(20), nullable=False)
+    work_email: Mapped[str | None] = mapped_column(String(254))
+    grade_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
     working_minutes_per_day: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default=text("450")
     )
     working_days: Mapped[list[int]] = mapped_column(
-        ARRAY(SmallInteger), nullable=False, server_default=text("'{1,2,3,4,5}'")
+        JSON, nullable=False, server_default=text("(JSON_ARRAY(1, 2, 3, 4, 5))")
     )
     start_date: Mapped[date | None] = mapped_column(Date)
     leaving_date: Mapped[date | None] = mapped_column(Date)
@@ -550,10 +555,10 @@ class OrganizationMember(Base, IdMixin, TimestampMixin):
     )
     # When the sign-in invitation was last sent. A login stays "invited" until the person has
     # chosen a password (``users.password_changed_at`` moves past this moment).
-    invited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    invited_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     # Where SMS notifications go: digits with an optional leading +. Set by the person in their
     # notification settings; without it no SMS is sent.
-    mobile_number: Mapped[str | None] = mapped_column(Text)
+    mobile_number: Mapped[str | None] = mapped_column(String(15))
 
     user: Mapped[User] = relationship(lazy="raise", foreign_keys=[user_id])
     role: Mapped[Role] = relationship(

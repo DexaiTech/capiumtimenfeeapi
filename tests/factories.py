@@ -121,7 +121,7 @@ async def audit_entries(organization_id: str | uuid.UUID, action: str | None = N
         rows = await session.execute(
             text(
                 "SELECT action, actor_user_id, target_type, target_id, metadata FROM audit_logs "
-                "WHERE organization_id = :org AND (CAST(:action AS text) IS NULL "
+                "WHERE organization_id = :org AND (CAST(:action AS CHAR) IS NULL "
                 "OR action = :action) ORDER BY created_at, id"
             ),
             {"org": str(organization_id), "action": action},

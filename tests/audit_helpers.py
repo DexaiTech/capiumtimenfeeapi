@@ -93,7 +93,7 @@ async def entry_rows(org: dict, action: str | None = None, **where: Any) -> list
     rows = await sql(
         "SELECT action, actor_user_id, target_type, target_id, host(ip_address) AS ip, "  # noqa: S608
         "user_agent, request_id, metadata FROM audit_logs "
-        "WHERE organization_id = :org AND (CAST(:action AS text) IS NULL OR action = :action)"
+        "WHERE organization_id = :org AND (CAST(:action AS CHAR) IS NULL OR action = :action)"
         f"{clauses} ORDER BY created_at, id",
         org=org["id"],
         action=action,

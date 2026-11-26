@@ -8,22 +8,22 @@ from sqlalchemy import (
     BigInteger,
     CheckConstraint,
     Date,
-    DateTime,
     ForeignKey,
     ForeignKeyConstraint,
     Index,
     Integer,
     PrimaryKeyConstraint,
     SmallInteger,
+    String,
     Text,
     UniqueConstraint,
     text,
 )
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, IdMixin, OrgScopedMixin, SoftDeleteMixin, TimestampMixin
 from app.db.models.clients import _member_fk
+from app.db.types import NOW, UTCDateTime, Uuid36
 
 JOB_STATUSES = ("planned", "in_progress", "on_hold", "completed", "closed", "cancelled")
 JOB_BILLING_BASES = ("hourly", "fixed", "non_billable")
@@ -82,9 +82,9 @@ class Job(Base, IdMixin, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
         CheckConstraint("closed_at IS NULL OR status = 'closed'", name="closed_at_status"),
         CheckConstraint("(pm_job_id IS NULL) = (pm_linked_at IS NULL)", name="pm_link"),
         CheckConstraint(
-            "pm_job_id IS NULL OR length(pm_job_id) BETWEEN 1 AND 64", name="pm_job_id_length"
+            "pm_job_id IS NULL OR char_length(pm_job_id) BETWEEN 1 AND 64", name="pm_job_id_length"
         ),
-        CheckConstraint("length(name) BETWEEN 1 AND 200", name="name_length"),
+        CheckConstraint("char_length(name) BETWEEN 1 AND 200", name="name_length"),
         Index(
             "uq_jobs_organization_id_number",
             "organization_id",
@@ -97,21 +97,22 @@ class Job(Base, IdMixin, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
         # A practice management job is linked to at most one live job of the practice.
         Index(
             "uq_jobs_organization_id_pm_job_id",
-            "organization_id",
-            "pm_job_id",
+            text(
+                "(CASE WHEN pm_job_id IS NOT NULL AND deleted_at IS NULL THEN `organization_id` END)"
+            ),
+            text("(CASE WHEN pm_job_id IS NOT NULL AND deleted_at IS NULL THEN `pm_job_id` END)"),
             unique=True,
-            postgresql_where=text("pm_job_id IS NOT NULL AND deleted_at IS NULL"),
         ),
     )
 
-    client_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    service_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    client_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
+    service_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
     # From the "job" sequence, e.g. J00042.
-    number: Mapped[str] = mapped_column(Text, nullable=False)
-    name: Mapped[str] = mapped_column(Text, nullable=False)
+    number: Mapped[str] = mapped_column(String(255), nullable=False)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
-    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="planned")
-    billing_basis: Mapped[str] = mapped_column(Text, nullable=False, server_default="hourly")
+    status: Mapped[str] = mapped_column(String(32), nullable=False, server_default="planned")
+    billing_basis: Mapped[str] = mapped_column(String(32), nullable=False, server_default="hourly")
     fixed_fee: Mapped[int | None] = mapped_column(BigInteger)
     # Overrides every other charge-out rate for time on this job.
     hourly_rate: Mapped[int | None] = mapped_column(BigInteger)
@@ -127,16 +128,16 @@ class Job(Base, IdMixin, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
     period_end: Mapped[date | None] = mapped_column(Date)
     start_date: Mapped[date | None] = mapped_column(Date)
     due_date: Mapped[date | None] = mapped_column(Date)
-    partner_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
-    manager_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
-    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    partner_user_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
+    manager_user_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
+    completed_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     # Set while the job is ``closed``; a closed job takes no new time and no task changes.
-    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    closed_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     # The practice management job this job is linked to, and when it was linked. A linked job's
     # name, service, manager, partner and dates belong to practice management (read-only here).
-    pm_job_id: Mapped[str | None] = mapped_column(Text)
-    pm_linked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
+    pm_job_id: Mapped[str | None] = mapped_column(String(64))
+    pm_linked_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    created_by: Mapped[uuid.UUID | None] = mapped_column(Uuid36(), ForeignKey("users.id"))
 
 
 class JobAssignee(Base, OrgScopedMixin):
@@ -153,11 +154,9 @@ class JobAssignee(Base, OrgScopedMixin):
         Index("ix_job_assignees_organization_id_user_id", "organization_id", "user_id"),
     )
 
-    job_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=text("now()")
-    )
+    job_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False, server_default=NOW)
 
 
 class Task(Base, IdMixin, OrgScopedMixin, TimestampMixin):
@@ -176,9 +175,9 @@ class Task(Base, IdMixin, OrgScopedMixin, TimestampMixin):
             name="fk_tasks_organization_id_job_id_jobs",
             ondelete="CASCADE",
         ),
-        CheckConstraint("length(title) BETWEEN 1 AND 200", name="title_length"),
+        CheckConstraint("char_length(title) BETWEEN 1 AND 200", name="title_length"),
         CheckConstraint(
-            "description IS NULL OR length(description) <= 2000", name="description_length"
+            "description IS NULL OR char_length(description) <= 2000", name="description_length"
         ),
         CheckConstraint(
             "status IN ('not_started', 'in_progress', 'on_hold', 'completed')", name="status"
@@ -188,7 +187,8 @@ class Task(Base, IdMixin, OrgScopedMixin, TimestampMixin):
         CheckConstraint("(status = 'completed') = (completed_at IS NOT NULL)", name="completed_at"),
         CheckConstraint("(pm_task_id IS NULL) = (pm_linked_at IS NULL)", name="pm_link"),
         CheckConstraint(
-            "pm_task_id IS NULL OR length(pm_task_id) BETWEEN 1 AND 64", name="pm_task_id_length"
+            "pm_task_id IS NULL OR char_length(pm_task_id) BETWEEN 1 AND 64",
+            name="pm_task_id_length",
         ),
         Index(
             "ix_tasks_organization_id_job_id_sort_order", "organization_id", "job_id", "sort_order"
@@ -198,30 +198,28 @@ class Task(Base, IdMixin, OrgScopedMixin, TimestampMixin):
             "ix_tasks_organization_id_due_date",
             "organization_id",
             "due_date",
-            postgresql_where=text("due_date IS NOT NULL"),
         ),
         Index(
             "uq_tasks_organization_id_pm_task_id",
-            "organization_id",
-            "pm_task_id",
+            text("(CASE WHEN pm_task_id IS NOT NULL THEN `organization_id` END)"),
+            text("(CASE WHEN pm_task_id IS NOT NULL THEN `pm_task_id` END)"),
             unique=True,
-            postgresql_where=text("pm_task_id IS NOT NULL"),
         ),
     )
 
-    job_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    title: Mapped[str] = mapped_column(Text, nullable=False)
+    job_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
-    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="not_started")
+    status: Mapped[str] = mapped_column(String(32), nullable=False, server_default="not_started")
     budget_minutes: Mapped[int | None] = mapped_column(Integer)
     due_date: Mapped[date | None] = mapped_column(Date)
     # Position in the job's task list (0 first).
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
-    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     # The practice management task this task is linked to (only on a linked job).
-    pm_task_id: Mapped[str | None] = mapped_column(Text)
-    pm_linked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
+    pm_task_id: Mapped[str | None] = mapped_column(String(64))
+    pm_linked_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    created_by: Mapped[uuid.UUID | None] = mapped_column(Uuid36(), ForeignKey("users.id"))
 
 
 class TaskAssignee(Base, OrgScopedMixin):
@@ -238,11 +236,9 @@ class TaskAssignee(Base, OrgScopedMixin):
         Index("ix_task_assignees_organization_id_user_id", "organization_id", "user_id"),
     )
 
-    task_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=text("now()")
-    )
+    task_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False, server_default=NOW)
 
 
 class JobBudgetAlert(Base, IdMixin, OrgScopedMixin):
@@ -273,11 +269,11 @@ class JobBudgetAlert(Base, IdMixin, OrgScopedMixin):
         CheckConstraint("usage_bp >= 0", name="usage_bp"),
     )
 
-    job_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    kind: Mapped[str] = mapped_column(Text, nullable=False)
+    job_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
     threshold: Mapped[int] = mapped_column(SmallInteger, nullable=False)
     triggered_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=text("now()")
+        UTCDateTime(), nullable=False, server_default=NOW
     )
     # Usage in basis points (10000 = 100%) when the threshold was crossed.
     usage_bp: Mapped[int] = mapped_column(BigInteger, nullable=False)

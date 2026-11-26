@@ -8,20 +8,20 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     Date,
-    DateTime,
     ForeignKey,
     ForeignKeyConstraint,
     Index,
     Integer,
+    String,
     Text,
     UniqueConstraint,
     text,
 )
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, IdMixin, OrgScopedMixin, TimestampMixin
 from app.db.models.clients import _member_fk
+from app.db.types import UTCDateTime, Uuid36
 
 TIMESHEET_STATUSES = ("open", "submitted", "approved", "rejected")
 # Shared by time entries and disbursements.
@@ -51,12 +51,12 @@ class Timesheet(Base, IdMixin, OrgScopedMixin, TimestampMixin):
         ),
     )
 
-    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
     week_start: Mapped[date] = mapped_column(Date, nullable=False)
-    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="open")
-    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    decided_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
-    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(String(32), nullable=False, server_default="open")
+    submitted_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    decided_by: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
+    decided_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     decision_note: Mapped[str | None] = mapped_column(Text)
     # The person's time needs no approval (practice setting + permission ``timesheet.exempt``):
     # the sheet counts as approved for WIP and billing without being submitted.
@@ -107,7 +107,8 @@ class TimeEntry(Base, IdMixin, OrgScopedMixin, TimestampMixin):
         ),
         CheckConstraint("minutes BETWEEN 1 AND 1440", name="minutes"),
         CheckConstraint(
-            "internal_note IS NULL OR length(internal_note) <= 2000", name="internal_note_length"
+            "internal_note IS NULL OR char_length(internal_note) <= 2000",
+            name="internal_note_length",
         ),
         CheckConstraint("job_id IS NULL OR client_id IS NOT NULL", name="job_needs_client"),
         CheckConstraint("task_id IS NULL OR job_id IS NOT NULL", name="task_needs_job"),
@@ -144,7 +145,6 @@ class TimeEntry(Base, IdMixin, OrgScopedMixin, TimestampMixin):
             "ix_time_entries_organization_id_task_id",
             "organization_id",
             "task_id",
-            postgresql_where=text("task_id IS NOT NULL"),
         ),
         Index("ix_time_entries_timesheet_id", "timesheet_id"),
         # The WIP ledger: billable time not yet billed.
@@ -153,19 +153,18 @@ class TimeEntry(Base, IdMixin, OrgScopedMixin, TimestampMixin):
             "organization_id",
             "client_id",
             "entry_date",
-            postgresql_where=text("is_billable AND billing_status = 'unbilled'"),
         ),
     )
 
-    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    timesheet_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
+    timesheet_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
     entry_date: Mapped[date] = mapped_column(Date, nullable=False)
     minutes: Mapped[int] = mapped_column(Integer, nullable=False)
-    client_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
-    job_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    client_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
+    job_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
     # The task of the job the time was spent on (optional; a task has one job).
-    task_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
-    activity_code_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    task_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
+    activity_code_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
     description: Mapped[str | None] = mapped_column(Text)
     # Never printed on an invoice; seen by the owner and people who read or manage all time.
     internal_note: Mapped[str | None] = mapped_column(Text)
@@ -180,9 +179,11 @@ class TimeEntry(Base, IdMixin, OrgScopedMixin, TimestampMixin):
     # Which level of the rate ladder priced the entry (see ``RATE_SOURCES``; ``none``: no source
     # had a rate and the practice default is 0, "No rate"); null for time recorded before the
     # ladder existed.
-    rate_source: Mapped[str | None] = mapped_column(Text)
-    billing_status: Mapped[str] = mapped_column(Text, nullable=False, server_default="unbilled")
-    created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
+    rate_source: Mapped[str | None] = mapped_column(String(32))
+    billing_status: Mapped[str] = mapped_column(
+        String(32), nullable=False, server_default="unbilled"
+    )
+    created_by: Mapped[uuid.UUID | None] = mapped_column(Uuid36(), ForeignKey("users.id"))
     # Set by the opening-balance import so historic time can be shown apart from new time; it
     # otherwise behaves exactly like any other entry (same WIP and billing allocation).
     is_opening_balance: Mapped[bool] = mapped_column(
@@ -225,15 +226,15 @@ class Timer(Base, IdMixin, OrgScopedMixin, TimestampMixin):
         CheckConstraint("accumulated_seconds >= 0", name="accumulated_seconds"),
     )
 
-    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    client_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
-    job_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
-    task_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
-    activity_code_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
+    client_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
+    job_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
+    task_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
+    activity_code_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
     description: Mapped[str | None] = mapped_column(Text)
     is_billable: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
     # Null while paused. Elapsed = accumulated_seconds + (now - started_at).
-    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    started_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     accumulated_seconds: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default=text("0")
     )

@@ -6,8 +6,9 @@ from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import date
 from typing import Any
+from zoneinfo import ZoneInfo
 
-from sqlalchemy import ColumnElement, and_, delete, or_, select, text
+from sqlalchemy import ColumnElement, and_, delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.locks import transaction_lock
@@ -15,6 +16,7 @@ from app.db.models import (
     Client,
     Grade,
     Job,
+    Organization,
     OrganizationMember,
     OvertimeRate,
     StaffHoursBasis,
@@ -91,26 +93,44 @@ class StaffHoursRepository:
         """A new member's working hours: one open-ended ``weekly`` row of their weekly capacity,
         from their start date, else the day they joined (as migration 081 gave everyone). None
         with a capacity of 0, or when they already have hours."""
-        await self.session.execute(
-            text(
-                """
-                INSERT INTO staff_hours_bases (
-                    id, organization_id, user_id, basis, standard_minutes, effective_from
-                )
-                SELECT gen_random_uuid(), m.organization_id, m.user_id, 'weekly',
-                       m.weekly_capacity_minutes,
-                       coalesce(m.start_date, (m.joined_at AT TIME ZONE o.timezone)::date)
-                FROM organization_members m
-                JOIN organizations o ON o.id = m.organization_id
-                WHERE m.organization_id = :org AND m.user_id = :user
-                  AND m.weekly_capacity_minutes > 0
-                  AND NOT EXISTS (
-                    SELECT 1 FROM staff_hours_bases h
-                    WHERE h.organization_id = m.organization_id AND h.user_id = m.user_id)
-                """
-            ),
-            {"org": organization_id, "user": user_id},
+        has_hours = (
+            select(StaffHoursBasis.id)
+            .where(
+                StaffHoursBasis.organization_id == OrganizationMember.organization_id,
+                StaffHoursBasis.user_id == OrganizationMember.user_id,
+            )
+            .exists()
         )
+        found = (
+            await self.session.execute(
+                select(
+                    OrganizationMember.weekly_capacity_minutes,
+                    OrganizationMember.start_date,
+                    OrganizationMember.joined_at,
+                    Organization.timezone,
+                )
+                .join(Organization, Organization.id == OrganizationMember.organization_id)
+                .where(
+                    OrganizationMember.organization_id == organization_id,
+                    OrganizationMember.user_id == user_id,
+                    OrganizationMember.weekly_capacity_minutes > 0,
+                    ~has_hours,
+                )
+            )
+        ).one_or_none()
+        if found is None:
+            return
+        capacity, start_date, joined_at, zone = found
+        self.session.add(
+            StaffHoursBasis(
+                organization_id=organization_id,
+                user_id=user_id,
+                basis="weekly",
+                standard_minutes=capacity,
+                effective_from=start_date or joined_at.astimezone(ZoneInfo(zone)).date(),
+            )
+        )
+        await self.session.flush()
 
     async def for_users(
         self, organization_id: uuid.UUID, user_ids: Collection[uuid.UUID]

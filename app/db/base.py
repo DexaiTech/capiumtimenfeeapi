@@ -3,10 +3,10 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import ForeignKey, MetaData, Uuid
+from sqlalchemy import ForeignKey, MetaData
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-from app.db.types import NOW, NOW_ON_UPDATE, UTCDateTime
+from app.db.types import NOW, NOW_ON_UPDATE, UTCDateTime, Uuid36
 from app.utils.ids import new_id
 
 NAMING_CONVENTION = {
@@ -20,10 +20,12 @@ NAMING_CONVENTION = {
 
 class Base(DeclarativeBase):
     metadata = MetaData(naming_convention=NAMING_CONVENTION)
+    # A column annotated ``uuid.UUID`` without an explicit type is a ``Uuid36`` too.
+    type_annotation_map = {uuid.UUID: Uuid36()}  # noqa: RUF012 (SQLAlchemy reads the class attribute)
 
 
 class IdMixin:
-    id: Mapped[uuid.UUID] = mapped_column(Uuid(), primary_key=True, default=new_id)
+    id: Mapped[uuid.UUID] = mapped_column(Uuid36(), primary_key=True, default=new_id)
 
 
 class TimestampMixin:
@@ -43,5 +45,5 @@ class OrgScopedMixin:
     """The practice a business row belongs to. Deleting a practice deletes its data."""
 
     organization_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid(), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+        Uuid36(), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
     )

@@ -1,40 +1,36 @@
-"""Shared building blocks for migrations."""
+"""Shared building blocks for migrations (MySQL 8.4)."""
 
 from typing import Any
 
 import sqlalchemy as sa
 from alembic import op
-from sqlalchemy.dialects import postgresql
+from sqlalchemy.dialects import mysql
 
 from app.core.permissions import CATALOGUE
 from app.utils.ids import new_id
 
 
 def id_column() -> sa.Column[Any]:
-    return sa.Column("id", postgresql.UUID(as_uuid=True), nullable=False)
+    return sa.Column("id", mysql.CHAR(36, charset="ascii", collation="ascii_bin"), nullable=False)
 
 
 def timestamps() -> list[sa.Column[Any]]:
+    """``created_at`` and ``updated_at`` as ``app.db.base.TimestampMixin`` declares them:
+    UTC ``DATETIME(6)``, and ``updated_at`` kept current by MySQL on every change."""
     return [
         sa.Column(
-            "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+            "created_at",
+            mysql.DATETIME(fsp=6),
+            server_default=sa.text("CURRENT_TIMESTAMP(6)"),
+            nullable=False,
         ),
         sa.Column(
-            "updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+            "updated_at",
+            mysql.DATETIME(fsp=6),
+            server_default=sa.text("CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6)"),
+            nullable=False,
         ),
     ]
-
-
-def add_updated_at_trigger(table: str) -> None:
-    op.execute(
-        f"CREATE TRIGGER trg_{table}_set_updated_at BEFORE UPDATE ON {table} "
-        "FOR EACH ROW EXECUTE FUNCTION set_updated_at()"
-    )
-
-
-def add_updated_at_triggers(*tables: str) -> None:
-    for table in tables:
-        add_updated_at_trigger(table)
 
 
 def sync_permissions() -> None:
@@ -45,19 +41,19 @@ def sync_permissions() -> None:
     """
     table = sa.table(
         "permissions",
-        sa.column("id", postgresql.UUID(as_uuid=True)),
-        sa.column("code", sa.Text()),
-        sa.column("category", sa.Text()),
-        sa.column("description", sa.Text()),
+        sa.column("id", sa.String()),
+        sa.column("code", sa.String()),
+        sa.column("category", sa.String()),
+        sa.column("description", sa.String()),
     )
     rows = [
-        {"id": new_id(), "code": p.code, "category": p.category, "description": p.description}
+        {"id": str(new_id()), "code": p.code, "category": p.category, "description": p.description}
         for p in CATALOGUE
     ]
-    stmt = postgresql.insert(table).values(rows)
+    stmt = mysql.insert(table).values(rows)
+    # ``permissions.code`` is the only unique key besides the id, so a duplicate is the code.
     op.execute(
-        stmt.on_conflict_do_update(
-            index_elements=["code"],
-            set_={"category": stmt.excluded.category, "description": stmt.excluded.description},
+        stmt.on_duplicate_key_update(
+            category=stmt.inserted.category, description=stmt.inserted.description
         )
     )

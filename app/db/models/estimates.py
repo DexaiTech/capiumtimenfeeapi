@@ -15,21 +15,21 @@ from sqlalchemy import (
     BigInteger,
     CheckConstraint,
     Date,
-    DateTime,
     ForeignKey,
     ForeignKeyConstraint,
     Index,
     Integer,
     Numeric,
     SmallInteger,
+    String,
     Text,
     UniqueConstraint,
     text,
 )
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, IdMixin, OrgScopedMixin, TimestampMixin
+from app.db.types import NOW, UTCDateTime, Uuid36
 
 ESTIMATE_STATUSES = ("draft", "sent", "accepted", "declined")
 RECURRING_FREQUENCIES = ("weekly", "monthly", "quarterly", "annually")
@@ -85,7 +85,7 @@ class Estimate(Base, IdMixin, OrgScopedMixin, TimestampMixin):
             name="fk_estimates_organization_id_converted_invoice_id_invoices",
         ),
         CheckConstraint("status IN ('draft', 'sent', 'accepted', 'declined')", name="status"),
-        CheckConstraint("currency ~ '^[A-Z]{3}$'", name="currency_format"),
+        CheckConstraint("REGEXP_LIKE(currency, '^[A-Z]{3}$', 'c')", name="currency_format"),
         CheckConstraint("(status = 'draft') = (number IS NULL)", name="number_when_sent"),
         CheckConstraint(
             "expiry_date IS NULL OR issue_date IS NULL OR expiry_date >= issue_date",
@@ -94,32 +94,31 @@ class Estimate(Base, IdMixin, OrgScopedMixin, TimestampMixin):
         CheckConstraint("gross_total = net_total + vat_total", name="gross_total"),
         Index(
             "uq_estimates_organization_id_number",
-            "organization_id",
-            "number",
+            text("(CASE WHEN number IS NOT NULL THEN `organization_id` END)"),
+            text("(CASE WHEN number IS NOT NULL THEN `number` END)"),
             unique=True,
-            postgresql_where=text("number IS NOT NULL"),
         ),
         Index("ix_estimates_organization_id_client_id", "organization_id", "client_id"),
         Index("ix_estimates_organization_id_status", "organization_id", "status"),
     )
 
-    client_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    job_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    client_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
+    job_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
     # Assigned from the "estimate" sequence when sent; drafts have none.
-    number: Mapped[str | None] = mapped_column(Text)
-    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="draft")
+    number: Mapped[str | None] = mapped_column(String(255))
+    status: Mapped[str] = mapped_column(String(32), nullable=False, server_default="draft")
     issue_date: Mapped[date | None] = mapped_column(Date)
     expiry_date: Mapped[date | None] = mapped_column(Date)
     reference: Mapped[str | None] = mapped_column(Text)
     notes: Mapped[str | None] = mapped_column(Text)
-    currency: Mapped[str] = mapped_column(Text, nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False)
     net_total: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default=text("0"))
     vat_total: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default=text("0"))
     gross_total: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default=text("0"))
-    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    responded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    converted_invoice_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
-    created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
+    sent_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    responded_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    converted_invoice_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
+    created_by: Mapped[uuid.UUID | None] = mapped_column(Uuid36(), ForeignKey("users.id"))
 
 
 class EstimateLine(Base, IdMixin, OrgScopedMixin, TimestampMixin):
@@ -136,21 +135,21 @@ class EstimateLine(Base, IdMixin, OrgScopedMixin, TimestampMixin):
         _vat_fk("estimate_lines"),
         CheckConstraint("quantity > 0", name="quantity"),
         CheckConstraint("vat_rate_bp BETWEEN 0 AND 10000", name="vat_rate_bp"),
-        CheckConstraint("length(description) BETWEEN 1 AND 1000", name="description_length"),
+        CheckConstraint("char_length(description) BETWEEN 1 AND 1000", name="description_length"),
         Index("ix_estimate_lines_estimate_id_position", "estimate_id", "position"),
     )
 
-    estimate_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    estimate_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
     position: Mapped[int] = mapped_column(SmallInteger, nullable=False)
-    description: Mapped[str] = mapped_column(Text, nullable=False)
-    job_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
-    service_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    description: Mapped[str] = mapped_column(String(1000), nullable=False)
+    job_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
+    service_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
     quantity: Mapped[Decimal] = mapped_column(
         Numeric(12, 2), nullable=False, server_default=text("1")
     )
     unit_amount: Mapped[int] = mapped_column(BigInteger, nullable=False)
     net_amount: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    vat_rate_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    vat_rate_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
     vat_rate_bp: Mapped[int] = mapped_column(Integer, nullable=False)
     vat_amount: Mapped[int] = mapped_column(BigInteger, nullable=False)
 
@@ -164,28 +163,27 @@ class RecurringSchedule(Base, IdMixin, OrgScopedMixin, TimestampMixin):
             "frequency IN ('weekly', 'monthly', 'quarterly', 'annually')", name="frequency"
         ),
         CheckConstraint("status IN ('active', 'paused', 'ended')", name="status"),
-        CheckConstraint("length(name) BETWEEN 1 AND 200", name="name_length"),
+        CheckConstraint("char_length(name) BETWEEN 1 AND 200", name="name_length"),
         CheckConstraint("end_date IS NULL OR end_date >= start_date", name="end_after_start"),
         CheckConstraint("next_run_date >= start_date", name="next_after_start"),
         Index("ix_recurring_schedules_organization_id_client_id", "organization_id", "client_id"),
         Index(
             "ix_recurring_schedules_due",
             "next_run_date",
-            postgresql_where=text("status = 'active'"),
         ),
     )
 
-    client_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    name: Mapped[str] = mapped_column(Text, nullable=False)
-    frequency: Mapped[str] = mapped_column(Text, nullable=False)
+    client_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    frequency: Mapped[str] = mapped_column(String(32), nullable=False)
     start_date: Mapped[date] = mapped_column(Date, nullable=False)
     end_date: Mapped[date | None] = mapped_column(Date)
     next_run_date: Mapped[date] = mapped_column(Date, nullable=False)
-    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="active")
+    status: Mapped[str] = mapped_column(String(32), nullable=False, server_default="active")
     reference: Mapped[str | None] = mapped_column(Text)
     notes: Mapped[str | None] = mapped_column(Text)
     last_run_on: Mapped[date | None] = mapped_column(Date)
-    created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
+    created_by: Mapped[uuid.UUID | None] = mapped_column(Uuid36(), ForeignKey("users.id"))
 
 
 class RecurringLine(Base, IdMixin, OrgScopedMixin, TimestampMixin):
@@ -203,21 +201,21 @@ class RecurringLine(Base, IdMixin, OrgScopedMixin, TimestampMixin):
         _service_fk("recurring_lines"),
         _vat_fk("recurring_lines"),
         CheckConstraint("quantity > 0", name="quantity"),
-        CheckConstraint("length(description) BETWEEN 1 AND 1000", name="description_length"),
+        CheckConstraint("char_length(description) BETWEEN 1 AND 1000", name="description_length"),
         Index("ix_recurring_lines_schedule_id_position", "schedule_id", "position"),
     )
 
-    schedule_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    schedule_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
     position: Mapped[int] = mapped_column(SmallInteger, nullable=False)
-    description: Mapped[str] = mapped_column(Text, nullable=False)
-    job_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
-    service_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    description: Mapped[str] = mapped_column(String(1000), nullable=False)
+    job_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
+    service_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
     quantity: Mapped[Decimal] = mapped_column(
         Numeric(12, 2), nullable=False, server_default=text("1")
     )
     unit_amount: Mapped[int] = mapped_column(BigInteger, nullable=False)
     # The chosen rate; null means the usual resolution (client, service, practice default).
-    vat_rate_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    vat_rate_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
 
 
 class RecurringRun(Base, IdMixin, OrgScopedMixin, TimestampMixin):
@@ -242,15 +240,13 @@ class RecurringRun(Base, IdMixin, OrgScopedMixin, TimestampMixin):
         Index("ix_recurring_runs_schedule_id_run_date", "schedule_id", "run_date"),
     )
 
-    schedule_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    schedule_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
     run_date: Mapped[date] = mapped_column(Date, nullable=False)
-    status: Mapped[str] = mapped_column(Text, nullable=False)
-    invoice_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    invoice_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
     error: Mapped[str | None] = mapped_column(Text)
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
-    ran_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=text("now()")
-    )
+    ran_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False, server_default=NOW)
 
 
 __all__ = [

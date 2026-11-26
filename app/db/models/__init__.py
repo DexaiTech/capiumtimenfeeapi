@@ -1,5 +1,6 @@
 """Import every model so ``Base.metadata`` is complete for Alembic."""
 
+from app.db.base import Base
 from app.db.models.billing import (
     CreditNote,
     CreditNoteLine,
@@ -103,6 +104,9 @@ from app.db.models.wip import (
     WipSnapshotItem,
     WipTransfer,
 )
+from app.db.triggers import attach as _attach_triggers
+
+_attach_triggers(Base.metadata.tables)
 
 __all__ = [
     "ActivityCode",

@@ -9,21 +9,21 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     Date,
-    DateTime,
     ForeignKey,
     ForeignKeyConstraint,
     Index,
     Integer,
     SmallInteger,
+    String,
     Text,
     UniqueConstraint,
     text,
 )
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql.expression import ColumnElement
 
 from app.db.base import Base, IdMixin, OrgScopedMixin, SoftDeleteMixin, TimestampMixin
+from app.db.types import UTCDateTime, Uuid36
 
 CLIENT_TYPES = (
     "individual",
@@ -85,7 +85,7 @@ class Client(Base, IdMixin, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
             name="central_sync_state",
         ),
         CheckConstraint(
-            "central_client_id IS NULL OR length(central_client_id) BETWEEN 1 AND 64",
+            "central_client_id IS NULL OR char_length(central_client_id) BETWEEN 1 AND 64",
             name="central_client_id_length",
         ),
         CheckConstraint(
@@ -101,7 +101,7 @@ class Client(Base, IdMixin, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
             name="cost_plus_markup_bp",
         ),
         CheckConstraint(
-            "invoice_email IS NULL OR length(invoice_email) BETWEEN 3 AND 254",
+            "invoice_email IS NULL OR char_length(invoice_email) BETWEEN 3 AND 254",
             name="invoice_email_length",
         ),
         CheckConstraint(
@@ -110,8 +110,8 @@ class Client(Base, IdMixin, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
             name="client_type",
         ),
         CheckConstraint("status IN ('prospect', 'active', 'inactive', 'archived')", name="status"),
-        CheckConstraint("length(name) BETWEEN 1 AND 200", name="name_length"),
-        CheckConstraint("code ~ '^[A-Z0-9_-]{1,20}$'", name="code_format"),
+        CheckConstraint("char_length(name) BETWEEN 1 AND 200", name="name_length"),
+        CheckConstraint("REGEXP_LIKE(code, '^[A-Z0-9_-]{1,20}$', 'c')", name="code_format"),
         CheckConstraint(
             "(year_end_month IS NULL) = (year_end_day IS NULL)", name="year_end_complete"
         ),
@@ -123,100 +123,106 @@ class Client(Base, IdMixin, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
         ),
         Index(
             "uq_clients_organization_id_code",
-            "organization_id",
-            "code",
+            text("(CASE WHEN deleted_at IS NULL THEN `organization_id` END)"),
+            text("(CASE WHEN deleted_at IS NULL THEN `code` END)"),
             unique=True,
-            postgresql_where=text("deleted_at IS NULL"),
         ),
         CheckConstraint(
             "aml_status IN ('not_started', 'pending', 'clear', 'review', 'failed')",
             name="aml_status",
         ),
         CheckConstraint("health_score BETWEEN 0 AND 100", name="health_score"),
-        CheckConstraint("segment IS NULL OR length(segment) BETWEEN 1 AND 40", name="segment"),
+        CheckConstraint("segment IS NULL OR char_length(segment) BETWEEN 1 AND 40", name="segment"),
         CheckConstraint(
             "accounting_software IS NULL OR accounting_software IN "
             "('xero', 'quickbooks', 'sage', 'freeagent', 'other')",
             name="accounting_software",
         ),
-        Index("ix_clients_organization_id_name_lower", "organization_id", text("lower(name)")),
+        Index("ix_clients_organization_id_name_lower", "organization_id", text("(lower(name))")),
         Index("ix_clients_organization_id_manager_user_id", "organization_id", "manager_user_id"),
         Index("ix_clients_organization_id_branch_id", "organization_id", "branch_id"),
         # A central client is enabled at most once per practice.
         Index(
             "uq_clients_organization_id_central_client_id",
-            "organization_id",
-            "central_client_id",
+            text(
+                "(CASE WHEN central_client_id IS NOT NULL AND deleted_at IS NULL THEN `organization_id` END)"
+            ),
+            text(
+                "(CASE WHEN central_client_id IS NOT NULL AND deleted_at IS NULL THEN `central_client_id` END)"
+            ),
             unique=True,
-            postgresql_where=text("central_client_id IS NOT NULL AND deleted_at IS NULL"),
         ),
         Index(
             "ix_clients_organization_id_merged_into_client_id",
             "organization_id",
             "merged_into_client_id",
-            postgresql_where=text("merged_into_client_id IS NOT NULL"),
         ),
         # One built-in Internal client per practice.
         Index(
             "uq_clients_organization_id_internal",
-            "organization_id",
+            text("(CASE WHEN is_internal THEN `organization_id` END)"),
             unique=True,
-            postgresql_where=text("is_internal"),
         ),
     )
 
     # A short reference such as "ACME01"; generated from the sequence when not given.
-    code: Mapped[str] = mapped_column(Text, nullable=False)
-    name: Mapped[str] = mapped_column(Text, nullable=False)
-    client_type: Mapped[str] = mapped_column(Text, nullable=False, server_default="limited_company")
-    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="active")
+    code: Mapped[str] = mapped_column(String(20), nullable=False)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    client_type: Mapped[str] = mapped_column(
+        String(32), nullable=False, server_default="limited_company"
+    )
+    status: Mapped[str] = mapped_column(String(32), nullable=False, server_default="active")
     email: Mapped[str | None] = mapped_column(Text)
     phone: Mapped[str | None] = mapped_column(Text)
     address_line1: Mapped[str | None] = mapped_column(Text)
     address_line2: Mapped[str | None] = mapped_column(Text)
     city: Mapped[str | None] = mapped_column(Text)
     postcode: Mapped[str | None] = mapped_column(Text)
-    country: Mapped[str] = mapped_column(Text, nullable=False, server_default="GB")
+    country: Mapped[str] = mapped_column(String(255), nullable=False, server_default="GB")
     # Companies House number, HMRC unique taxpayer reference and VAT registration number.
     company_number: Mapped[str | None] = mapped_column(Text)
     utr: Mapped[str | None] = mapped_column(Text)
     vat_number: Mapped[str | None] = mapped_column(Text)
     year_end_month: Mapped[int | None] = mapped_column(SmallInteger)
     year_end_day: Mapped[int | None] = mapped_column(SmallInteger)
-    partner_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
-    manager_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    partner_user_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
+    manager_user_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
     # Overrides the practice's payment terms on this client's invoices.
     payment_terms_days: Mapped[int | None] = mapped_column(SmallInteger)
-    default_vat_rate_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    default_vat_rate_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
     # Recovery analysis: the client's cost-plus mark-up (basis points); null = the practice's. A
     # job's own mark-up wins over it.
     cost_plus_markup_bp: Mapped[int | None] = mapped_column(Integer)
     billing_notes: Mapped[str | None] = mapped_column(Text)
     notes: Mapped[str | None] = mapped_column(Text)
     # Practice-defined tier shown on the client list (Bronze, Silver, Gold, Platinum, ...).
-    segment: Mapped[str | None] = mapped_column(Text)
+    segment: Mapped[str | None] = mapped_column(String(40))
     # The practice branch (office) the client belongs to; required on create and edit while the
     # practice has ``branches_enabled`` on.
-    branch_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    branch_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
     # Anti-money-laundering check state (UK MLR 2017 customer due diligence).
-    aml_status: Mapped[str] = mapped_column(Text, nullable=False, server_default="not_started")
+    aml_status: Mapped[str] = mapped_column(
+        String(32), nullable=False, server_default="not_started"
+    )
     aml_checked_on: Mapped[date | None] = mapped_column(Date)
     # 0-100; set by the practice (later computed from deadlines, debt and recoverability).
     health_score: Mapped[int | None] = mapped_column(SmallInteger)
     # Bookkeeping software the client uses (shown as a badge, e.g. Xero).
-    accounting_software: Mapped[str | None] = mapped_column(Text)
+    accounting_software: Mapped[str | None] = mapped_column(String(32))
     # Where invoices are emailed; it comes before the billing and primary contacts.
-    invoice_email: Mapped[str | None] = mapped_column(Text)
+    invoice_email: Mapped[str | None] = mapped_column(String(254))
     # The service new jobs and invoices of the client suggest.
-    default_service_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
-    invoice_template_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    default_service_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
+    invoice_template_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
     # The central client this one is linked to. While linked, the name and the address are
     # managed centrally (``central_synced_at`` is when they were last confirmed against it).
-    central_client_id: Mapped[str | None] = mapped_column(Text)
-    central_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    central_sync_state: Mapped[str] = mapped_column(Text, nullable=False, server_default="local")
+    central_client_id: Mapped[str | None] = mapped_column(String(64))
+    central_synced_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    central_sync_state: Mapped[str] = mapped_column(
+        String(32), nullable=False, server_default="local"
+    )
     # Set on a client that was merged into another: everything it had now belongs there.
-    merged_into_client_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    merged_into_client_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
     # The practice's built-in Internal client (APT64): internal time goes on its non-billable
     # jobs. It is never listed, counted, billed or synced, and cannot be edited or deleted.
     is_internal: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
@@ -238,19 +244,18 @@ class ClientContact(Base, IdMixin, OrgScopedMixin, TimestampMixin):
             name="fk_client_contacts_organization_id_client_id_clients",
             ondelete="CASCADE",
         ),
-        CheckConstraint("length(name) BETWEEN 1 AND 120", name="name_length"),
+        CheckConstraint("char_length(name) BETWEEN 1 AND 120", name="name_length"),
         Index("ix_client_contacts_organization_id_client_id", "organization_id", "client_id"),
         # One primary contact per client.
         Index(
             "uq_client_contacts_client_id_primary",
-            "client_id",
+            text("(CASE WHEN is_primary THEN `client_id` END)"),
             unique=True,
-            postgresql_where=text("is_primary"),
         ),
     )
 
-    client_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    name: Mapped[str] = mapped_column(Text, nullable=False)
+    client_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
     position: Mapped[str | None] = mapped_column(Text)
     email: Mapped[str | None] = mapped_column(Text)
     phone: Mapped[str | None] = mapped_column(Text)
@@ -288,11 +293,11 @@ class ClientService(Base, IdMixin, OrgScopedMixin, TimestampMixin):
         Index("ix_client_services_organization_id_service_id", "organization_id", "service_id"),
     )
 
-    client_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    service_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    client_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
+    service_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
     # Agreed fee per occurrence; null uses the service's default fee.
     fee: Mapped[int | None] = mapped_column(BigInteger)
-    frequency: Mapped[str] = mapped_column(Text, nullable=False, server_default="annually")
+    frequency: Mapped[str] = mapped_column(String(32), nullable=False, server_default="annually")
     start_date: Mapped[date | None] = mapped_column(Date)
     end_date: Mapped[date | None] = mapped_column(Date)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
@@ -321,14 +326,14 @@ class EngagementJobRun(Base, IdMixin, OrgScopedMixin, TimestampMixin):
     )
 
     client_service_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("client_services.id", ondelete="CASCADE"), nullable=False
+        Uuid36(), ForeignKey("client_services.id", ondelete="CASCADE"), nullable=False
     )
     period_start: Mapped[date] = mapped_column(Date, nullable=False)
     period_end: Mapped[date | None] = mapped_column(Date)
     job_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("jobs.id", ondelete="SET NULL")
+        Uuid36(), ForeignKey("jobs.id", ondelete="SET NULL")
     )
-    status: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
     error: Mapped[str | None] = mapped_column(Text)
 
 
@@ -349,13 +354,15 @@ class Lead(Base, IdMixin, OrgScopedMixin, TimestampMixin):
             ["clients.organization_id", "clients.id"],
             name="fk_leads_organization_id_converted_client_id_clients",
         ),
-        CheckConstraint("length(name) BETWEEN 1 AND 200", name="name_length"),
+        CheckConstraint("char_length(name) BETWEEN 1 AND 200", name="name_length"),
         CheckConstraint(
             "client_type IN ('individual', 'sole_trader', 'partnership', 'llp', "
             "'limited_company', 'trust', 'charity', 'other')",
             name="client_type",
         ),
-        CheckConstraint("source IS NULL OR length(source) BETWEEN 1 AND 100", name="source_length"),
+        CheckConstraint(
+            "source IS NULL OR char_length(source) BETWEEN 1 AND 100", name="source_length"
+        ),
         CheckConstraint("acquisition_cost >= 0", name="acquisition_cost"),
         CheckConstraint("onboarding_cost >= 0", name="onboarding_cost"),
         CheckConstraint(
@@ -365,21 +372,22 @@ class Lead(Base, IdMixin, OrgScopedMixin, TimestampMixin):
         # A client comes from at most one lead.
         Index(
             "uq_leads_organization_id_converted_client_id",
-            "organization_id",
-            "converted_client_id",
+            text("(CASE WHEN converted_client_id IS NOT NULL THEN `organization_id` END)"),
+            text("(CASE WHEN converted_client_id IS NOT NULL THEN `converted_client_id` END)"),
             unique=True,
-            postgresql_where=text("converted_client_id IS NOT NULL"),
         ),
     )
 
-    name: Mapped[str] = mapped_column(Text, nullable=False)
-    client_type: Mapped[str] = mapped_column(Text, nullable=False, server_default="limited_company")
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    client_type: Mapped[str] = mapped_column(
+        String(32), nullable=False, server_default="limited_company"
+    )
     # The person the practice deals with; becomes the client's primary contact.
     contact_name: Mapped[str | None] = mapped_column(Text)
     email: Mapped[str | None] = mapped_column(Text)
     phone: Mapped[str | None] = mapped_column(Text)
     # Where the lead came from: "Referral", "Website", ...
-    source: Mapped[str | None] = mapped_column(Text)
+    source: Mapped[str | None] = mapped_column(String(100))
     notes: Mapped[str | None] = mapped_column(Text)
     acquisition_cost: Mapped[int] = mapped_column(
         BigInteger, nullable=False, server_default=text("0")
@@ -387,10 +395,10 @@ class Lead(Base, IdMixin, OrgScopedMixin, TimestampMixin):
     onboarding_cost: Mapped[int] = mapped_column(
         BigInteger, nullable=False, server_default=text("0")
     )
-    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    converted_client_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
-    converted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    archived_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    converted_client_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
+    converted_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    created_by: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
 
 
 __all__ = ["Client", "ClientContact", "ClientService", "EngagementJobRun", "Lead"]

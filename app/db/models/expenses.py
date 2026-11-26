@@ -27,20 +27,19 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     Date,
-    DateTime,
     ForeignKeyConstraint,
     Index,
     Integer,
     Numeric,
+    String,
     Text,
     UniqueConstraint,
-    func,
     text,
 )
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, IdMixin, OrgScopedMixin, TimestampMixin
+from app.db.types import NOW, UTCDateTime, Uuid36
 
 EXPENSE_CLAIM_STATUSES = ("draft", "submitted", "approved", "returned")
 EXPENSE_PAYERS = ("staff", "practice")
@@ -72,23 +71,22 @@ class ExpenseType(Base, IdMixin, OrgScopedMixin, TimestampMixin):
             ["vat_rates.organization_id", "vat_rates.id"],
             name="fk_expense_types_default_vat_rate_id_vat_rates",
         ),
-        CheckConstraint("length(name) BETWEEN 1 AND 80", name="name_length"),
-        CheckConstraint("code ~ '^[A-Z0-9_-]{1,12}$'", name="code_format"),
+        CheckConstraint("char_length(name) BETWEEN 1 AND 80", name="name_length"),
+        CheckConstraint("REGEXP_LIKE(code, '^[A-Z0-9_-]{1,12}$', 'c')", name="code_format"),
         # The name is unique among the active types: a retired name can be used again.
         Index(
             "uq_expense_types_organization_id_name_lower",
-            "organization_id",
-            text("lower(name)"),
+            text("(CASE WHEN is_active THEN `organization_id` END)"),
+            text("(CASE WHEN is_active THEN lower(name) END)"),
             unique=True,
-            postgresql_where=text("is_active"),
         ),
         Index("uq_expense_types_organization_id_code", "organization_id", "code", unique=True),
     )
 
-    name: Mapped[str] = mapped_column(Text, nullable=False)
-    code: Mapped[str] = mapped_column(Text, nullable=False)
+    name: Mapped[str] = mapped_column(String(80), nullable=False)
+    code: Mapped[str] = mapped_column(String(12), nullable=False)
     # The VAT code a line starts with when only its net amount is given; null = no VAT.
-    default_vat_rate_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    default_vat_rate_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
     # A mileage line is priced from its miles and the practice's mileage rate.
     is_mileage: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
     default_billable: Mapped[bool] = mapped_column(
@@ -105,9 +103,11 @@ class ExpenseClaim(Base, IdMixin, OrgScopedMixin, TimestampMixin):
         _member_fk("created_by", "fk_expense_claims_organization_id_created_by_members"),
         _member_fk("decided_by", "fk_expense_claims_organization_id_decided_by_members"),
         CheckConstraint(_in("status", EXPENSE_CLAIM_STATUSES), name="status"),
-        CheckConstraint("title IS NULL OR length(title) BETWEEN 1 AND 200", name="title_length"),
         CheckConstraint(
-            "decision_note IS NULL OR length(decision_note) BETWEEN 1 AND 2000",
+            "title IS NULL OR char_length(title) BETWEEN 1 AND 200", name="title_length"
+        ),
+        CheckConstraint(
+            "decision_note IS NULL OR char_length(decision_note) BETWEEN 1 AND 2000",
             name="decision_note_length",
         ),
         CheckConstraint(
@@ -134,20 +134,19 @@ class ExpenseClaim(Base, IdMixin, OrgScopedMixin, TimestampMixin):
             "ix_expense_claims_submitted",
             "organization_id",
             "submitted_at",
-            postgresql_where=text("status = 'submitted'"),
         ),
     )
 
     # The person the claim is for: a member, possibly one without a login (recorded on their
     # behalf by someone with ``expense.manage``).
-    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
     # Whoever entered it: the claimant, or the person who recorded it on their behalf.
-    created_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    title: Mapped[str | None] = mapped_column(Text)
-    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="draft")
-    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    decided_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    created_by: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
+    title: Mapped[str | None] = mapped_column(String(200))
+    status: Mapped[str] = mapped_column(String(32), nullable=False, server_default="draft")
+    submitted_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    decided_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    decided_by: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
     # The reason a claim was returned (required then); an optional note when approved.
     decision_note: Mapped[str | None] = mapped_column(Text)
 
@@ -185,9 +184,9 @@ class Expense(Base, IdMixin, OrgScopedMixin, TimestampMixin):
             ["vat_rates.organization_id", "vat_rates.id"],
             name="fk_expenses_organization_id_vat_rate_id_vat_rates",
         ),
-        CheckConstraint("length(description) BETWEEN 1 AND 500", name="description_length"),
+        CheckConstraint("char_length(description) BETWEEN 1 AND 500", name="description_length"),
         CheckConstraint(
-            "supplier IS NULL OR length(supplier) BETWEEN 1 AND 200", name="supplier_length"
+            "supplier IS NULL OR char_length(supplier) BETWEEN 1 AND 200", name="supplier_length"
         ),
         CheckConstraint("net >= 0 AND vat >= 0", name="amounts"),
         CheckConstraint("gross = net + vat", name="gross_total"),
@@ -221,7 +220,6 @@ class Expense(Base, IdMixin, OrgScopedMixin, TimestampMixin):
             "ix_expenses_organization_id_job_id",
             "organization_id",
             "job_id",
-            postgresql_where=text("job_id IS NOT NULL"),
         ),
         Index("ix_expenses_organization_id_expense_type_id", "organization_id", "expense_type_id"),
         # The WIP candidates: billable, unbilled, with something to recharge (the claim must
@@ -231,21 +229,18 @@ class Expense(Base, IdMixin, OrgScopedMixin, TimestampMixin):
             "organization_id",
             "client_id",
             "incurred_on",
-            postgresql_where=text(
-                "is_billable AND billing_status = 'unbilled' AND recharge_amount > 0"
-            ),
         ),
     )
 
-    claim_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    expense_type_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    claim_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
+    expense_type_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
     incurred_on: Mapped[date] = mapped_column(Date, nullable=False)
-    description: Mapped[str] = mapped_column(Text, nullable=False)
-    client_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
-    job_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
-    supplier: Mapped[str | None] = mapped_column(Text)
+    description: Mapped[str] = mapped_column(String(500), nullable=False)
+    client_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
+    job_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
+    supplier: Mapped[str | None] = mapped_column(String(200))
     # The VAT code of the cost and the rate it had when the line was saved (both or neither).
-    vat_rate_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    vat_rate_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
     vat_rate_bp: Mapped[int | None] = mapped_column(Integer)
     net: Mapped[int] = mapped_column(BigInteger, nullable=False)
     vat: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default=text("0"))
@@ -260,8 +255,10 @@ class Expense(Base, IdMixin, OrgScopedMixin, TimestampMixin):
         BigInteger, nullable=False, server_default=text("0")
     )
     # Who paid: the staff member (reimbursed) or the practice (company card).
-    payer: Mapped[str] = mapped_column(Text, nullable=False, server_default="staff")
-    billing_status: Mapped[str] = mapped_column(Text, nullable=False, server_default="unbilled")
+    payer: Mapped[str] = mapped_column(String(255), nullable=False, server_default="staff")
+    billing_status: Mapped[str] = mapped_column(
+        String(255), nullable=False, server_default="unbilled"
+    )
 
 
 class ExpenseClaimEvent(Base, IdMixin, OrgScopedMixin):
@@ -277,7 +274,7 @@ class ExpenseClaimEvent(Base, IdMixin, OrgScopedMixin):
         ),
         _member_fk("actor_user_id", "fk_expense_claim_events_organization_id_actor_members"),
         CheckConstraint(_in("action", CLAIM_EVENT_ACTIONS), name="action"),
-        CheckConstraint("note IS NULL OR length(note) BETWEEN 1 AND 2000", name="note_length"),
+        CheckConstraint("note IS NULL OR char_length(note) BETWEEN 1 AND 2000", name="note_length"),
         Index(
             "ix_expense_claim_events_organization_id_claim_id_at",
             "organization_id",
@@ -286,13 +283,11 @@ class ExpenseClaimEvent(Base, IdMixin, OrgScopedMixin):
         ),
     )
 
-    claim_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    claim_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
     action: Mapped[str] = mapped_column(Text, nullable=False)
-    actor_user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    actor_user_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
     note: Mapped[str | None] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False, server_default=NOW)
 
 
 class ExpenseReceipt(Base, IdMixin, OrgScopedMixin):
@@ -306,27 +301,25 @@ class ExpenseReceipt(Base, IdMixin, OrgScopedMixin):
             ondelete="CASCADE",
         ),
         _member_fk("uploaded_by", "fk_expense_receipts_organization_id_uploader_members"),
-        CheckConstraint("length(file_name) BETWEEN 1 AND 200", name="file_name_length"),
-        CheckConstraint("length(content_type) BETWEEN 3 AND 100", name="content_type_length"),
+        CheckConstraint("char_length(file_name) BETWEEN 1 AND 200", name="file_name_length"),
+        CheckConstraint("char_length(content_type) BETWEEN 3 AND 100", name="content_type_length"),
         CheckConstraint(f"size_bytes BETWEEN 1 AND {MAX_RECEIPT_BYTES}", name="size_bytes"),
-        CheckConstraint("length(storage_key) BETWEEN 16 AND 128", name="storage_key_length"),
-        CheckConstraint("sha256 ~ '^[0-9a-f]{64}$'", name="sha256_format"),
+        CheckConstraint("char_length(storage_key) BETWEEN 16 AND 128", name="storage_key_length"),
+        CheckConstraint("REGEXP_LIKE(sha256, '^[0-9a-f]{64}$', 'c')", name="sha256_format"),
         Index("uq_expense_receipts_storage_key", "storage_key", unique=True),
         Index("ix_expense_receipts_organization_id_expense_id", "organization_id", "expense_id"),
     )
 
-    expense_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    expense_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
     # The sanitised name the person gave the file.
-    file_name: Mapped[str] = mapped_column(Text, nullable=False)
+    file_name: Mapped[str] = mapped_column(String(200), nullable=False)
     # What the content really is (sniffed), never what the client claimed.
-    content_type: Mapped[str] = mapped_column(Text, nullable=False)
+    content_type: Mapped[str] = mapped_column(String(100), nullable=False)
     size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    storage_key: Mapped[str] = mapped_column(Text, nullable=False)
-    sha256: Mapped[str] = mapped_column(Text, nullable=False)
-    uploaded_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now()
-    )
+    storage_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    uploaded_by: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False, server_default=NOW)
 
 
 __all__ = [

@@ -11,21 +11,22 @@ from datetime import datetime
 from typing import Any
 
 from sqlalchemy import (
+    JSON,
     Boolean,
     CheckConstraint,
-    DateTime,
     ForeignKeyConstraint,
     Index,
     Integer,
     PrimaryKeyConstraint,
+    String,
     Text,
     UniqueConstraint,
     text,
 )
-from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, IdMixin, OrgScopedMixin, TimestampMixin
+from app.db.types import JSON_EMPTY_OBJECT, NOW, UTCDateTime, Uuid36
 
 CENTRAL_CLIENT_STATUSES = ("active", "archived")
 SYNC_DIRECTIONS = ("inbound", "outbound")
@@ -52,13 +53,13 @@ class CentralClientCache(Base, IdMixin, OrgScopedMixin):
             "central_id",
             name="uq_central_client_cache_organization_id_central_id",
         ),
-        CheckConstraint("length(central_id) BETWEEN 1 AND 64", name="central_id_length"),
-        CheckConstraint("length(name) BETWEEN 1 AND 200", name="name_length"),
+        CheckConstraint("char_length(central_id) BETWEEN 1 AND 64", name="central_id_length"),
+        CheckConstraint("char_length(name) BETWEEN 1 AND 200", name="name_length"),
         CheckConstraint("status IN ('active', 'archived')", name="status"),
         Index(
             "ix_central_client_cache_organization_id_name_lower",
             "organization_id",
-            text("lower(name)"),
+            text("(lower(name))"),
         ),
         Index(
             "ix_central_client_cache_organization_id_company_number",
@@ -67,20 +68,18 @@ class CentralClientCache(Base, IdMixin, OrgScopedMixin):
         ),
     )
 
-    central_id: Mapped[str] = mapped_column(Text, nullable=False)
-    name: Mapped[str] = mapped_column(Text, nullable=False)
-    company_number: Mapped[str | None] = mapped_column(Text)
+    central_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    company_number: Mapped[str | None] = mapped_column(String(255))
     address_line1: Mapped[str | None] = mapped_column(Text)
     address_line2: Mapped[str | None] = mapped_column(Text)
     city: Mapped[str | None] = mapped_column(Text)
     postcode: Mapped[str | None] = mapped_column(Text)
-    country: Mapped[str] = mapped_column(Text, nullable=False, server_default="GB")
-    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="active")
+    country: Mapped[str] = mapped_column(String(255), nullable=False, server_default="GB")
+    status: Mapped[str] = mapped_column(String(32), nullable=False, server_default="active")
     # When the central service last changed the record, and when this cache last heard of it.
-    source_updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    fetched_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=text("now()")
-    )
+    source_updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    fetched_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False, server_default=NOW)
 
 
 class IntegrationSyncLog(Base, IdMixin, OrgScopedMixin):
@@ -94,19 +93,20 @@ class IntegrationSyncLog(Base, IdMixin, OrgScopedMixin):
 
     __tablename__ = "integration_sync_logs"
     __table_args__ = (
-        CheckConstraint("integration ~ '^[a-z][a-z0-9_]{1,39}$'", name="integration_format"),
+        CheckConstraint(
+            "REGEXP_LIKE(integration, '^[a-z][a-z0-9_]{1,39}$', 'c')", name="integration_format"
+        ),
         CheckConstraint("direction IN ('inbound', 'outbound')", name="direction"),
-        CheckConstraint("length(operation) BETWEEN 1 AND 60", name="operation_length"),
+        CheckConstraint("char_length(operation) BETWEEN 1 AND 60", name="operation_length"),
         CheckConstraint("status IN ('ok', 'failed', 'skipped')", name="status"),
         CheckConstraint("attempt >= 1", name="attempt"),
-        CheckConstraint("message IS NULL OR length(message) <= 1000", name="message_length"),
+        CheckConstraint("message IS NULL OR char_length(message) <= 1000", name="message_length"),
         Index(
             "uq_integration_sync_logs_event",
-            "organization_id",
-            "integration",
-            "external_event_id",
+            text("(CASE WHEN external_event_id IS NOT NULL THEN `organization_id` END)"),
+            text("(CASE WHEN external_event_id IS NOT NULL THEN `integration` END)"),
+            text("(CASE WHEN external_event_id IS NOT NULL THEN `external_event_id` END)"),
             unique=True,
-            postgresql_where=text("external_event_id IS NOT NULL"),
         ),
         Index(
             "ix_integration_sync_logs_organization_id_created_at", "organization_id", "created_at"
@@ -116,24 +116,21 @@ class IntegrationSyncLog(Base, IdMixin, OrgScopedMixin):
             "organization_id",
             "entity_id",
             "created_at",
-            postgresql_where=text("entity_id IS NOT NULL"),
         ),
     )
 
-    integration: Mapped[str] = mapped_column(Text, nullable=False)
-    direction: Mapped[str] = mapped_column(Text, nullable=False, server_default="inbound")
-    operation: Mapped[str] = mapped_column(Text, nullable=False)
+    integration: Mapped[str] = mapped_column(String(39), nullable=False)
+    direction: Mapped[str] = mapped_column(String(32), nullable=False, server_default="inbound")
+    operation: Mapped[str] = mapped_column(String(60), nullable=False)
     entity_type: Mapped[str | None] = mapped_column(Text)
-    entity_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    entity_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
     external_id: Mapped[str | None] = mapped_column(Text)
-    external_event_id: Mapped[str | None] = mapped_column(Text)
-    status: Mapped[str] = mapped_column(Text, nullable=False)
-    message: Mapped[str | None] = mapped_column(Text)
+    external_event_id: Mapped[str | None] = mapped_column(String(255))
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    message: Mapped[str | None] = mapped_column(String(1000))
     attempt: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
-    details: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=text("now()")
-    )
+    details: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False, server_default=NOW)
 
 
 class IntegrationCursor(Base, OrgScopedMixin):
@@ -142,14 +139,14 @@ class IntegrationCursor(Base, OrgScopedMixin):
     __tablename__ = "integration_cursors"
     __table_args__ = (
         PrimaryKeyConstraint("organization_id", "integration"),
-        CheckConstraint("integration ~ '^[a-z][a-z0-9_]{1,39}$'", name="integration_format"),
+        CheckConstraint(
+            "REGEXP_LIKE(integration, '^[a-z][a-z0-9_]{1,39}$', 'c')", name="integration_format"
+        ),
     )
 
-    integration: Mapped[str] = mapped_column(Text, nullable=False)
+    integration: Mapped[str] = mapped_column(String(39), nullable=False)
     cursor: Mapped[str] = mapped_column(Text, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=text("now()")
-    )
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False, server_default=NOW)
 
 
 class IntegrationConnection(Base, IdMixin, OrgScopedMixin, TimestampMixin):
@@ -169,19 +166,19 @@ class IntegrationConnection(Base, IdMixin, OrgScopedMixin, TimestampMixin):
         CheckConstraint(f"integration IN ({_INTEGRATION_KEYS_SQL})", name="integration"),
         CheckConstraint("status IN ('idle', 'ok', 'error')", name="status"),
         CheckConstraint(
-            "last_error IS NULL OR length(last_error) <= 1000", name="last_error_length"
+            "last_error IS NULL OR char_length(last_error) <= 1000", name="last_error_length"
         ),
     )
 
-    integration: Mapped[str] = mapped_column(Text, nullable=False)
+    integration: Mapped[str] = mapped_column(String(255), nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
     # How the last attempt went: ``idle`` (nothing yet), ``ok`` or ``error``.
-    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="idle")
-    last_success_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    last_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    last_error: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, server_default="idle")
+    last_success_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    last_attempt_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    last_error: Mapped[str | None] = mapped_column(String(1000))
     config: Mapped[dict[str, Any]] = mapped_column(
-        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+        JSON, nullable=False, server_default=JSON_EMPTY_OBJECT
     )
 
 
@@ -204,20 +201,21 @@ class IntegrationSyncItem(Base, IdMixin, OrgScopedMixin, TimestampMixin):
         ),
         CheckConstraint(f"integration IN ({_INTEGRATION_KEYS_SQL})", name="integration"),
         CheckConstraint("direction IN ('inbound', 'outbound')", name="direction"),
-        CheckConstraint("length(operation) BETWEEN 1 AND 60", name="operation_length"),
-        CheckConstraint("length(idempotency_key) BETWEEN 1 AND 200", name="idempotency_key_length"),
+        CheckConstraint("char_length(operation) BETWEEN 1 AND 60", name="operation_length"),
+        CheckConstraint(
+            "char_length(idempotency_key) BETWEEN 1 AND 200", name="idempotency_key_length"
+        ),
         CheckConstraint("status IN ('pending', 'ok', 'failed', 'skipped')", name="status"),
         CheckConstraint("attempts >= 0", name="attempts"),
         CheckConstraint(
             "(status = 'pending') = (next_attempt_at IS NOT NULL)", name="next_attempt"
         ),
         CheckConstraint(
-            "last_error IS NULL OR length(last_error) <= 1000", name="last_error_length"
+            "last_error IS NULL OR char_length(last_error) <= 1000", name="last_error_length"
         ),
         Index(
             "ix_integration_sync_items_due",
             "next_attempt_at",
-            postgresql_where=text("status = 'pending'"),
         ),
         Index(
             "ix_integration_sync_items_org_integration_status",
@@ -230,28 +228,27 @@ class IntegrationSyncItem(Base, IdMixin, OrgScopedMixin, TimestampMixin):
             "ix_integration_sync_items_organization_id_entity_id",
             "organization_id",
             "entity_id",
-            postgresql_where=text("entity_id IS NOT NULL"),
         ),
     )
 
-    integration: Mapped[str] = mapped_column(Text, nullable=False)
+    integration: Mapped[str] = mapped_column(String(255), nullable=False)
     entity_type: Mapped[str | None] = mapped_column(Text)
-    entity_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
-    direction: Mapped[str] = mapped_column(Text, nullable=False, server_default="outbound")
-    operation: Mapped[str] = mapped_column(Text, nullable=False)
-    idempotency_key: Mapped[str] = mapped_column(Text, nullable=False)
-    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="pending")
+    entity_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
+    direction: Mapped[str] = mapped_column(String(32), nullable=False, server_default="outbound")
+    operation: Mapped[str] = mapped_column(String(60), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(200), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, server_default="pending")
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
     # Set while pending (when the next attempt is due), null otherwise.
-    next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    last_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    last_error: Mapped[str | None] = mapped_column(Text)
+    next_attempt_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    last_attempt_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    completed_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    last_error: Mapped[str | None] = mapped_column(String(1000))
     # A stable code for the last failure: UNMAPPED, UNAVAILABLE, REJECTED, INVALID_TRANSITION ...
     last_error_code: Mapped[str | None] = mapped_column(Text)
     external_ref: Mapped[str | None] = mapped_column(Text)
     payload: Mapped[dict[str, Any]] = mapped_column(
-        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+        JSON, nullable=False, server_default=JSON_EMPTY_OBJECT
     )
 
 
@@ -267,29 +264,29 @@ class BookkeepingServiceMapping(Base, IdMixin, OrgScopedMixin, TimestampMixin):
             name="fk_bk_service_mappings_service",
             ondelete="CASCADE",
         ),
-        CheckConstraint(f"account_code ~ '{CODE_PATTERN}'", name="account_code_format"),
         CheckConstraint(
-            "account_name IS NULL OR length(account_name) BETWEEN 1 AND 120",
+            f"REGEXP_LIKE(account_code, '{CODE_PATTERN}', 'c')", name="account_code_format"
+        ),
+        CheckConstraint(
+            "account_name IS NULL OR char_length(account_name) BETWEEN 1 AND 120",
             name="account_name_length",
         ),
         Index(
             "uq_bk_service_mappings_service",
-            "organization_id",
-            "service_id",
+            text("(CASE WHEN service_id IS NOT NULL THEN `organization_id` END)"),
+            text("(CASE WHEN service_id IS NOT NULL THEN `service_id` END)"),
             unique=True,
-            postgresql_where=text("service_id IS NOT NULL"),
         ),
         Index(
             "uq_bk_service_mappings_default",
-            "organization_id",
+            text("(CASE WHEN service_id IS NULL THEN `organization_id` END)"),
             unique=True,
-            postgresql_where=text("service_id IS NULL"),
         ),
     )
 
-    service_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    service_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
     account_code: Mapped[str] = mapped_column(Text, nullable=False)
-    account_name: Mapped[str | None] = mapped_column(Text)
+    account_name: Mapped[str | None] = mapped_column(String(120))
 
 
 class BookkeepingVatMapping(Base, IdMixin, OrgScopedMixin, TimestampMixin):
@@ -304,28 +301,26 @@ class BookkeepingVatMapping(Base, IdMixin, OrgScopedMixin, TimestampMixin):
             name="fk_bk_vat_mappings_vat_rate",
             ondelete="CASCADE",
         ),
-        CheckConstraint(f"tax_code ~ '{CODE_PATTERN}'", name="tax_code_format"),
+        CheckConstraint(f"REGEXP_LIKE(tax_code, '{CODE_PATTERN}', 'c')", name="tax_code_format"),
         CheckConstraint(
-            "tax_name IS NULL OR length(tax_name) BETWEEN 1 AND 120", name="tax_name_length"
+            "tax_name IS NULL OR char_length(tax_name) BETWEEN 1 AND 120", name="tax_name_length"
         ),
         Index(
             "uq_bk_vat_mappings_vat_rate",
-            "organization_id",
-            "vat_rate_id",
+            text("(CASE WHEN vat_rate_id IS NOT NULL THEN `organization_id` END)"),
+            text("(CASE WHEN vat_rate_id IS NOT NULL THEN `vat_rate_id` END)"),
             unique=True,
-            postgresql_where=text("vat_rate_id IS NOT NULL"),
         ),
         Index(
             "uq_bk_vat_mappings_default",
-            "organization_id",
+            text("(CASE WHEN vat_rate_id IS NULL THEN `organization_id` END)"),
             unique=True,
-            postgresql_where=text("vat_rate_id IS NULL"),
         ),
     )
 
-    vat_rate_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    vat_rate_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
     tax_code: Mapped[str] = mapped_column(Text, nullable=False)
-    tax_name: Mapped[str | None] = mapped_column(Text)
+    tax_name: Mapped[str | None] = mapped_column(String(120))
 
 
 __all__ = [

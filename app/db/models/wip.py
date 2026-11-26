@@ -24,23 +24,23 @@ from datetime import date, datetime
 from typing import Any
 
 from sqlalchemy import (
+    JSON,
     BigInteger,
     Boolean,
     CheckConstraint,
     Date,
-    DateTime,
     ForeignKeyConstraint,
     Index,
     Integer,
+    String,
     Text,
     UniqueConstraint,
-    func,
     text,
 )
-from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, IdMixin, OrgScopedMixin, TimestampMixin
+from app.db.types import JSON_EMPTY_ARRAY, NOW, UTCDateTime, Uuid36
 
 WIP_COMPONENTS = ("time", "fixed_fee", "expense")
 MOVEMENT_KINDS = (
@@ -96,7 +96,7 @@ class WipMovement(Base, IdMixin, OrgScopedMixin):
             "OR (kind IN ('write_off', 'transfer_out', 'credit_write_off') AND amount < 0)",
             name="amount_sign",
         ),
-        CheckConstraint("length(btrim(reason)) BETWEEN 1 AND 500", name="reason_length"),
+        CheckConstraint("char_length(trim(reason)) BETWEEN 1 AND 500", name="reason_length"),
         CheckConstraint("(kind = 'reversal') = (reversal_of_id IS NOT NULL)", name="reversal_of"),
         CheckConstraint(
             "(approval_state = 'approved') = (approved_by IS NOT NULL)", name="approval_fields"
@@ -108,13 +108,12 @@ class WipMovement(Base, IdMixin, OrgScopedMixin):
             name="source",
         ),
         CheckConstraint("item_count >= 0", name="item_count"),
-        CheckConstraint("jsonb_typeof(item_refs) = 'array'", name="item_refs_array"),
+        CheckConstraint("JSON_TYPE(item_refs) = 'ARRAY'", name="item_refs_array"),
         # A movement is reversed at most once.
         Index(
             "uq_wip_movements_reversal_of_id",
-            "reversal_of_id",
+            text("(CASE WHEN reversal_of_id IS NOT NULL THEN `reversal_of_id` END)"),
             unique=True,
-            postgresql_where=text("reversal_of_id IS NOT NULL"),
         ),
         Index("ix_wip_movements_organization_id_created_at", "organization_id", "created_at", "id"),
         Index(
@@ -133,31 +132,31 @@ class WipMovement(Base, IdMixin, OrgScopedMixin):
         ),
     )
 
-    kind: Mapped[str] = mapped_column(Text, nullable=False)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
     # ``amount``: adjusts the WIP balance of the job. ``items``: a memo of a change already made
     # to the items (they left WIP, or came back); it never counts in the balance.
     scope: Mapped[str] = mapped_column(Text, nullable=False)
     component: Mapped[str] = mapped_column(Text, nullable=False)
-    client_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    job_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    client_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
+    job_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
     # Signed pence: positive adds WIP value, negative removes it.
     amount: Mapped[int] = mapped_column(BigInteger, nullable=False)
     effective_date: Mapped[date] = mapped_column(Date, nullable=False)
     reason: Mapped[str] = mapped_column(Text, nullable=False)
-    actor_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
-    approval_state: Mapped[str] = mapped_column(Text, nullable=False, server_default="not_required")
-    approved_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
-    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    reversal_of_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
-    source_type: Mapped[str | None] = mapped_column(Text)
-    source_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    actor_user_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
+    approval_state: Mapped[str] = mapped_column(
+        String(32), nullable=False, server_default="not_required"
+    )
+    approved_by: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
+    approved_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    reversal_of_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
+    source_type: Mapped[str | None] = mapped_column(String(255))
+    source_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
     item_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
     item_refs: Mapped[list[dict[str, Any]]] = mapped_column(
-        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+        JSON, nullable=False, server_default=JSON_EMPTY_ARRAY
     )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.clock_timestamp()
-    )
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False, server_default=NOW)
 
 
 class WipAdjustment(Base, IdMixin, OrgScopedMixin, TimestampMixin):
@@ -183,13 +182,13 @@ class WipAdjustment(Base, IdMixin, OrgScopedMixin, TimestampMixin):
         CheckConstraint(_in("status", ADJUSTMENT_STATUSES), name="status"),
         CheckConstraint(_in("component", WIP_COMPONENTS), name="component"),
         CheckConstraint("amount > 0", name="amount"),
-        CheckConstraint("length(btrim(reason)) BETWEEN 1 AND 500", name="reason_length"),
+        CheckConstraint("char_length(trim(reason)) BETWEEN 1 AND 500", name="reason_length"),
         CheckConstraint(
-            "decision_note IS NULL OR length(btrim(decision_note)) BETWEEN 1 AND 500",
+            "decision_note IS NULL OR char_length(trim(decision_note)) BETWEEN 1 AND 500",
             name="decision_note_length",
         ),
         CheckConstraint(
-            "reversal_reason IS NULL OR length(btrim(reversal_reason)) BETWEEN 1 AND 500",
+            "reversal_reason IS NULL OR char_length(trim(reversal_reason)) BETWEEN 1 AND 500",
             name="reversal_reason_length",
         ),
         CheckConstraint(
@@ -212,32 +211,31 @@ class WipAdjustment(Base, IdMixin, OrgScopedMixin, TimestampMixin):
             "ix_wip_adjustments_pending",
             "organization_id",
             "created_at",
-            postgresql_where=text("status = 'pending'"),
         ),
     )
 
-    client_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    job_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    client_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
+    job_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
     kind: Mapped[str] = mapped_column(Text, nullable=False)
     component: Mapped[str] = mapped_column(Text, nullable=False)
     # Always positive: ``kind`` says whether it adds or removes WIP.
     amount: Mapped[int] = mapped_column(BigInteger, nullable=False)
     effective_date: Mapped[date] = mapped_column(Date, nullable=False)
     reason: Mapped[str] = mapped_column(Text, nullable=False)
-    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="pending")
+    status: Mapped[str] = mapped_column(String(255), nullable=False, server_default="pending")
     # Whether the amount was above the practice's threshold when it was requested, and the
     # threshold that applied then.
     approval_required: Mapped[bool] = mapped_column(Boolean, nullable=False)
     threshold: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    requested_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    decided_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
-    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    requested_by: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
+    decided_by: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
+    decided_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     decision_note: Mapped[str | None] = mapped_column(Text)
     # The ledger rows (no foreign key: the ledger is history).
-    movement_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
-    reversal_movement_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
-    reversed_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
-    reversed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    movement_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
+    reversal_movement_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
+    reversed_by: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
+    reversed_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     reversal_reason: Mapped[str | None] = mapped_column(Text)
 
 
@@ -269,12 +267,12 @@ class WipTransfer(Base, IdMixin, OrgScopedMixin, TimestampMixin):
         CheckConstraint("amount > 0", name="amount"),
         CheckConstraint(_in("component", WIP_COMPONENTS), name="component"),
         CheckConstraint(_in("status", TRANSFER_STATUSES), name="status"),
-        CheckConstraint("length(btrim(reason)) BETWEEN 1 AND 500", name="reason_length"),
+        CheckConstraint("char_length(trim(reason)) BETWEEN 1 AND 500", name="reason_length"),
         CheckConstraint(
-            "reversal_reason IS NULL OR length(btrim(reversal_reason)) BETWEEN 1 AND 500",
+            "reversal_reason IS NULL OR char_length(trim(reversal_reason)) BETWEEN 1 AND 500",
             name="reversal_reason_length",
         ),
-        CheckConstraint("jsonb_typeof(items) = 'array'", name="items_array"),
+        CheckConstraint("JSON_TYPE(items) = 'ARRAY'", name="items_array"),
         CheckConstraint(
             "(status = 'applied' AND reversed_by IS NULL AND reversed_at IS NULL "
             "AND reversal_reason IS NULL) "
@@ -286,23 +284,23 @@ class WipTransfer(Base, IdMixin, OrgScopedMixin, TimestampMixin):
         Index("ix_wip_transfers_organization_id_client_id", "organization_id", "client_id"),
     )
 
-    client_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    from_job_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    to_job_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    client_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
+    from_job_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
+    to_job_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
     component: Mapped[str] = mapped_column(Text, nullable=False)
     amount: Mapped[int] = mapped_column(BigInteger, nullable=False)
     effective_date: Mapped[date] = mapped_column(Date, nullable=False)
     reason: Mapped[str] = mapped_column(Text, nullable=False)
     # The items the person chose, as ``[{kind, id, value}]`` (empty when an amount was given).
     items: Mapped[list[dict[str, Any]]] = mapped_column(
-        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+        JSON, nullable=False, server_default=JSON_EMPTY_ARRAY
     )
-    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="applied")
-    out_movement_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    in_movement_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    created_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    reversed_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
-    reversed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(String(255), nullable=False, server_default="applied")
+    out_movement_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
+    in_movement_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
+    created_by: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
+    reversed_by: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
+    reversed_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     reversal_reason: Mapped[str | None] = mapped_column(Text)
 
 
@@ -328,13 +326,13 @@ class CreditNoteWip(Base, IdMixin, OrgScopedMixin, TimestampMixin):
         ),
         _member_fk("created_by", "fk_credit_note_wip_organization_id_created_by_members"),
         CheckConstraint(_in("mode", CREDIT_WIP_MODES), name="mode"),
-        CheckConstraint("length(btrim(reason)) BETWEEN 1 AND 500", name="reason_length"),
+        CheckConstraint("char_length(trim(reason)) BETWEEN 1 AND 500", name="reason_length"),
         CheckConstraint("net_credited > 0 AND wip_value >= 0 AND item_count >= 0", name="values"),
     )
 
-    credit_note_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    client_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    invoice_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    credit_note_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
+    client_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
+    invoice_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
     mode: Mapped[str] = mapped_column(Text, nullable=False)
     reason: Mapped[str] = mapped_column(Text, nullable=False)
     # The credit note's net total.
@@ -342,7 +340,7 @@ class CreditNoteWip(Base, IdMixin, OrgScopedMixin, TimestampMixin):
     # The WIP value that came back (return) or was written off (write_off).
     wip_value: Mapped[int] = mapped_column(BigInteger, nullable=False)
     item_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
-    created_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    created_by: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
 
 
 class WipSnapshot(Base, IdMixin, OrgScopedMixin):
@@ -361,16 +359,14 @@ class WipSnapshot(Base, IdMixin, OrgScopedMixin):
     )
 
     as_at: Mapped[date] = mapped_column(Date, nullable=False)
-    source: Mapped[str] = mapped_column(Text, nullable=False, server_default="request")
+    source: Mapped[str] = mapped_column(String(255), nullable=False, server_default="request")
     # The practice settings the figures were produced under.
-    fixed_fee_wip_mode: Mapped[str] = mapped_column(Text, nullable=False)
+    fixed_fee_wip_mode: Mapped[str] = mapped_column(String(32), nullable=False)
     require_timesheet_approval: Mapped[bool] = mapped_column(Boolean, nullable=False)
     item_count: Mapped[int] = mapped_column(Integer, nullable=False)
     total: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    taken_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
-    taken_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.clock_timestamp()
-    )
+    taken_by: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
+    taken_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False, server_default=NOW)
 
 
 class WipSnapshotItem(Base, IdMixin, OrgScopedMixin):
@@ -395,23 +391,23 @@ class WipSnapshotItem(Base, IdMixin, OrgScopedMixin):
         Index("ix_wip_snapshot_items_snapshot_id_item_date", "snapshot_id", "item_date", "id"),
     )
 
-    snapshot_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    snapshot_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
     kind: Mapped[str] = mapped_column(Text, nullable=False)
     component: Mapped[str] = mapped_column(Text, nullable=False)
     # The time entry, disbursement or expense line; the job for a fixed fee; the movement for an
     # adjustment.
-    item_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    client_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    item_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
+    client_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
     client_code: Mapped[str] = mapped_column(Text, nullable=False)
     client_name: Mapped[str] = mapped_column(Text, nullable=False)
-    job_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    job_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
     job_number: Mapped[str | None] = mapped_column(Text)
     job_name: Mapped[str | None] = mapped_column(Text)
     billing_basis: Mapped[str | None] = mapped_column(Text)
-    partner_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
-    manager_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
-    service_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
-    person_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    partner_user_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
+    manager_user_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
+    service_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
+    person_user_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
     item_date: Mapped[date] = mapped_column(Date, nullable=False)
     minutes: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
     value: Mapped[int] = mapped_column(BigInteger, nullable=False)

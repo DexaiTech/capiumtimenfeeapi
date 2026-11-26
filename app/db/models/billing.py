@@ -26,21 +26,21 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     Date,
-    DateTime,
     ForeignKey,
     ForeignKeyConstraint,
     Index,
     Integer,
     Numeric,
     SmallInteger,
+    String,
     Text,
     UniqueConstraint,
     text,
 )
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, IdMixin, OrgScopedMixin, TimestampMixin
+from app.db.types import UTCDateTime, Uuid36
 
 INVOICE_STATUSES = ("draft", "awaiting_approval", "approved", "issued", "void")
 LINE_KINDS = ("time", "fixed_fee", "disbursement", "manual")
@@ -77,7 +77,7 @@ class Disbursement(Base, IdMixin, OrgScopedMixin, TimestampMixin):
         ),
         _vat_fk("disbursements"),
         CheckConstraint("amount > 0", name="amount"),
-        CheckConstraint("length(description) BETWEEN 1 AND 500", name="description_length"),
+        CheckConstraint("char_length(description) BETWEEN 1 AND 500", name="description_length"),
         CheckConstraint(
             "billing_status IN ('unbilled', 'in_draft', 'billed', 'written_off')",
             name="billing_status",
@@ -93,22 +93,23 @@ class Disbursement(Base, IdMixin, OrgScopedMixin, TimestampMixin):
             "ix_disbursements_wip",
             "organization_id",
             "client_id",
-            postgresql_where=text("is_billable AND billing_status = 'unbilled'"),
         ),
     )
 
-    client_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    job_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    client_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
+    job_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
     incurred_on: Mapped[date] = mapped_column(Date, nullable=False)
-    description: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[str] = mapped_column(String(500), nullable=False)
     supplier: Mapped[str | None] = mapped_column(Text)
     # Net amount to recharge, in minor units.
     amount: Mapped[int] = mapped_column(BigInteger, nullable=False)
     # VAT charged when it is billed; null uses the practice default.
-    vat_rate_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    vat_rate_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
     is_billable: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
-    billing_status: Mapped[str] = mapped_column(Text, nullable=False, server_default="unbilled")
-    created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
+    billing_status: Mapped[str] = mapped_column(
+        String(32), nullable=False, server_default="unbilled"
+    )
+    created_by: Mapped[uuid.UUID | None] = mapped_column(Uuid36(), ForeignKey("users.id"))
 
 
 class Invoice(Base, IdMixin, OrgScopedMixin, TimestampMixin):
@@ -123,7 +124,7 @@ class Invoice(Base, IdMixin, OrgScopedMixin, TimestampMixin):
             "status IN ('draft', 'awaiting_approval', 'approved', 'issued', 'void')",
             name="status",
         ),
-        CheckConstraint("currency ~ '^[A-Z]{3}$'", name="currency_format"),
+        CheckConstraint("REGEXP_LIKE(currency, '^[A-Z]{3}$', 'c')", name="currency_format"),
         CheckConstraint(
             "(status IN ('draft', 'awaiting_approval', 'approved')) = (number IS NULL)",
             name="number_when_issued",
@@ -146,10 +147,9 @@ class Invoice(Base, IdMixin, OrgScopedMixin, TimestampMixin):
         CheckConstraint("deleted_at IS NULL OR status = 'void'", name="deleted_only_void"),
         Index(
             "uq_invoices_organization_id_number",
-            "organization_id",
-            "number",
+            text("(CASE WHEN number IS NOT NULL THEN `organization_id` END)"),
+            text("(CASE WHEN number IS NOT NULL THEN `number` END)"),
             unique=True,
-            postgresql_where=text("number IS NOT NULL"),
         ),
         Index("ix_invoices_organization_id_client_id", "organization_id", "client_id"),
         Index(
@@ -158,15 +158,15 @@ class Invoice(Base, IdMixin, OrgScopedMixin, TimestampMixin):
         Index("ix_invoices_organization_id_issue_date", "organization_id", "issue_date"),
     )
 
-    client_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    client_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
     # Assigned from the "invoice" sequence when issued; drafts have none.
-    number: Mapped[str | None] = mapped_column(Text)
-    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="draft")
+    number: Mapped[str | None] = mapped_column(String(255))
+    status: Mapped[str] = mapped_column(String(32), nullable=False, server_default="draft")
     issue_date: Mapped[date | None] = mapped_column(Date)
     due_date: Mapped[date | None] = mapped_column(Date)
     reference: Mapped[str | None] = mapped_column(Text)
     notes: Mapped[str | None] = mapped_column(Text)
-    currency: Mapped[str] = mapped_column(Text, nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False)
     net_total: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default=text("0"))
     vat_total: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default=text("0"))
     gross_total: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default=text("0"))
@@ -174,15 +174,15 @@ class Invoice(Base, IdMixin, OrgScopedMixin, TimestampMixin):
     credited_total: Mapped[int] = mapped_column(
         BigInteger, nullable=False, server_default=text("0")
     )
-    issued_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    issued_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
-    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    voided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    voided_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
+    issued_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    issued_by: Mapped[uuid.UUID | None] = mapped_column(Uuid36(), ForeignKey("users.id"))
+    sent_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    voided_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    voided_by: Mapped[uuid.UUID | None] = mapped_column(Uuid36(), ForeignKey("users.id"))
     void_reason: Mapped[str | None] = mapped_column(Text)
-    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    deleted_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
-    created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
+    deleted_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    deleted_by: Mapped[uuid.UUID | None] = mapped_column(Uuid36(), ForeignKey("users.id"))
+    created_by: Mapped[uuid.UUID | None] = mapped_column(Uuid36(), ForeignKey("users.id"))
 
     @property
     def balance(self) -> int:
@@ -216,24 +216,24 @@ class InvoiceLine(Base, IdMixin, OrgScopedMixin, TimestampMixin):
         CheckConstraint("kind IN ('time', 'fixed_fee', 'disbursement', 'manual')", name="kind"),
         CheckConstraint("quantity > 0", name="quantity"),
         CheckConstraint("vat_rate_bp BETWEEN 0 AND 10000", name="vat_rate_bp"),
-        CheckConstraint("length(description) BETWEEN 1 AND 1000", name="description_length"),
+        CheckConstraint("char_length(description) BETWEEN 1 AND 1000", name="description_length"),
         CheckConstraint("NOT is_advance OR kind = 'manual'", name="advance_is_manual"),
         Index("ix_invoice_lines_invoice_id_position", "invoice_id", "position"),
     )
 
-    invoice_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    invoice_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
     position: Mapped[int] = mapped_column(SmallInteger, nullable=False)
-    kind: Mapped[str] = mapped_column(Text, nullable=False)
-    description: Mapped[str] = mapped_column(Text, nullable=False)
-    job_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
-    service_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    description: Mapped[str] = mapped_column(String(1000), nullable=False)
+    job_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
+    service_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
     quantity: Mapped[Decimal] = mapped_column(
         Numeric(12, 2), nullable=False, server_default=text("1")
     )
     # Price of one unit; net = round(quantity x unit_amount). Negative for a discount line.
     unit_amount: Mapped[int] = mapped_column(BigInteger, nullable=False)
     net_amount: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    vat_rate_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    vat_rate_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
     # Snapshot of the rate when the line was written: later rate changes never alter it.
     vat_rate_bp: Mapped[int] = mapped_column(Integer, nullable=False)
     vat_amount: Mapped[int] = mapped_column(BigInteger, nullable=False)
@@ -254,16 +254,16 @@ class WipWriteOff(Base, IdMixin, OrgScopedMixin, TimestampMixin):
             name="fk_wip_write_offs_organization_id_client_id_job_id_jobs",
         ),
         CheckConstraint("total_wip_value >= 0", name="total_wip_value"),
-        CheckConstraint("length(reason) BETWEEN 1 AND 500", name="reason_length"),
+        CheckConstraint("char_length(reason) BETWEEN 1 AND 500", name="reason_length"),
         Index("ix_wip_write_offs_organization_id_client_id", "organization_id", "client_id"),
     )
 
-    client_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    job_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    client_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
+    job_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
     written_off_on: Mapped[date] = mapped_column(Date, nullable=False)
-    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    reason: Mapped[str] = mapped_column(String(500), nullable=False)
     total_wip_value: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
+    created_by: Mapped[uuid.UUID | None] = mapped_column(Uuid36(), ForeignKey("users.id"))
 
 
 class WipAllocation(Base, IdMixin, OrgScopedMixin, TimestampMixin):
@@ -309,7 +309,9 @@ class WipAllocation(Base, IdMixin, OrgScopedMixin, TimestampMixin):
             name="fk_wip_allocations_write_off",
         ),
         CheckConstraint(
-            "num_nonnulls(time_entry_id, disbursement_id, expense_id) = 1", name="one_item"
+            "(time_entry_id IS NOT NULL) + (disbursement_id IS NOT NULL) "
+            "+ (expense_id IS NOT NULL) = 1",
+            name="one_item",
         ),
         CheckConstraint(
             "(invoice_line_id IS NULL) <> (write_off_id IS NULL)", name="one_destination"
@@ -321,37 +323,40 @@ class WipAllocation(Base, IdMixin, OrgScopedMixin, TimestampMixin):
         CheckConstraint("write_off_id IS NULL OR billed_value = 0", name="write_off_bills_zero"),
         Index(
             "uq_wip_allocations_time_entry_live",
-            "time_entry_id",
+            text(
+                "(CASE WHEN time_entry_id IS NOT NULL AND reversed_at IS NULL THEN `time_entry_id` END)"
+            ),
             unique=True,
-            postgresql_where=text("time_entry_id IS NOT NULL AND reversed_at IS NULL"),
         ),
         Index(
             "uq_wip_allocations_disbursement_live",
-            "disbursement_id",
+            text(
+                "(CASE WHEN disbursement_id IS NOT NULL AND reversed_at IS NULL THEN `disbursement_id` END)"
+            ),
             unique=True,
-            postgresql_where=text("disbursement_id IS NOT NULL AND reversed_at IS NULL"),
         ),
         Index(
             "uq_wip_allocations_expense_live",
-            "expense_id",
+            text(
+                "(CASE WHEN expense_id IS NOT NULL AND reversed_at IS NULL THEN `expense_id` END)"
+            ),
             unique=True,
-            postgresql_where=text("expense_id IS NOT NULL AND reversed_at IS NULL"),
         ),
         Index("ix_wip_allocations_invoice_id", "invoice_id"),
         Index("ix_wip_allocations_invoice_line_id", "invoice_line_id"),
         Index("ix_wip_allocations_write_off_id", "write_off_id"),
     )
 
-    time_entry_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
-    disbursement_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    time_entry_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
+    disbursement_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
     # An approved billable expense claim line (docs/modules/wip.md, "Contract for billing").
-    expense_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
-    invoice_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
-    invoice_line_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
-    write_off_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    expense_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
+    invoice_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
+    invoice_line_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
+    write_off_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
     wip_value: Mapped[int] = mapped_column(BigInteger, nullable=False)
     billed_value: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    reversed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    reversed_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     # The day the item was assigned to an advance line (APT69): it left WIP then, not on the
     # invoice's issue date. Null for every other allocation.
     assigned_on: Mapped[date | None] = mapped_column(Date)
@@ -371,20 +376,20 @@ class CreditNote(Base, IdMixin, OrgScopedMixin, TimestampMixin):
         ),
         CheckConstraint("gross_total = net_total + vat_total", name="gross_total"),
         CheckConstraint("gross_total > 0", name="gross_positive"),
-        CheckConstraint("length(reason) BETWEEN 1 AND 500", name="reason_length"),
+        CheckConstraint("char_length(reason) BETWEEN 1 AND 500", name="reason_length"),
         Index("uq_credit_notes_organization_id_number", "organization_id", "number", unique=True),
         Index("ix_credit_notes_organization_id_invoice_id", "organization_id", "invoice_id"),
     )
 
-    client_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    invoice_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    number: Mapped[str] = mapped_column(Text, nullable=False)
+    client_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
+    invoice_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
+    number: Mapped[str] = mapped_column(String(255), nullable=False)
     issue_date: Mapped[date] = mapped_column(Date, nullable=False)
-    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    reason: Mapped[str] = mapped_column(String(500), nullable=False)
     net_total: Mapped[int] = mapped_column(BigInteger, nullable=False)
     vat_total: Mapped[int] = mapped_column(BigInteger, nullable=False)
     gross_total: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
+    created_by: Mapped[uuid.UUID | None] = mapped_column(Uuid36(), ForeignKey("users.id"))
 
 
 class CreditNoteLine(Base, IdMixin, OrgScopedMixin, TimestampMixin):
@@ -400,15 +405,15 @@ class CreditNoteLine(Base, IdMixin, OrgScopedMixin, TimestampMixin):
         CheckConstraint("net_amount > 0", name="net_amount"),
         CheckConstraint("vat_rate_bp BETWEEN 0 AND 10000", name="vat_rate_bp"),
         CheckConstraint("vat_amount >= 0", name="vat_amount"),
-        CheckConstraint("length(description) BETWEEN 1 AND 1000", name="description_length"),
+        CheckConstraint("char_length(description) BETWEEN 1 AND 1000", name="description_length"),
         Index("ix_credit_note_lines_credit_note_id", "credit_note_id"),
     )
 
-    credit_note_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    credit_note_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
     position: Mapped[int] = mapped_column(SmallInteger, nullable=False)
-    description: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[str] = mapped_column(String(1000), nullable=False)
     net_amount: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    vat_rate_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    vat_rate_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
     vat_rate_bp: Mapped[int] = mapped_column(Integer, nullable=False)
     vat_amount: Mapped[int] = mapped_column(BigInteger, nullable=False)
 
@@ -441,7 +446,7 @@ class Payment(Base, IdMixin, OrgScopedMixin, TimestampMixin):
         CheckConstraint("reversed_at IS NULL OR voided_at IS NOT NULL", name="reversed_is_void"),
         CheckConstraint("NOT bounced OR reversed_at IS NOT NULL", name="bounced_is_reversed"),
         CheckConstraint(
-            "reversal_reason IS NULL OR length(reversal_reason) BETWEEN 1 AND 500",
+            "reversal_reason IS NULL OR char_length(reversal_reason) BETWEEN 1 AND 500",
             name="reversal_reason_length",
         ),
         Index(
@@ -452,24 +457,22 @@ class Payment(Base, IdMixin, OrgScopedMixin, TimestampMixin):
         ),
     )
 
-    client_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    client_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
     received_on: Mapped[date] = mapped_column(Date, nullable=False)
     amount: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    method: Mapped[str] = mapped_column(Text, nullable=False, server_default="bank_transfer")
+    method: Mapped[str] = mapped_column(String(32), nullable=False, server_default="bank_transfer")
     reference: Mapped[str | None] = mapped_column(Text)
     notes: Mapped[str | None] = mapped_column(Text)
     allocated_total: Mapped[int] = mapped_column(
         BigInteger, nullable=False, server_default=text("0")
     )
-    voided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    reversed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    reversed_by: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id")
-    )
-    reversal_reason: Mapped[str | None] = mapped_column(Text)
+    voided_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    reversed_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    reversed_by: Mapped[uuid.UUID | None] = mapped_column(Uuid36(), ForeignKey("users.id"))
+    reversal_reason: Mapped[str | None] = mapped_column(String(500))
     # True when the money never arrived (a bounced cheque or a returned direct debit).
     bounced: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
-    created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
+    created_by: Mapped[uuid.UUID | None] = mapped_column(Uuid36(), ForeignKey("users.id"))
 
     @property
     def unallocated(self) -> int:
@@ -498,9 +501,9 @@ class PaymentAllocation(Base, IdMixin, OrgScopedMixin, TimestampMixin):
         Index("ix_payment_allocations_invoice_id", "invoice_id"),
     )
 
-    client_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    payment_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    invoice_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    client_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
+    payment_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
+    invoice_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
     amount: Mapped[int] = mapped_column(BigInteger, nullable=False)
 
 

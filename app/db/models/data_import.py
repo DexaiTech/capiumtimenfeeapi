@@ -12,20 +12,21 @@ from datetime import datetime
 from typing import Any, Literal
 
 from sqlalchemy import (
+    JSON,
     CheckConstraint,
-    DateTime,
     ForeignKey,
     ForeignKeyConstraint,
     Index,
     Integer,
+    String,
     Text,
     UniqueConstraint,
     text,
 )
-from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, IdMixin, OrgScopedMixin, TimestampMixin
+from app.db.types import JSON_EMPTY_ARRAY, JSON_EMPTY_OBJECT, UTCDateTime, Uuid36
 
 ImportEntity = Literal["staff", "rates", "jobs"]
 ImportFormat = Literal["csv", "xlsx"]
@@ -43,7 +44,7 @@ class DataImportBatch(Base, IdMixin, OrgScopedMixin, TimestampMixin):
         CheckConstraint("entity IN ('staff', 'rates', 'jobs')", name="entity"),
         CheckConstraint("file_format IN ('csv', 'xlsx')", name="file_format"),
         CheckConstraint("status IN ('validated', 'committed', 'failed')", name="status"),
-        CheckConstraint("length(filename) BETWEEN 1 AND 255", name="filename_length"),
+        CheckConstraint("char_length(filename) BETWEEN 1 AND 255", name="filename_length"),
         CheckConstraint(
             "total_rows >= 0 AND valid_rows >= 0 AND warning_rows >= 0 AND rejected_rows >= 0 "
             "AND created_rows >= 0 AND updated_rows >= 0 AND unchanged_rows >= 0",
@@ -58,22 +59,22 @@ class DataImportBatch(Base, IdMixin, OrgScopedMixin, TimestampMixin):
         ),
     )
 
-    entity: Mapped[ImportEntity] = mapped_column(Text, nullable=False)
-    filename: Mapped[str] = mapped_column(Text, nullable=False)
-    file_format: Mapped[ImportFormat] = mapped_column(Text, nullable=False)
-    status: Mapped[BatchStatus] = mapped_column(Text, nullable=False)
+    entity: Mapped[ImportEntity] = mapped_column(String(32), nullable=False)
+    filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    file_format: Mapped[ImportFormat] = mapped_column(String(32), nullable=False)
+    status: Mapped[BatchStatus] = mapped_column(String(32), nullable=False)
     # What the person chose when uploading (rates: ``close_previous``).
     options: Mapped[dict[str, Any]] = mapped_column(
-        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+        JSON, nullable=False, server_default=JSON_EMPTY_OBJECT
     )
     # Unmatched client codes and staff references the person pointed at existing records:
     # ``{"clients": {"acme1": "<client id>"}, "staff": {"jo@old.example": "<user id>"}}``.
     mapping: Mapped[dict[str, Any]] = mapped_column(
-        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+        JSON, nullable=False, server_default=JSON_EMPTY_OBJECT
     )
     # The file's header cells: ``{"recognised": [...], "ignored": [...]}``.
     columns: Mapped[dict[str, Any]] = mapped_column(
-        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+        JSON, nullable=False, server_default=JSON_EMPTY_OBJECT
     )
     total_rows: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
     valid_rows: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
@@ -86,12 +87,12 @@ class DataImportBatch(Base, IdMixin, OrgScopedMixin, TimestampMixin):
     # Why a commit failed (the batch is then ``failed`` and nothing was written).
     error_message: Mapped[str | None] = mapped_column(Text)
     created_by: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
+        Uuid36(), ForeignKey("users.id", ondelete="SET NULL")
     )
     committed_by: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
+        Uuid36(), ForeignKey("users.id", ondelete="SET NULL")
     )
-    committed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    committed_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
 
 
 class DataImportRow(Base, IdMixin, OrgScopedMixin):
@@ -106,7 +107,7 @@ class DataImportRow(Base, IdMixin, OrgScopedMixin):
             ondelete="CASCADE",
         ),
         UniqueConstraint("batch_id", "row_number", name="uq_data_import_rows_batch_id_row_number"),
-        CheckConstraint("row_number >= 1", name="row_number"),
+        CheckConstraint("`row_number` >= 1", name="row_number"),
         CheckConstraint("state IN ('valid', 'warning', 'rejected')", name="state"),
         CheckConstraint(
             "action IS NULL OR action IN ('create', 'update', 'unchanged')", name="action"
@@ -114,20 +115,20 @@ class DataImportRow(Base, IdMixin, OrgScopedMixin):
         CheckConstraint("state = 'rejected' OR action IS NOT NULL", name="importable_has_action"),
     )
 
-    batch_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    batch_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
     row_number: Mapped[int] = mapped_column(Integer, nullable=False)
     # The cells as the file had them, by column key.
-    raw: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
-    state: Mapped[RowState] = mapped_column(Text, nullable=False)
+    raw: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    state: Mapped[RowState] = mapped_column(String(32), nullable=False)
     # What importing the row does; null for a rejected row.
-    action: Mapped[RowAction | None] = mapped_column(Text)
+    action: Mapped[RowAction | None] = mapped_column(String(32))
     # The request body the staff, rate-rule or job service receives; null for a rejected row.
-    payload: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    payload: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     # The record an update changes, or (after a commit) the record the row created or updated.
-    target_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    target_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
     # ``[{severity, field, code, message, value}]``; empty for a clean row.
     messages: Mapped[list[dict[str, Any]]] = mapped_column(
-        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+        JSON, nullable=False, server_default=JSON_EMPTY_ARRAY
     )
 
 

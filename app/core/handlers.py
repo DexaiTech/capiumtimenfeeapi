@@ -222,6 +222,10 @@ async def _database_error(_: Request, exc: Exception) -> JSONResponse:
         return error_response(422, "VALIDATION_ERROR", "Some fields are invalid.")
     if kind in ("deadlock", "lock_timeout"):
         return _unavailable()
+    if kind == "rejected":
+        # A trigger refused the change (append-only history): a bug, never the caller's input.
+        log.error("integrity_error", exc_info=exc)
+        return error_response(500, AppException.code, AppException.message)
     if isinstance(exc, PoolTimeoutError | OperationalError | InterfaceError):
         log.error("database_unavailable", exc_info=exc)
         return _unavailable()

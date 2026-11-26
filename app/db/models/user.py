@@ -1,17 +1,25 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Index, Text, func, text
-from sqlalchemy.dialects.postgresql import INET, UUID
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    ForeignKey,
+    Index,
+    String,
+    Text,
+    text,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, IdMixin, SoftDeleteMixin, TimestampMixin
+from app.db.types import NOW, UTCDateTime, Uuid36
 
 
 class User(Base, IdMixin, TimestampMixin, SoftDeleteMixin):
     __tablename__ = "users"
     __table_args__ = (
-        CheckConstraint("length(full_name) BETWEEN 1 AND 120", name="full_name_length"),
+        CheckConstraint("char_length(full_name) BETWEEN 1 AND 120", name="full_name_length"),
         CheckConstraint(
             "(avatar_storage_key IS NULL) = (avatar_content_type IS NULL) "
             "AND (avatar_storage_key IS NULL) = (avatar_updated_at IS NULL)",
@@ -19,17 +27,18 @@ class User(Base, IdMixin, TimestampMixin, SoftDeleteMixin):
         ),
         Index(
             "uq_users_email_lower",
-            text("lower(email)"),
+            text("(CASE WHEN deleted_at IS NULL THEN lower(email) END)"),
             unique=True,
-            postgresql_where=text("deleted_at IS NULL"),
         ),
     )
 
-    email: Mapped[str] = mapped_column(Text, nullable=False)
+    email: Mapped[str] = mapped_column(String(255), nullable=False)
     password_hash: Mapped[str] = mapped_column(Text, nullable=False)
-    full_name: Mapped[str] = mapped_column(Text, nullable=False)
-    timezone: Mapped[str] = mapped_column(Text, nullable=False, server_default="Europe/London")
-    email_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    full_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    timezone: Mapped[str] = mapped_column(
+        String(255), nullable=False, server_default="Europe/London"
+    )
+    email_verified_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
     is_superuser: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false")
@@ -40,14 +49,14 @@ class User(Base, IdMixin, TimestampMixin, SoftDeleteMixin):
         Boolean, nullable=False, server_default=text("false")
     )
     password_changed_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now()
+        UTCDateTime(), nullable=False, server_default=NOW
     )
-    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_login_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     # The profile picture: a key in the file store (namespaced by the user's id), its content type
     # and when it was set (also the cache-buster of the image). All three are set or all are null.
     avatar_storage_key: Mapped[str | None] = mapped_column(Text)
     avatar_content_type: Mapped[str | None] = mapped_column(Text)
-    avatar_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    avatar_updated_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
 
     @property
     def email_verified(self) -> bool:
@@ -62,20 +71,20 @@ class UserSession(Base, IdMixin, TimestampMixin):
             "('logout', 'password_change', 'reuse_detected', 'admin', 'user')",
             name="revoked_reason",
         ),
-        Index("ix_user_sessions_user_id", "user_id", postgresql_where=text("revoked_at IS NULL")),
+        Index("ix_user_sessions_user_id", "user_id"),
     )
 
     user_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+        Uuid36(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
-    ip_address: Mapped[str | None] = mapped_column(INET)
+    ip_address: Mapped[str | None] = mapped_column(String(45))
     user_agent: Mapped[str | None] = mapped_column(Text)
     last_used_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now()
+        UTCDateTime(), nullable=False, server_default=NOW
     )
-    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    revoked_reason: Mapped[str | None] = mapped_column(Text)
+    expires_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    revoked_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    revoked_reason: Mapped[str | None] = mapped_column(String(32))
 
 
 class RefreshToken(Base, IdMixin, TimestampMixin):
@@ -86,21 +95,21 @@ class RefreshToken(Base, IdMixin, TimestampMixin):
     )
 
     session_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("user_sessions.id", ondelete="CASCADE"), nullable=False
+        Uuid36(), ForeignKey("user_sessions.id", ondelete="CASCADE"), nullable=False
     )
-    token_hash: Mapped[str] = mapped_column(Text, nullable=False)
-    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    token_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     replaced_by_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("refresh_tokens.id", ondelete="SET NULL")
+        Uuid36(), ForeignKey("refresh_tokens.id", ondelete="SET NULL")
     )
 
 
 class _OneTimeTokenMixin:
-    token_hash: Mapped[str] = mapped_column(Text, nullable=False)
-    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    requested_ip: Mapped[str | None] = mapped_column(INET)
+    token_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    requested_ip: Mapped[str | None] = mapped_column(String(45))
 
 
 class EmailVerificationToken(Base, IdMixin, TimestampMixin, _OneTimeTokenMixin):
@@ -111,7 +120,7 @@ class EmailVerificationToken(Base, IdMixin, TimestampMixin, _OneTimeTokenMixin):
     )
 
     user_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+        Uuid36(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
 
 
@@ -123,5 +132,5 @@ class PasswordResetToken(Base, IdMixin, TimestampMixin, _OneTimeTokenMixin):
     )
 
     user_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+        Uuid36(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )

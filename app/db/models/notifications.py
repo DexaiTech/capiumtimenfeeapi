@@ -15,23 +15,23 @@ from datetime import datetime
 from typing import Any
 
 from sqlalchemy import (
+    JSON,
     Boolean,
     CheckConstraint,
-    DateTime,
     ForeignKey,
     ForeignKeyConstraint,
     Index,
+    String,
     Text,
     UniqueConstraint,
-    func,
     text,
 )
-from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, IdMixin, OrgScopedMixin, TimestampMixin
+from app.db.types import JSON_EMPTY_OBJECT, NOW, UTCDateTime, Uuid36
 
-_TYPE_FORMAT = "type ~ '^[a-z][a-z0-9_]{1,49}$'"
+_TYPE_FORMAT = "REGEXP_LIKE(type, '^[a-z][a-z0-9_]{1,49}$', 'c')"
 
 MESSAGE_CHANNELS = ("email", "sms")
 MESSAGE_STATUSES = ("sent", "failed")
@@ -53,20 +53,24 @@ class Notification(Base, IdMixin, OrgScopedMixin, TimestampMixin):
         UniqueConstraint("organization_id", "id", name="uq_notifications_organization_id_id"),
         _recipient_fk("fk_notifications_organization_id_user_id_organization_members"),
         CheckConstraint(_TYPE_FORMAT, name="type_format"),
-        CheckConstraint("length(title) BETWEEN 1 AND 200", name="title_length"),
-        CheckConstraint("length(body) <= 2000", name="body_length"),
+        CheckConstraint("char_length(title) BETWEEN 1 AND 200", name="title_length"),
+        CheckConstraint("char_length(body) <= 2000", name="body_length"),
         # A path inside the app, never an address that leaves it.
         CheckConstraint(
-            "link IS NULL OR (length(link) <= 300 AND link ~ '^/($|[^/])' "
-            "AND link !~ '[[:space:][:cntrl:]]' AND strpos(link, chr(92)) = 0)",
+            "link IS NULL OR (char_length(link) <= 300 AND REGEXP_LIKE(link, '^/($|[^/])', 'c') "
+            "AND NOT REGEXP_LIKE(link, '[[:space:][:cntrl:]]', 'c') "
+            # No backslash: CHAR(92 USING utf8mb4), so no escaping is involved.
+            "AND INSTR(link, CHAR(92 USING utf8mb4)) = 0)",
             name="link_relative",
         ),
         CheckConstraint("(entity_type IS NULL) = (entity_id IS NULL)", name="entity_pair"),
         CheckConstraint(
-            "entity_type IS NULL OR length(entity_type) BETWEEN 1 AND 50", name="entity_type_length"
+            "entity_type IS NULL OR char_length(entity_type) BETWEEN 1 AND 50",
+            name="entity_type_length",
         ),
         CheckConstraint(
-            "dedupe_key IS NULL OR length(dedupe_key) BETWEEN 1 AND 200", name="dedupe_key_length"
+            "dedupe_key IS NULL OR char_length(dedupe_key) BETWEEN 1 AND 200",
+            name="dedupe_key_length",
         ),
         Index(
             "ix_notifications_organization_id_user_id_created_at",
@@ -78,30 +82,28 @@ class Notification(Base, IdMixin, OrgScopedMixin, TimestampMixin):
             "ix_notifications_unread",
             "organization_id",
             "user_id",
-            postgresql_where=text("read_at IS NULL"),
         ),
         Index(
             "uq_notifications_organization_id_user_id_dedupe_key",
-            "organization_id",
-            "user_id",
-            "dedupe_key",
+            text("(CASE WHEN dedupe_key IS NOT NULL THEN `organization_id` END)"),
+            text("(CASE WHEN dedupe_key IS NOT NULL THEN `user_id` END)"),
+            text("(CASE WHEN dedupe_key IS NOT NULL THEN `dedupe_key` END)"),
             unique=True,
-            postgresql_where=text("dedupe_key IS NOT NULL"),
         ),
     )
 
-    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    type: Mapped[str] = mapped_column(Text, nullable=False)
-    title: Mapped[str] = mapped_column(Text, nullable=False)
-    body: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
-    link: Mapped[str | None] = mapped_column(Text)
-    entity_type: Mapped[str | None] = mapped_column(Text)
-    entity_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
+    type: Mapped[str] = mapped_column(String(49), nullable=False)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("('')"))
+    link: Mapped[str | None] = mapped_column(String(300))
+    entity_type: Mapped[str | None] = mapped_column(String(50))
+    entity_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
     payload: Mapped[dict[str, Any]] = mapped_column(
-        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+        JSON, nullable=False, server_default=JSON_EMPTY_OBJECT
     )
-    dedupe_key: Mapped[str | None] = mapped_column(Text)
-    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    dedupe_key: Mapped[str | None] = mapped_column(String(200))
+    read_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
 
 
 class NotificationPreference(Base, IdMixin, OrgScopedMixin, TimestampMixin):
@@ -119,8 +121,8 @@ class NotificationPreference(Base, IdMixin, OrgScopedMixin, TimestampMixin):
         CheckConstraint(_TYPE_FORMAT, name="type_format"),
     )
 
-    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    type: Mapped[str] = mapped_column(Text, nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
+    type: Mapped[str] = mapped_column(String(49), nullable=False)
     in_app: Mapped[bool] = mapped_column(Boolean, nullable=False)
     email: Mapped[bool] = mapped_column(Boolean, nullable=False)
     sms: Mapped[bool] = mapped_column(Boolean, nullable=False)
@@ -137,7 +139,7 @@ class NotificationSetting(Base, IdMixin, OrgScopedMixin, TimestampMixin):
         CheckConstraint(_TYPE_FORMAT, name="type_format"),
     )
 
-    type: Mapped[str] = mapped_column(Text, nullable=False)
+    type: Mapped[str] = mapped_column(String(49), nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
     default_in_app: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("true")
@@ -146,7 +148,7 @@ class NotificationSetting(Base, IdMixin, OrgScopedMixin, TimestampMixin):
         Boolean, nullable=False, server_default=text("true")
     )
     default_sms: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
-    updated_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
+    updated_by: Mapped[uuid.UUID | None] = mapped_column(Uuid36(), ForeignKey("users.id"))
 
 
 class EmailTemplate(Base, IdMixin, OrgScopedMixin, TimestampMixin):
@@ -159,19 +161,22 @@ class EmailTemplate(Base, IdMixin, OrgScopedMixin, TimestampMixin):
             "template_key",
             name="uq_email_templates_organization_id_template_key",
         ),
-        CheckConstraint("template_key ~ '^[a-z][a-z0-9_]{1,49}$'", name="key_format"),
         CheckConstraint(
-            "length(subject) BETWEEN 1 AND 200 AND subject !~ '[[:cntrl:]]'", name="subject_valid"
+            "REGEXP_LIKE(template_key, '^[a-z][a-z0-9_]{1,49}$', 'c')", name="key_format"
         ),
-        CheckConstraint("length(html_body) BETWEEN 1 AND 100000", name="html_body_length"),
-        CheckConstraint("length(text_body) BETWEEN 1 AND 50000", name="text_body_length"),
+        CheckConstraint(
+            "char_length(subject) BETWEEN 1 AND 200 AND NOT REGEXP_LIKE(subject, '[[:cntrl:]]', 'c')",
+            name="subject_valid",
+        ),
+        CheckConstraint("char_length(html_body) BETWEEN 1 AND 100000", name="html_body_length"),
+        CheckConstraint("char_length(text_body) BETWEEN 1 AND 50000", name="text_body_length"),
     )
 
-    template_key: Mapped[str] = mapped_column(Text, nullable=False)
-    subject: Mapped[str] = mapped_column(Text, nullable=False)
+    template_key: Mapped[str] = mapped_column(String(49), nullable=False)
+    subject: Mapped[str] = mapped_column(String(200), nullable=False)
     html_body: Mapped[str] = mapped_column(Text, nullable=False)
     text_body: Mapped[str] = mapped_column(Text, nullable=False)
-    updated_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
+    updated_by: Mapped[uuid.UUID | None] = mapped_column(Uuid36(), ForeignKey("users.id"))
 
 
 class MessageLog(Base, IdMixin):
@@ -189,19 +194,17 @@ class MessageLog(Base, IdMixin):
         Index("ix_message_log_created_at", "created_at"),
     )
 
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False, server_default=NOW)
     organization_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE")
+        Uuid36(), ForeignKey("organizations.id", ondelete="CASCADE")
     )
-    user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
-    channel: Mapped[str] = mapped_column(Text, nullable=False)
+    user_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
+    channel: Mapped[str] = mapped_column(String(32), nullable=False)
     recipient: Mapped[str] = mapped_column(Text, nullable=False)
     subject: Mapped[str | None] = mapped_column(Text)
     body: Mapped[str] = mapped_column(Text, nullable=False)
     html_body: Mapped[str | None] = mapped_column(Text)
     template_key: Mapped[str | None] = mapped_column(Text)
-    status: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
     provider_ref: Mapped[str | None] = mapped_column(Text)
     error: Mapped[str | None] = mapped_column(Text)

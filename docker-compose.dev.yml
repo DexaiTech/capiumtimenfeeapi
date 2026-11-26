@@ -1,26 +1,38 @@
 # Local development stack for Capium Time & Fees. Every secret here is for local use only.
 # Not for deployment: deploy the API from the Dockerfile (see docs/deployment.md).
 #
-#   docker compose -f docker-compose.dev.yml up -d postgres mailpit       # database and mail catcher
+#   docker compose -f docker-compose.dev.yml up -d mysql azurite mailpit  # database, blob emulator, mail
 #   docker compose -f docker-compose.dev.yml --profile app up --build     # plus migrations, API, worker
 #
-# Postgres: localhost:5433, database "capium" (and "capium_test" for the test suite).
+# MySQL 8.4: localhost:3307, database "capium" (and "capium_test" for the test suite).
+# Azurite (Azure Blob Storage emulator): localhost:10000, used by the app profile for uploads.
 # Mailpit inbox: http://localhost:8025. API: http://localhost:8000/docs.
 services:
-  postgres:
-    image: postgres:18
+  mysql:
+    image: mysql:8.4
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_as_cs
+      - --transaction-isolation=READ-COMMITTED
+      - --log-bin-trust-function-creators=ON
     environment:
-      POSTGRES_USER: capium
-      POSTGRES_PASSWORD: capium
-      POSTGRES_DB: capium
-    ports: ["5433:5432"]
+      MYSQL_ROOT_PASSWORD: capium-root
+      MYSQL_USER: capium
+      MYSQL_PASSWORD: capium
+      MYSQL_DATABASE: capium
+    ports: ["3307:3306"]
     volumes:
-      - pgdata:/var/lib/postgresql
+      - mysqldata:/var/lib/mysql
       - ./docker/init-test-db.sql:/docker-entrypoint-initdb.d/init-test-db.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U capium -d capium"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-ucapium", "-pcapium"]
       interval: 5s
-      retries: 10
+      retries: 20
+
+  azurite:
+    image: mcr.microsoft.com/azure-storage/azurite:latest # development-only blob emulator
+    command: azurite-blob --blobHost 0.0.0.0 --skipApiVersionCheck
+    ports: ["10000:10000"]
 
   mailpit:
     image: axllent/mailpit:latest # development-only mail catcher
@@ -37,15 +49,19 @@ services:
         required: false
     environment: &container_env
       APP_ENV: development
-      DB_URL: postgresql://capium:capium@postgres:5432/capium
+      DB_URL: mysql://capium:capium@mysql:3306/capium
       JWT_SECRET_KEY: local-development-only-secret-0123456789abcdef
       FRONTEND_URL: http://localhost:5173
       BACKEND_URL: http://localhost:8000
       SMTP_HOST: mailpit
       SMTP_PORT: "1025"
       SMTP_FROM_ADDRESS: no-reply@capium.local
+      # Azurite's well-known development account (public, documented by Microsoft).
+      AZURE_STORAGE_CONTAINER: uploads
+      AZURE_STORAGE_CONNECTION_STRING: "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azurite:10000/devstoreaccount1;"
     depends_on:
-      postgres: { condition: service_healthy }
+      mysql: { condition: service_healthy }
+      azurite: { condition: service_started }
     profiles: [app]
 
   api:
@@ -57,9 +73,6 @@ services:
         required: false
     environment: *container_env
     ports: ["8000:8000"]
-    # Uploaded files (ticket attachments); the image's STORAGE_DIR is /var/lib/capium/storage.
-    volumes:
-      - uploads:/var/lib/capium/storage
     healthcheck:
       test:
         - CMD
@@ -87,5 +100,4 @@ services:
     profiles: [app]
 
 volumes:
-  pgdata:
-  uploads:
+  mysqldata:

@@ -1,6 +1,6 @@
 """Test configuration.
 
-Runs against a disposable PostgreSQL whose database name contains the word ``test`` (for example
+Runs against a disposable MySQL 8.4 database whose name contains the word ``test`` (for example
 ``capium_test`` or ``capium_test_j``) and a local SMTP sink. The real ``.env`` is never read.
 """
 
@@ -26,7 +26,7 @@ def _free_port() -> int:
         return int(sock.getsockname()[1])
 
 
-TEST_DB_URL = os.environ.get("TEST_DB_URL", "postgresql://postgres@127.0.0.1:5432/capium_tf_test")
+TEST_DB_URL = os.environ.get("TEST_DB_URL", "mysql://capium:capium@127.0.0.1:3307/capium_test")
 if not re.search(r"(^|_)test(_|$)", TEST_DB_URL.rsplit("/", 1)[-1].split("?")[0]):
     raise RuntimeError("Refusing to run: the test database name must contain the word 'test'.")
 
@@ -63,7 +63,10 @@ from sqlalchemy import text  # noqa: E402
 from sqlalchemy.ext.asyncio import AsyncSession  # noqa: E402
 
 from app.core.config import get_settings  # noqa: E402
+from app.db import models  # noqa: E402, F401  (every table on Base.metadata)
+from app.db.base import Base  # noqa: E402
 from app.db.session import dispose_engine, get_sessionmaker  # noqa: E402
+from app.db.triggers import APPEND_ONLY  # noqa: E402
 from app.main import app  # noqa: E402
 from app.services.central_clients import (  # noqa: E402
     MockCentralClientGateway,
@@ -164,15 +167,61 @@ async def _clean(mailbox: Mailbox) -> AsyncIterator[None]:
     mailbox.clear()
     _empty_storage()
     async with get_sessionmaker()() as session:
-        await session.execute(
-            text(
-                # Every practice table cascades from organizations.
-                "TRUNCATE users, user_sessions, refresh_tokens, email_verification_tokens, "
-                "password_reset_tokens, background_jobs, rate_limit_counters, audit_logs, "
-                "organizations CASCADE"
-            )
-        )
+        await _empty_tables(session)
+
+
+# What a test may leave behind: these tables and every table that refers to one of them, as
+# PostgreSQL's TRUNCATE ... CASCADE emptied them. Reference data (``permissions``) stays.
+_ROOTS = {
+    "users",
+    "user_sessions",
+    "refresh_tokens",
+    "email_verification_tokens",
+    "password_reset_tokens",
+    "background_jobs",
+    "rate_limit_counters",
+    "audit_logs",
+    "organizations",
+}
+
+
+def _cascade(roots: set[str]) -> list[str]:
+    found = set(roots)
+    while True:
+        more = {
+            table.name
+            for table in Base.metadata.sorted_tables
+            if table.name not in found
+            and any(fk.column.table.name in found for fk in table.foreign_keys)
+        }
+        if not more:
+            return [t.name for t in Base.metadata.sorted_tables if t.name in found]
+        found |= more
+
+
+_TEST_TABLES = _cascade(_ROOTS)
+# Emptied with TRUNCATE: their triggers refuse DELETE (app/db/triggers.py).
+_APPEND_ONLY = set(APPEND_ONLY)
+_ANY_ROWS = " UNION ALL ".join(
+    f"SELECT '{name}' FROM `{name}` HAVING COUNT(*) > 0"  # noqa: S608
+    for name in _TEST_TABLES
+)
+
+
+async def _empty_tables(session: AsyncSession) -> None:
+    """Empty every table that has rows. Only those: MySQL has no TRUNCATE ... CASCADE, and
+    emptying the hundred tables one by one after every test would be slow."""
+    names = list((await session.execute(text(_ANY_ROWS))).scalars())
+    if not names:
+        return
+    await session.execute(text("SET FOREIGN_KEY_CHECKS = 0"))
+    try:
+        for name in names:
+            verb = "TRUNCATE TABLE" if name in _APPEND_ONLY else "DELETE FROM"
+            await session.execute(text(f"{verb} `{name}`"))
         await session.commit()
+    finally:
+        await session.execute(text("SET FOREIGN_KEY_CHECKS = 1"))
 
 
 @pytest.fixture

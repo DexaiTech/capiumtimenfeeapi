@@ -13,7 +13,15 @@ from dataclasses import dataclass
 from typing import Literal
 
 Kind = Literal[
-    "unique", "foreign_key", "check", "overlap", "too_long", "deadlock", "lock_timeout", "other"
+    "unique",
+    "foreign_key",
+    "check",
+    "overlap",
+    "rejected",
+    "too_long",
+    "deadlock",
+    "lock_timeout",
+    "other",
 ]
 
 _KINDS: dict[int, Kind] = {
@@ -65,7 +73,9 @@ def database_error(exc: BaseException) -> DatabaseError | None:
     number, message = found
     if number == _SIGNAL:
         name = message.strip()
-        return DatabaseError(number, "overlap" if name.startswith("ex_") else "other", name)
+        # ``ex_...``: an overlap trigger; anything else: a trigger that refuses the change
+        # outright (append-only history, app/db/triggers.py).
+        return DatabaseError(number, "overlap" if name.startswith("ex_") else "rejected", name)
     kind = _KINDS.get(number, "other")
     pattern = {"unique": _DUPLICATE_KEY, "check": _CHECK, "foreign_key": _FOREIGN_KEY}.get(kind)
     match = pattern.search(message) if pattern else None

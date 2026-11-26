@@ -17,21 +17,20 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     CheckConstraint,
-    DateTime,
     ForeignKeyConstraint,
     Index,
     Integer,
     PrimaryKeyConstraint,
     SmallInteger,
+    String,
     Text,
     UniqueConstraint,
-    func,
     text,
 )
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, IdMixin, OrgScopedMixin, TimestampMixin
+from app.db.types import NOW, UTCDateTime, Uuid36
 
 VAT_CODES = ("standard", "reduced", "zero", "exempt", "outside_scope")
 BILLING_BASES = ("hourly", "fixed")
@@ -46,28 +45,26 @@ class VatRate(Base, IdMixin, OrgScopedMixin, TimestampMixin):
             "code IN ('standard', 'reduced', 'zero', 'exempt', 'outside_scope')", name="code"
         ),
         CheckConstraint("rate_bp BETWEEN 0 AND 10000", name="rate_bp"),
-        CheckConstraint("length(name) BETWEEN 1 AND 40", name="name_length"),
+        CheckConstraint("char_length(name) BETWEEN 1 AND 40", name="name_length"),
         Index(
             "uq_vat_rates_organization_id_name_lower",
-            "organization_id",
-            text("lower(name)"),
+            text("(CASE WHEN archived_at IS NULL THEN `organization_id` END)"),
+            text("(CASE WHEN archived_at IS NULL THEN lower(name) END)"),
             unique=True,
-            postgresql_where=text("archived_at IS NULL"),
         ),
         # At most one default rate per practice.
         Index(
             "uq_vat_rates_organization_id_default",
-            "organization_id",
+            text("(CASE WHEN is_default AND archived_at IS NULL THEN `organization_id` END)"),
             unique=True,
-            postgresql_where=text("is_default AND archived_at IS NULL"),
         ),
     )
 
-    name: Mapped[str] = mapped_column(Text, nullable=False)
-    code: Mapped[str] = mapped_column(Text, nullable=False)
+    name: Mapped[str] = mapped_column(String(40), nullable=False)
+    code: Mapped[str] = mapped_column(String(32), nullable=False)
     rate_bp: Mapped[int] = mapped_column(Integer, nullable=False)
     is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
-    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    archived_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
 
 
 class Service(Base, IdMixin, OrgScopedMixin, TimestampMixin):
@@ -83,25 +80,25 @@ class Service(Base, IdMixin, OrgScopedMixin, TimestampMixin):
         ),
         CheckConstraint("billing_basis IN ('hourly', 'fixed')", name="billing_basis"),
         CheckConstraint("default_fee IS NULL OR default_fee >= 0", name="default_fee"),
-        CheckConstraint("length(name) BETWEEN 1 AND 120", name="name_length"),
-        CheckConstraint("code ~ '^[A-Z0-9_-]{1,12}$'", name="code_format"),
+        CheckConstraint("char_length(name) BETWEEN 1 AND 120", name="name_length"),
+        CheckConstraint("REGEXP_LIKE(code, '^[A-Z0-9_-]{1,12}$', 'c')", name="code_format"),
         CheckConstraint(
-            "invoice_description IS NULL OR length(invoice_description) BETWEEN 1 AND 500",
+            "invoice_description IS NULL OR char_length(invoice_description) BETWEEN 1 AND 500",
             name="invoice_description_length",
         ),
         Index("uq_services_organization_id_code", "organization_id", "code", unique=True),
         Index(
             "uq_services_organization_id_name_lower",
             "organization_id",
-            text("lower(name)"),
+            text("(lower(name))"),
             unique=True,
         ),
     )
 
-    code: Mapped[str] = mapped_column(Text, nullable=False)
-    name: Mapped[str] = mapped_column(Text, nullable=False)
+    code: Mapped[str] = mapped_column(String(12), nullable=False)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
-    billing_basis: Mapped[str] = mapped_column(Text, nullable=False, server_default="hourly")
+    billing_basis: Mapped[str] = mapped_column(String(32), nullable=False, server_default="hourly")
     # Suggested fixed fee for new jobs of this service.
     default_fee: Mapped[int | None] = mapped_column(BigInteger)
     # Whether work on this service is billable by default: jobs created without a billing
@@ -109,9 +106,9 @@ class Service(Base, IdMixin, OrgScopedMixin, TimestampMixin):
     default_billable: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("true")
     )
-    vat_rate_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    vat_rate_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
     # Wording suggested for invoice lines of this service.
-    invoice_description: Mapped[str | None] = mapped_column(Text)
+    invoice_description: Mapped[str | None] = mapped_column(String(500))
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
 
@@ -128,29 +125,29 @@ class ActivityCode(Base, IdMixin, OrgScopedMixin, TimestampMixin):
             ["vat_rates.organization_id", "vat_rates.id"],
             name="fk_activity_codes_organization_id_vat_rate_id_vat_rates",
         ),
-        CheckConstraint("code ~ '^[A-Z0-9_-]{1,12}$'", name="code_format"),
-        CheckConstraint("length(name) BETWEEN 1 AND 120", name="name_length"),
+        CheckConstraint("REGEXP_LIKE(code, '^[A-Z0-9_-]{1,12}$', 'c')", name="code_format"),
+        CheckConstraint("char_length(name) BETWEEN 1 AND 120", name="name_length"),
         CheckConstraint(
-            "invoice_description IS NULL OR length(invoice_description) BETWEEN 1 AND 500",
+            "invoice_description IS NULL OR char_length(invoice_description) BETWEEN 1 AND 500",
             name="invoice_description_length",
         ),
         Index("uq_activity_codes_organization_id_code", "organization_id", "code", unique=True),
         Index(
             "uq_activity_codes_organization_id_name_lower",
             "organization_id",
-            text("lower(name)"),
+            text("(lower(name))"),
             unique=True,
         ),
     )
 
-    code: Mapped[str] = mapped_column(Text, nullable=False)
-    name: Mapped[str] = mapped_column(Text, nullable=False)
+    code: Mapped[str] = mapped_column(String(12), nullable=False)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
     # The default billable status of time recorded against the code.
     is_chargeable: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("true")
     )
-    vat_rate_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
-    invoice_description: Mapped[str | None] = mapped_column(Text)
+    vat_rate_id: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
+    invoice_description: Mapped[str | None] = mapped_column(String(500))
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
 
 
@@ -168,9 +165,9 @@ class ServiceTaskTemplate(Base, IdMixin, OrgScopedMixin, TimestampMixin):
             name="fk_service_task_templates_service_id_services",
             ondelete="CASCADE",
         ),
-        CheckConstraint("length(title) BETWEEN 1 AND 200", name="title_length"),
+        CheckConstraint("char_length(title) BETWEEN 1 AND 200", name="title_length"),
         CheckConstraint(
-            "description IS NULL OR length(description) <= 2000", name="description_length"
+            "description IS NULL OR char_length(description) <= 2000", name="description_length"
         ),
         CheckConstraint("budget_minutes IS NULL OR budget_minutes >= 0", name="budget_minutes"),
         CheckConstraint(
@@ -185,8 +182,8 @@ class ServiceTaskTemplate(Base, IdMixin, OrgScopedMixin, TimestampMixin):
         ),
     )
 
-    service_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    title: Mapped[str] = mapped_column(Text, nullable=False)
+    service_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
     budget_minutes: Mapped[int | None] = mapped_column(Integer)
     due_offset_days: Mapped[int | None] = mapped_column(Integer)
@@ -218,11 +215,9 @@ class ServiceActivityCode(Base, OrgScopedMixin):
         ),
     )
 
-    service_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    activity_code_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=text("now()")
-    )
+    service_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
+    activity_code_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False, server_default=NOW)
 
 
 class Grade(Base, IdMixin, OrgScopedMixin, TimestampMixin):
@@ -235,10 +230,10 @@ class Grade(Base, IdMixin, OrgScopedMixin, TimestampMixin):
     __tablename__ = "grades"
     __table_args__ = (
         UniqueConstraint("organization_id", "id", name="uq_grades_organization_id_id"),
-        CheckConstraint("length(name) BETWEEN 1 AND 80", name="name_length"),
-        CheckConstraint("code ~ '^[A-Z0-9_-]{1,12}$'", name="code_format"),
+        CheckConstraint("char_length(name) BETWEEN 1 AND 80", name="name_length"),
+        CheckConstraint("REGEXP_LIKE(code, '^[A-Z0-9_-]{1,12}$', 'c')", name="code_format"),
         CheckConstraint(
-            "description IS NULL OR length(description) BETWEEN 1 AND 500",
+            "description IS NULL OR char_length(description) BETWEEN 1 AND 500",
             name="description_length",
         ),
         CheckConstraint(
@@ -256,14 +251,14 @@ class Grade(Base, IdMixin, OrgScopedMixin, TimestampMixin):
         Index(
             "uq_grades_organization_id_name_lower",
             "organization_id",
-            text("lower(name)"),
+            text("(lower(name))"),
             unique=True,
         ),
     )
 
-    code: Mapped[str] = mapped_column(Text, nullable=False)
-    name: Mapped[str] = mapped_column(Text, nullable=False)
-    description: Mapped[str | None] = mapped_column(Text)
+    code: Mapped[str] = mapped_column(String(12), nullable=False)
+    name: Mapped[str] = mapped_column(String(80), nullable=False)
+    description: Mapped[str | None] = mapped_column(String(500))
     # Pence per hour; null = the grade sets no rate of that kind.
     default_cost_rate: Mapped[int | None] = mapped_column(BigInteger)
     default_charge_rate: Mapped[int | None] = mapped_column(BigInteger)
@@ -286,14 +281,14 @@ class DocumentSequence(Base, OrgScopedMixin, TimestampMixin):
         ),
         CheckConstraint("next_number >= 1", name="next_number"),
         CheckConstraint("padding BETWEEN 1 AND 10", name="padding"),
-        CheckConstraint("prefix ~ '^[A-Za-z0-9/_-]{0,12}$'", name="prefix_format"),
-        CheckConstraint("suffix ~ '^[A-Za-z0-9/_-]{0,12}$'", name="suffix_format"),
+        CheckConstraint("REGEXP_LIKE(prefix, '^[A-Za-z0-9/_-]{0,12}$', 'c')", name="prefix_format"),
+        CheckConstraint("REGEXP_LIKE(suffix, '^[A-Za-z0-9/_-]{0,12}$', 'c')", name="suffix_format"),
     )
 
-    kind: Mapped[str] = mapped_column(Text, nullable=False)
-    prefix: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    prefix: Mapped[str] = mapped_column(String(12), nullable=False, server_default="")
     # Printed after the number of an invoice, credit note or estimate; empty elsewhere.
-    suffix: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
+    suffix: Mapped[str] = mapped_column(String(12), nullable=False, server_default="")
     next_number: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
     padding: Mapped[int] = mapped_column(SmallInteger, nullable=False, server_default=text("5"))
 
@@ -319,21 +314,21 @@ class Segment(Base, IdMixin, OrgScopedMixin, TimestampMixin):
     __tablename__ = "segments"
     __table_args__ = (
         UniqueConstraint("organization_id", "id", name="uq_segments_organization_id_id"),
-        CheckConstraint("length(name) BETWEEN 1 AND 40", name="name_length"),
+        CheckConstraint("char_length(name) BETWEEN 1 AND 40", name="name_length"),
         CheckConstraint(
-            "description IS NULL OR length(description) BETWEEN 1 AND 500",
+            "description IS NULL OR char_length(description) BETWEEN 1 AND 500",
             name="description_length",
         ),
         Index(
             "uq_segments_organization_id_name_lower",
             "organization_id",
-            text("lower(name)"),
+            text("(lower(name))"),
             unique=True,
         ),
     )
 
-    name: Mapped[str] = mapped_column(Text, nullable=False)
-    description: Mapped[str | None] = mapped_column(Text)
+    name: Mapped[str] = mapped_column(String(40), nullable=False)
+    description: Mapped[str | None] = mapped_column(String(500))
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
 
@@ -347,16 +342,16 @@ class Branch(Base, IdMixin, OrgScopedMixin, TimestampMixin):
     __tablename__ = "branches"
     __table_args__ = (
         UniqueConstraint("organization_id", "id", name="uq_branches_organization_id_id"),
-        CheckConstraint("length(name) BETWEEN 1 AND 40", name="name_length"),
+        CheckConstraint("char_length(name) BETWEEN 1 AND 40", name="name_length"),
         Index(
             "uq_branches_organization_id_name_lower",
             "organization_id",
-            text("lower(name)"),
+            text("(lower(name))"),
             unique=True,
         ),
     )
 
-    name: Mapped[str] = mapped_column(Text, nullable=False)
+    name: Mapped[str] = mapped_column(String(40), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
 
 
@@ -382,8 +377,6 @@ class StaffSegment(Base, IdMixin, OrgScopedMixin):
         Index("ix_staff_segments_organization_id_segment_id", "organization_id", "segment_id"),
     )
 
-    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    segment_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
-    )
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
+    segment_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), server_default=NOW, nullable=False)

@@ -20,17 +20,16 @@ from typing import Literal
 from sqlalchemy import (
     CheckConstraint,
     Date,
-    DateTime,
     ForeignKeyConstraint,
     Index,
+    String,
     Text,
     UniqueConstraint,
-    func,
 )
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, IdMixin, OrgScopedMixin, TimestampMixin
+from app.db.types import NOW, UTCDateTime, Uuid36
 
 EventType = Literal["locked", "reopened"]
 PeriodType = Literal["week", "month", "quarter", "year", "legacy"]
@@ -68,14 +67,12 @@ class LockedPeriod(Base, IdMixin, OrgScopedMixin):
         ),
     )
 
-    period_type: Mapped[PeriodType] = mapped_column(Text, nullable=False)
+    period_type: Mapped[PeriodType] = mapped_column(String(32), nullable=False)
     start_date: Mapped[date] = mapped_column(Date, nullable=False)
     end_date: Mapped[date] = mapped_column(Date, nullable=False)
     reason: Mapped[str | None] = mapped_column(Text)
-    locked_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
-    locked_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
-    )
+    locked_by: Mapped[uuid.UUID | None] = mapped_column(Uuid36())
+    locked_at: Mapped[datetime] = mapped_column(UTCDateTime(), server_default=NOW, nullable=False)
 
 
 class PeriodLockEvent(Base, IdMixin, OrgScopedMixin):
@@ -89,7 +86,7 @@ class PeriodLockEvent(Base, IdMixin, OrgScopedMixin):
             name="fk_period_lock_events_organization_id_actor_members",
         ),
         CheckConstraint("event_type IN ('locked', 'reopened')", name="event_type"),
-        CheckConstraint("reason IS NULL OR length(reason) BETWEEN 1 AND 500", name="reason"),
+        CheckConstraint("reason IS NULL OR char_length(reason) BETWEEN 1 AND 500", name="reason"),
         CheckConstraint("event_type <> 'reopened' OR reason IS NOT NULL", name="reopen_reason"),
         CheckConstraint(
             "period_type IS NULL OR (period_type IN ('week', 'month', 'quarter', 'year', 'legacy') "
@@ -104,21 +101,19 @@ class PeriodLockEvent(Base, IdMixin, OrgScopedMixin):
         ),
     )
 
-    event_type: Mapped[EventType] = mapped_column(Text, nullable=False)
+    event_type: Mapped[EventType] = mapped_column(String(32), nullable=False)
     # The period the event is about; null on the events written before periods existed.
-    period_type: Mapped[PeriodType | None] = mapped_column(Text)
+    period_type: Mapped[PeriodType | None] = mapped_column(String(32))
     period_start: Mapped[date | None] = mapped_column(Date)
     period_end: Mapped[date | None] = mapped_column(Date)
     # Events before periods existed: the single lock date before and after (null = none).
     previous_locked_through: Mapped[date | None] = mapped_column(Date)
     locked_through: Mapped[date | None] = mapped_column(Date)
-    reason: Mapped[str | None] = mapped_column(Text)
-    actor_user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    reason: Mapped[str | None] = mapped_column(String(500))
+    actor_user_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
     # clock_timestamp(), not now(): an event written after waiting for the lock must sort after
     # the event it waited for, although its transaction started earlier.
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.clock_timestamp(), nullable=False
-    )
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), server_default=NOW, nullable=False)
 
 
 __all__ = ["EventType", "LockedPeriod", "PeriodLock", "PeriodLockEvent", "PeriodType"]

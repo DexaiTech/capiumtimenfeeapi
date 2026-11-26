@@ -9,11 +9,19 @@ import uuid
 from datetime import date, datetime
 from typing import Any
 
-from sqlalchemy import CheckConstraint, Date, DateTime, Index, Text, UniqueConstraint, func
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy import (
+    JSON,
+    CheckConstraint,
+    Date,
+    Index,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, IdMixin, OrgScopedMixin
+from app.db.types import NOW, UTCDateTime, Uuid36
 
 REMINDER_KINDS = ("timesheet", "approval")
 
@@ -28,9 +36,9 @@ class TimeEntryHistory(Base, IdMixin, OrgScopedMixin):
     __tablename__ = "time_entry_history"
     __table_args__ = (
         UniqueConstraint("organization_id", "id", name="uq_time_entry_history_organization_id_id"),
-        CheckConstraint("length(btrim(reason)) BETWEEN 1 AND 2000", name="reason_length"),
+        CheckConstraint("char_length(trim(reason)) BETWEEN 1 AND 2000", name="reason_length"),
         CheckConstraint(
-            "jsonb_typeof(before) = 'object' AND jsonb_typeof(after) = 'object'",
+            "JSON_TYPE(`before`) = 'OBJECT' AND JSON_TYPE(`after`) = 'OBJECT'",
             name="snapshots_are_objects",
         ),
         Index(
@@ -41,18 +49,16 @@ class TimeEntryHistory(Base, IdMixin, OrgScopedMixin):
         ),
     )
 
-    time_entry_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    time_entry_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
     # The person whose time it is, and the person who corrected it.
-    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    corrected_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
+    corrected_by: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
     reason: Mapped[str] = mapped_column(Text, nullable=False)
-    before: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
-    after: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    before: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    after: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     # The moment of the insert (not of the transaction), so the order of corrections of an
     # entry is the order in which they took the entry's lock.
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.clock_timestamp()
-    )
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False, server_default=NOW)
 
 
 class TimesheetReminder(Base, IdMixin, OrgScopedMixin):
@@ -78,12 +84,10 @@ class TimesheetReminder(Base, IdMixin, OrgScopedMixin):
         ),
     )
 
-    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
     week_start: Mapped[date] = mapped_column(Date, nullable=False)
-    kind: Mapped[str] = mapped_column(Text, nullable=False)
-    reminded_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now()
-    )
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    reminded_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False, server_default=NOW)
 
 
 __all__ = ["REMINDER_KINDS", "TimeEntryHistory", "TimesheetReminder"]
