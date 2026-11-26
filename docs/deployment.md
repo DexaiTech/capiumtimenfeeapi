@@ -40,12 +40,18 @@ The API checks the `Origin` of the refresh and logout calls against `CORS_ORIGIN
 | `CENTRAL_CLIENT_GATEWAY` | `mock` | The central client service. `mock` (the default and so far the only gateway) is an in-memory catalogue of 25 UK clients inside the API process: fine for demonstrations, not a real integration (its state is per process and resets on restart; its `/central-clients/mock/...` endpoints answer 404 in production). See `docs/modules/central-clients.md` |
 | `FORWARDED_ALLOW_IPS` | `*` | Lets uvicorn read the client address from `X-Forwarded-For` behind the platform proxy (per-person rate limits) |
 | `STORAGE_DIR` | `/var/lib/capium/storage` | Where uploaded files (ticket attachments) are kept. The image already sets this path; override it only to keep the files elsewhere. See [Uploaded files](#uploaded-files) |
+| `AZURE_STORAGE_CONTAINER` | `uploads` | Keeps every uploaded file in this private Azure Blob container instead of `STORAGE_DIR`. Needs `AZURE_STORAGE_ACCOUNT_URL` (`https://<account>.blob.core.windows.net`, managed identity with *Storage Blob Data Contributor*) or `AZURE_STORAGE_CONNECTION_STRING`. See [Uploaded files](#uploaded-files) |
 
 All are runtime variables; none is needed at build time. The worker uses the same set.
 
 ## Uploaded files
 
-Ticket attachments (Application Testing) are written to the local directory `STORAGE_DIR`, one sub-directory per practice. The
+Uploaded files (ticket attachments, expense receipts, profile pictures) go to **Azure Blob Storage** when
+`AZURE_STORAGE_CONTAINER` is set: a private container, blobs named `<practice id>/<2 characters>/<key>`, encrypted at rest by
+Azure. Nothing needs mounting, any number of API containers can share it, and the account's own backup (soft delete, point-in-time
+restore) is the file backup. A missing container or a role assignment that has not propagated yet answers 503 `STORAGE_UNAVAILABLE`.
+
+Without it, files are written to the local directory `STORAGE_DIR`, one sub-directory per practice. The
 image declares `/var/lib/capium/storage` as a volume and owns it for its unprivileged user (uid 10001, `app`). On a platform:
 
 * **Mount persistent storage at `/var/lib/capium/storage`** on the API container (Coolify: *Persistent Storage*, a named volume or a

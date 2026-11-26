@@ -54,7 +54,7 @@ Browser ──HTTPS──► UI container (nginx, static build) ──/api/*─�
   test suite on every PR; the UI repo has no CI, so its checks are run locally.
 - **Integrations.** Capium Central (the central client service) sits behind a gateway interface
   with an in-memory mock today; messaging is SMTP or a mock that records messages; uploads go to
-  local storage or S3. See the API [`architecture.md`](https://github.com/DexaiTech/capiumtimenfeeapi/blob/main/docs/architecture.md).
+  local storage or Azure Blob Storage. See the API [`architecture.md`](https://github.com/DexaiTech/capiumtimenfeeapi/blob/main/docs/architecture.md).
 
 ## 3. Cross-cutting rules (both repos)
 

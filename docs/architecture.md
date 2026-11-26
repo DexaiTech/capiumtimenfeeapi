@@ -249,8 +249,9 @@ be added to `_UPLOADS`, or bodies over 1 MB are refused before the route runs.
 ## File storage
 
 `app/services/storage.py`: a `FileStorage` protocol with `LocalFileStorage`
-(`STORAGE_DIR/<practice id>/<2 chars>/<key>`, atomic writes) and `S3FileStorage` (chosen by
-`get_storage()` when `AWS_BUCKET_NAME` is set). Keys are random (`new_key`), never derived from
+(`STORAGE_DIR/<practice id>/<2 chars>/<key>`, atomic writes) and `AzureBlobFileStorage` (same
+layout in a private Azure Blob container, chosen by `get_storage()` when `AZURE_STORAGE_CONTAINER`
+is set; managed identity or connection string). Keys are random (`new_key`), never derived from
 file names, and every call names the practice. Used by ticket attachments, expense receipts,
 profile pictures and invoice template watermark images. Operations: [deployment.md](deployment.md#uploaded-files).
 

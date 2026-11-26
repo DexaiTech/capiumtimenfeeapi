@@ -41,7 +41,7 @@ recoverability and profitability.
 4. Deadlines from Companies House and HMRC (accounts, CT600, confirmation statement, VAT quarters) feeding jobs.
 5. Client portal: invoices, statements, payment links, document requests.
 6. Automated credit control: reminder sequences by days overdue, statement runs.
-7. Receipts and documents on disbursements (S3 storage behind the existing storage interface).
+7. Receipts and documents on disbursements (Azure Blob Storage behind the existing storage interface).
 8. Budgets and capacity planning, WIP forecasting; engagement-letter fees vs actuals.
 9. Multi-currency (schema already stores `currency` on invoices), multi-entity practices.
 10. Mobile-first timer (PWA), calendar import (Outlook/Google) to suggest time.

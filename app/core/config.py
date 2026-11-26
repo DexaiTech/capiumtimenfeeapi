@@ -108,13 +108,13 @@ class Settings(BaseSettings):
     # A relative path is resolved against the directory that holds ``app/``. Mount a volume here.
     storage_dir: str = ""
 
-    # Amazon S3 for uploaded files. With AWS_BUCKET_NAME set, every upload (ticket attachments,
-    # expense receipts, profile pictures) goes to that bucket instead of STORAGE_DIR. Leave the key
-    # pair empty to use the AWS default credential chain (an instance or task role).
-    aws_bucket_name: str = ""
-    aws_region: str = ""
-    aws_access_key_id: SecretStr = SecretStr("")
-    aws_secret_access_key: SecretStr = SecretStr("")
+    # Azure Blob Storage for uploaded files. With AZURE_STORAGE_CONTAINER set, every upload (ticket
+    # attachments, expense receipts, profile pictures) goes to that private container instead of
+    # STORAGE_DIR. Give AZURE_STORAGE_ACCOUNT_URL to sign in with the managed identity
+    # (DefaultAzureCredential), or AZURE_STORAGE_CONNECTION_STRING (local Azurite, account keys).
+    azure_storage_container: str = ""
+    azure_storage_account_url: str = ""
+    azure_storage_connection_string: SecretStr = SecretStr("")
 
     # Which implementation of the central client service the API talks to. ``mock`` is an
     # in-memory catalogue of UK companies (state is per process: for development and demos).
@@ -167,6 +167,19 @@ class Settings(BaseSettings):
     def _check_messaging(self) -> Self:
         if self.messaging_backend == "smtp" and not self.smtp_host:
             raise ValueError("MESSAGING_BACKEND=smtp needs SMTP_HOST")
+        return self
+
+    @model_validator(mode="after")
+    def _check_storage(self) -> Self:
+        has_credential = bool(
+            self.azure_storage_account_url.strip()
+            or self.azure_storage_connection_string.get_secret_value().strip()
+        )
+        if self.azure_storage_container.strip() and not has_credential:
+            raise ValueError(
+                "AZURE_STORAGE_CONTAINER needs AZURE_STORAGE_ACCOUNT_URL or "
+                "AZURE_STORAGE_CONNECTION_STRING"
+            )
         return self
 
     @model_validator(mode="after")
@@ -223,6 +236,10 @@ class Settings(BaseSettings):
             for key, value in parse_qsl(parts.query, keep_blank_values=True)
         ]
         return urlunsplit(("postgresql", parts.netloc, parts.path, urlencode(query), ""))
+
+    @property
+    def uses_blob_storage(self) -> bool:
+        return bool(self.azure_storage_container.strip())
 
     @property
     def storage_path(self) -> Path:
