@@ -25,13 +25,13 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.context import RequestContext
 from app.core.exceptions import AppException
 from app.db.models import Lead, Organization
-from app.db.session import unit_of_work
+from app.db.session import new_engine, unit_of_work
 from app.maintenance.bootstrap import BootstrapError, _ensure_schema_is_current
 from app.maintenance.reset_data import _describe_target
 from app.repositories.branches import BranchRepository
@@ -265,9 +265,10 @@ async def _main(args: argparse.Namespace) -> int:
     except SeedError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
-    url = get_settings().database_url
+    settings = get_settings()
+    url = settings.database_url
     print(f"Database: {_describe_target(url)}")
-    engine = create_async_engine(url)
+    engine = new_engine(url, settings)
     try:
         async with AsyncSession(engine, expire_on_commit=False) as session:
             result = await seed_leads(

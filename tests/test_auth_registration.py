@@ -122,7 +122,7 @@ async def test_expired_verification_token_is_rejected(client, worker, mailbox, d
     await run_jobs(worker)
     token = mailbox.token_for("ada@example.com")
     await db.execute(
-        text("UPDATE email_verification_tokens SET expires_at = now() - interval '1 minute'")
+        text("UPDATE email_verification_tokens SET expires_at = NOW(6) - INTERVAL 1 MINUTE")
     )
     await db.commit()
     response = await client.post("/api/v1/auth/verify-email", json={"token": token})

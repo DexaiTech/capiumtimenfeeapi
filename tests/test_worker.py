@@ -105,7 +105,7 @@ async def test_reaper_returns_expired_leases_to_the_queue(worker, db):
     await enqueue("purge_retention")
     await db.execute(
         text(
-            "UPDATE background_jobs SET status = 'running', attempts = 1, locked_by = 'crashed', locked_until = now() - interval '1 minute'"
+            "UPDATE background_jobs SET status = 'running', attempts = 1, locked_by = 'crashed', locked_until = NOW(6) - INTERVAL 1 MINUTE"
         )
     )
     await db.commit()
@@ -138,11 +138,18 @@ async def test_tick_enqueues_periodic_jobs_once(worker, db):
     await worker.tick()
     await worker.tick()
     count = await db.scalar(
-        text(
-            "SELECT count(*) FROM background_jobs WHERE type IN ('create_partitions', 'purge_retention')"
-        )
+        text("SELECT count(*) FROM background_jobs WHERE type = 'purge_retention'")
     )
-    assert count == 2
+    assert count == 1
+    # The audit log is no longer partitioned (MySQL): nothing keeps partitions ahead any more.
+    assert (
+        await db.scalar(
+            text("SELECT count(*) FROM background_jobs WHERE type = 'create_partitions'")
+        )
+        == 0
+    )
+    assert "create_partitions" not in handlers.HANDLERS
+    assert "create_partitions" not in {job for job, _ in handlers.PERIODIC}
     periodic = len(handlers.PERIODIC)
     assert await run_jobs(worker) == periodic
     assert (

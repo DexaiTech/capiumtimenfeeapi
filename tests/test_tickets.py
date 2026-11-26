@@ -113,7 +113,7 @@ async def test_create_writes_the_first_status_history_row_and_an_audit_row(clien
         "tags": ["Bug"],
     }
     [row] = await sql(
-        "SELECT ip_address::text AS ip, request_id FROM audit_logs WHERE action = 'ticket.created'"
+        "SELECT ip_address AS ip, request_id FROM audit_logs WHERE action = 'ticket.created'"
     )
     assert row["ip"] and row["request_id"]
 
@@ -514,7 +514,7 @@ async def test_deleting_a_practice_member_reference_is_protected(client):
     t = await new_team(client)
     staff = await t.member("staff")
     await make_ticket(client, staff, t.org)
-    with pytest.raises(Exception, match="violates foreign key constraint"):
+    with pytest.raises(Exception, match="a foreign key constraint fails"):
         await sql(
             "DELETE FROM organization_members WHERE organization_id = :o AND user_id = :u",
             o=t.id,

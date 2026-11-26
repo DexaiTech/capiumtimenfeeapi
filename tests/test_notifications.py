@@ -6,7 +6,7 @@ from datetime import date
 
 import pytest
 from httpx import AsyncClient
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DBAPIError  # MySQL: a CHECK failure is not an IntegrityError
 
 from app.core.config import get_settings
 from app.core.notification_types import CATALOGUE, NotificationType
@@ -258,7 +258,7 @@ async def test_valid_links_are_stored_and_the_database_refuses_the_rest(client):
         await notify(org, "budget_alert", [owner], link=link)
     assert len(await inbox(client, owner, org)) == 4
     for bad in ("https://evil.example", "//evil.example", "/x\\y", "relative/path"):
-        with pytest.raises(IntegrityError):
+        with pytest.raises(DBAPIError):
             await sql(
                 "INSERT INTO notifications (id, organization_id, user_id, type, title, link) "
                 "VALUES (:id, :org, :user, 'budget_alert', 't', :link)",
@@ -596,7 +596,7 @@ async def test_a_job_whose_lease_expired_for_the_last_time_notifies(client, work
     await enqueue_failing(org, "purge_retention", max_attempts=1)
     await sql(
         "UPDATE background_jobs SET status = 'running', attempts = 1, locked_by = 'crashed', "
-        "locked_until = now() - interval '1 minute' WHERE type = 'purge_retention'"
+        "locked_until = NOW(6) - INTERVAL 1 MINUTE WHERE type = 'purge_retention'"
     )
     await worker.tick()
     [note] = await inbox(client, owner, org)
@@ -684,9 +684,7 @@ async def test_the_retention_job_clears_old_notifications_and_the_mock_log(clien
     owner, org = await practice(client)
     for title in ("Old", "Recent"):
         await notify(org, "budget_alert", [owner], title=title)
-    await sql(
-        "UPDATE notifications SET created_at = now() - interval '200 days' WHERE title = 'Old'"
-    )
+    await sql("UPDATE notifications SET created_at = NOW(6) - INTERVAL 200 DAY WHERE title = 'Old'")
     gateway = build_gateway(mock_settings())
     for subject in ("Old", "Recent"):
         await gateway.send_email(
@@ -694,9 +692,7 @@ async def test_the_retention_job_clears_old_notifications_and_the_mock_log(clien
                 to="a@example.com", subject=subject, html="h", text="t", template="welcome"
             )
         )
-    await sql(
-        "UPDATE message_log SET created_at = now() - interval '100 days' WHERE subject = 'Old'"
-    )
+    await sql("UPDATE message_log SET created_at = NOW(6) - INTERVAL 100 DAY WHERE subject = 'Old'")
 
     async with get_sessionmaker()() as session:
         await handlers.HANDLERS["purge_retention"](session, get_settings(), {})

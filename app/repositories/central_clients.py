@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import TypedDict
 
 from sqlalchemy import Select, case, func, or_, select
-from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.dialects.mysql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.expression import ColumnElement, ColumnExpressionArgument
 
@@ -37,9 +37,10 @@ def normalised_company_number(
 ) -> ColumnElement[str | None]:
     """SQL twin of ``normalise_company_number``: upper case, letters and digits only, an
     all-digit number padded to eight digits (blank: null)."""
-    cleaned = func.regexp_replace(func.upper(column), "[^A-Z0-9]", "", "g")
+    # MySQL's REGEXP_REPLACE replaces every match; "c" makes the match case-sensitive.
+    cleaned = func.regexp_replace(func.upper(column), "[^A-Z0-9]", "")
     return case(
-        (cleaned.op("~")(r"^[0-9]{1,7}$"), func.lpad(cleaned, 8, "0")),
+        (func.regexp_like(cleaned, r"^[0-9]{1,7}$", "c"), func.lpad(cleaned, 8, "0")),
         else_=func.nullif(cleaned, ""),
     )
 
@@ -77,11 +78,11 @@ class CentralClientRepository:
             for c in sorted(clients, key=lambda c: c["central_id"])
         ]
         stmt = insert(CentralClientCache).values(rows)
+        # Only (organization_id, central_id) can collide: the id is new.
         await self.session.execute(
-            stmt.on_conflict_do_update(
-                index_elements=["organization_id", "central_id"],
-                set_={
-                    column: stmt.excluded[column]
+            stmt.on_duplicate_key_update(
+                {
+                    column: stmt.inserted[column]
                     for column in (
                         "name",
                         "company_number",
@@ -94,7 +95,7 @@ class CentralClientRepository:
                         "source_updated_at",
                         "fetched_at",
                     )
-                },
+                }
             )
         )
 
@@ -232,7 +233,8 @@ class CentralClientRepository:
                 )
             ).scalar_one()
         )
-        stmt = base.order_by(Client.central_synced_at.asc().nulls_first(), Client.id).limit(limit)
+        # Never synced first: MySQL sorts NULLs first ascending (PostgreSQL's NULLS FIRST).
+        stmt = base.order_by(Client.central_synced_at.asc(), Client.id).limit(limit)
         clients = list((await self.session.execute(stmt)).scalars())
         return clients, max(0, total - len(clients))
 

@@ -7,6 +7,7 @@ from functools import lru_cache
 from typing import Any
 
 import certifi
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -16,6 +17,7 @@ from sqlalchemy.ext.asyncio import (
 
 from app.core.config import Settings, get_settings
 from app.db import mysql_sql  # noqa: F401  (MySQL spellings, registered before use)
+from app.db.errors import as_integrity_error
 
 _UOW_DEPTH = "uow_depth"
 
@@ -54,11 +56,20 @@ def engine_options(settings: Settings) -> dict[str, Any]:
     return {"isolation_level": "READ COMMITTED", "connect_args": connect_args}
 
 
+def new_engine(url: str, settings: Settings, **kwargs: Any) -> AsyncEngine:
+    """An engine with the application's connection settings and error rules. The app, the
+    maintenance commands and the tests all make theirs here."""
+    engine = create_async_engine(url, **engine_options(settings), **kwargs)
+    event.listen(engine.sync_engine, "handle_error", as_integrity_error)
+    return engine
+
+
 @lru_cache
 def get_engine() -> AsyncEngine:
     settings = get_settings()
-    return create_async_engine(
+    return new_engine(
         settings.database_url,
+        settings,
         pool_size=settings.db_pool_size,
         max_overflow=settings.db_max_overflow,
         # A pre-ping costs one database round trip on every checkout, which is what made
@@ -67,7 +78,6 @@ def get_engine() -> AsyncEngine:
         # that one request with 503 and is replaced.
         pool_pre_ping=settings.db_pool_pre_ping,
         pool_recycle=settings.db_pool_recycle_seconds,
-        **engine_options(settings),
     )
 
 

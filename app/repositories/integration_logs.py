@@ -3,13 +3,19 @@ organization."""
 
 import uuid
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
-from sqlalchemy import ColumnElement, func, literal_column, select
-from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy import ColumnElement, func, literal, select
+from sqlalchemy.dialects.mysql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import IntegrationCursor, IntegrationSyncLog
+from app.db.types import UTCDateTime
+from app.utils.db_time import db_now
 from app.utils.pagination import Page, PageParams, paginate
+
+# Earlier than any timestamp (PostgreSQL's '-infinity'): DATETIME's first value.
+_BEFORE_EVERYTHING = datetime(1000, 1, 1, tzinfo=UTC)
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,7 +75,7 @@ class SyncLogRepository:
             *same_record,
             IntegrationSyncLog.status == "failed",
             IntegrationSyncLog.created_at
-            > func.coalesce(last_good, literal_column("'-infinity'::timestamptz")),
+            > func.coalesce(last_good, literal(_BEFORE_EVERYTHING, UTCDateTime())),
         )
         return int((await self.session.execute(stmt)).scalar_one())
 
@@ -111,9 +117,7 @@ class CursorRepository:
         stmt = insert(IntegrationCursor).values(
             organization_id=organization_id, integration=integration, cursor=cursor
         )
+        # The primary key (organization_id, integration) is the only unique key.
         await self.session.execute(
-            stmt.on_conflict_do_update(
-                index_elements=["organization_id", "integration"],
-                set_={"cursor": stmt.excluded.cursor, "updated_at": func.now()},
-            )
+            stmt.on_duplicate_key_update(cursor=stmt.inserted.cursor, updated_at=db_now())
         )

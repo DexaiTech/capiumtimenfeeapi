@@ -4,10 +4,11 @@ import uuid
 from collections.abc import Collection
 
 from sqlalchemy import select
-from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.dialects.mysql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import EmailTemplate, User
+from app.utils.db_time import db_now
 from app.utils.ids import new_id
 
 
@@ -54,11 +55,9 @@ class EmailTemplateRepository:
         stmt = insert(EmailTemplate).values(
             id=new_id(), organization_id=organization_id, template_key=key, **values
         )
-        await self.session.execute(
-            stmt.on_conflict_do_update(
-                constraint="uq_email_templates_organization_id_template_key", set_=values
-            )
-        )
+        # Only (organization_id, template_key) can collide: the id is new. updated_at is set
+        # as PostgreSQL's trigger did on every update, even when nothing else changed.
+        await self.session.execute(stmt.on_duplicate_key_update(**values, updated_at=db_now()))
 
     async def delete(self, template: EmailTemplate) -> None:
         await self.session.delete(template)

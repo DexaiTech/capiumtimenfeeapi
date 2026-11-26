@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy import ColumnElement, ScalarSelect, and_, exists, func, literal, or_, select
-from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.dialects.mysql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import (
@@ -180,7 +180,8 @@ class OnboardingRepository:
         await self.session.execute(
             insert(OnboardingProgress)
             .values(id=new_id(), organization_id=organization_id, step_key=step_key, state="todo")
-            .on_conflict_do_nothing(constraint="uq_onboarding_progress_organization_id_step_key")
+            # Only (organization_id, step_key) can collide (the id is new): then a no-op.
+            .on_duplicate_key_update(id=OnboardingProgress.__table__.c.id)
         )
         stmt = (
             select(OnboardingProgress)

@@ -5,7 +5,7 @@ change them and the checks the database keeps whatever the API does."""
 import asyncio
 
 import pytest
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DBAPIError  # MySQL: a CHECK failure is not an IntegrityError
 
 from app.maintenance.bootstrap import bootstrap
 from tests.clients_helpers import sql
@@ -254,5 +254,5 @@ async def test_another_practice_cannot_be_changed(client):
 )
 async def test_the_database_checks(client, assignment, constraint):
     _, org = await create_user_with_org(client)
-    with pytest.raises(IntegrityError, match=constraint):
+    with pytest.raises(DBAPIError, match=constraint):
         await sql(f"UPDATE organizations SET {assignment} WHERE id = :o", o=org["id"])  # noqa: S608

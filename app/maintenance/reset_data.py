@@ -3,10 +3,13 @@
 Use it to start over on a fresh deployment after test sign-ups. It removes every user,
 practice, client, job, time entry, invoice, payment, session and rate-limit
 counter. ``alembic_version`` and ``permissions`` (seeded by the migrations) are kept, so
-no migration has to run again.
+no migration has to run again, and so is ``advisory_locks`` (the named-lock rows, no data).
 
-It is a dry run unless ``--yes`` is given, and everything happens in one transaction. Uploaded
-files (``STORAGE_DIR``) are not touched: empty that directory yourself to start over.
+It is a dry run unless ``--yes`` is given. Each table is emptied with ``TRUNCATE`` (foreign key
+checks off meanwhile): the append-only tables' triggers refuse ``DELETE``, and ``TRUNCATE``
+also restarts the counters. In MySQL ``TRUNCATE`` commits on its own, so a run stopped part-way
+leaves some tables emptied: run it again. Uploaded files (``STORAGE_DIR``) are not touched:
+empty that directory yourself to start over.
 
 
     python -m app.maintenance.reset_data          # shows what would be deleted
@@ -19,30 +22,30 @@ import sys
 from urllib.parse import urlsplit
 
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
+from app.db.session import new_engine
 
-KEPT_TABLES = frozenset({"alembic_version", "permissions"})
+KEPT_TABLES = frozenset({"alembic_version", "permissions", "advisory_locks"})
 
 _LIST_TABLES = text(
     """
-    SELECT c.relname
-    FROM pg_class c
-    JOIN pg_namespace n ON n.oid = c.relnamespace
-    WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') AND NOT c.relispartition
-    ORDER BY c.relname
+    SELECT table_name
+    FROM information_schema.tables
+    WHERE table_schema = DATABASE() AND table_type = 'BASE TABLE'
+    ORDER BY table_name
     """
 )
 
 
 async def table_counts(session: AsyncSession) -> dict[str, int]:
-    """Row counts of every table that would be emptied (partitions count under their parent)."""
+    """Row counts of every table that would be emptied."""
     names = [name for name in (await session.scalars(_LIST_TABLES)) if name not in KEPT_TABLES]
     counts: dict[str, int] = {}
     for name in names:
         # Names come from the catalogue, never from input; they are quoted all the same.
-        query = text(f'SELECT count(*) FROM "{name}"')  # noqa: S608 (catalogue name, quoted)
+        query = text(f"SELECT count(*) FROM `{name}`")  # noqa: S608 (catalogue name, quoted)
         counts[name] = int(await session.scalar(query) or 0)
     return counts
 
@@ -51,20 +54,25 @@ async def reset_data(session: AsyncSession) -> dict[str, int]:
     """Empty every table except the kept ones; returns the counts that were deleted."""
     counts = await table_counts(session)
     if counts:
-        quoted = ", ".join(f'"{name}"' for name in counts)
-        await session.execute(text(f"TRUNCATE {quoted} RESTART IDENTITY CASCADE"))
+        await session.execute(text("SET SESSION foreign_key_checks = 0"))
+        try:
+            for name in counts:
+                await session.execute(text(f"TRUNCATE TABLE `{name}`"))
+        finally:
+            await session.execute(text("SET SESSION foreign_key_checks = 1"))
     return counts
 
 
 def _describe_target(url: str) -> str:
     parts = urlsplit(url)
-    return f"{parts.hostname}:{parts.port or 5432}{parts.path}"
+    return f"{parts.hostname}:{parts.port or 3306}{parts.path}"
 
 
 async def _main(confirmed: bool) -> int:
-    url = get_settings().db_url.get_secret_value()
+    settings = get_settings()
+    url = settings.db_url.get_secret_value()
     print(f"Database: {_describe_target(url)}")
-    engine = create_async_engine(url)
+    engine = new_engine(url, settings)
     try:
         async with AsyncSession(engine) as session, session.begin():
             counts = await table_counts(session)

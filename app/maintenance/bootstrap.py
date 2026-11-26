@@ -25,7 +25,7 @@ from datetime import UTC, datetime
 from pydantic import EmailStr, TypeAdapter, ValidationError
 from sqlalchemy import text
 from sqlalchemy.exc import ProgrammingError
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.health import expected_revision
 from app.core.config import get_settings
@@ -34,7 +34,7 @@ from app.core.exceptions import AppException
 from app.core.security import COMMON_PASSWORDS, generate_password, hash_password
 from app.db.locks import transaction_lock
 from app.db.models import Organization, User
-from app.db.session import unit_of_work
+from app.db.session import new_engine, unit_of_work
 from app.repositories.organizations import OrganizationRepository
 from app.repositories.users import UserRepository
 from app.schemas.auth import PASSWORD_MAX, PASSWORD_MIN
@@ -147,7 +147,8 @@ async def _ensure_schema_is_current(session: AsyncSession) -> None:
 
 
 async def _main(args: argparse.Namespace) -> int:
-    engine = create_async_engine(get_settings().database_url)
+    settings = get_settings()
+    engine = new_engine(settings.database_url, settings)
     try:
         async with AsyncSession(engine, expire_on_commit=False) as session:
             result = await bootstrap(

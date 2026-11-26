@@ -25,7 +25,7 @@ from sqlalchemy import (
     select,
     tuple_,
 )
-from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.dialects.mysql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import defer
 
@@ -396,7 +396,12 @@ class TicketRepository:
             for tag_id in tag_ids
         ]
         if rows:
-            await self.session.execute(insert(TicketTagLink).values(rows).on_conflict_do_nothing())
+            # The primary key (ticket_id, tag_id) is the only unique key: an existing link is
+            # left as it is (the key assigned to itself).
+            stmt = insert(TicketTagLink).values(rows)
+            await self.session.execute(
+                stmt.on_duplicate_key_update(ticket_id=TicketTagLink.__table__.c.ticket_id)
+            )
 
     async def unlink_tags(
         self,

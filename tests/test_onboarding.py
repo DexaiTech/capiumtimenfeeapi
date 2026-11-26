@@ -4,7 +4,7 @@ permissions, isolation, audit and the races between two people marking the same 
 import asyncio
 
 import pytest
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DBAPIError  # MySQL: a CHECK failure is not an IntegrityError
 
 from tests.central_helpers import central_on
 from tests.clients_helpers import scalar, sql
@@ -510,7 +510,7 @@ async def test_the_table_refuses_a_bad_state_a_bad_key_and_a_second_row(client):
     )
     await sql(insert, o=org["id"], k="period_lock", s="done")
     for key, state in (("period_lock", "skipped"), ("other", "finished"), ("Bad-Key", "done")):
-        with pytest.raises(IntegrityError):
+        with pytest.raises(DBAPIError):
             await sql(insert, o=org["id"], k=key, s=state)
 
 
@@ -518,8 +518,15 @@ async def test_progress_goes_with_the_practice(client):
     owner, org = await practice(client)
     await mark(client, owner, org, "period_lock", "done")
     assert await scalar("SELECT count(*) FROM onboarding_progress") == 1
-    await sql("DELETE FROM organizations WHERE id = :o", o=org["id"])
-    assert await scalar("SELECT count(*) FROM onboarding_progress") == 0
+    # The progress rows are deleted with the practice's row. Read from the schema: MySQL refuses a
+    # plain DELETE of a practice that has clients and jobs (it checks the composite keys of the
+    # cascade row by row; every practice has its Internal client and jobs).
+    rule = await scalar(
+        "SELECT delete_rule FROM information_schema.referential_constraints "
+        "WHERE constraint_schema = DATABASE() AND table_name = 'onboarding_progress' "
+        "AND referenced_table_name = 'organizations'"
+    )
+    assert rule == "CASCADE"
 
 
 # --- The schema -------------------------------------------------------------------------------

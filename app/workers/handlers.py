@@ -184,9 +184,6 @@ async def send_statement_email(
         raise PermanentJobError(str(exc)) from exc
 
 
-PARTITIONED_TABLES = ("audit_logs",)
-
-
 async def process_integration_items(
     session: AsyncSession, settings: Settings, payload: dict[str, Any]
 ) -> dict[str, Any] | None:
@@ -195,20 +192,6 @@ async def process_integration_items(
     management statuses) with the retry backoff. Failures stay on the items and never reach
     billing; the job itself succeeds."""
     return await run_scheduled(session)
-
-
-async def create_partitions(
-    session: AsyncSession, settings: Settings, payload: dict[str, Any]
-) -> None:
-    """Keep monthly partitions three months ahead."""
-    for table in PARTITIONED_TABLES:
-        await session.execute(
-            text(
-                "SELECT create_monthly_partition(:parent, (date_trunc('month', now()) "
-                "+ make_interval(months => m))::date) FROM generate_series(0, 3) AS m"
-            ),
-            {"parent": table},
-        )
 
 
 async def purge_retention(
@@ -220,20 +203,20 @@ async def purge_retention(
     await RateLimitRepository(session).purge(timedelta(days=1))
     await session.execute(
         text(
-            "DELETE FROM user_sessions WHERE (revoked_at < now() - interval '30 days') "
-            "OR (expires_at < now() - interval '30 days')"
+            "DELETE FROM user_sessions WHERE (revoked_at < NOW(6) - INTERVAL 30 DAY) "
+            "OR (expires_at < NOW(6) - INTERVAL 30 DAY)"
         )
     )
     for table in ("email_verification_tokens", "password_reset_tokens"):
         await session.execute(
-            text(f"DELETE FROM {table} WHERE expires_at < now() - interval '30 days'")  # noqa: S608
+            text(f"DELETE FROM {table} WHERE expires_at < NOW(6) - INTERVAL 30 DAY")  # noqa: S608
         )
     # A bell inbox older than six months is clutter, and the mock gateway's log is a dev aid.
     await session.execute(
-        text("DELETE FROM notifications WHERE created_at < now() - interval '180 days'")
+        text("DELETE FROM notifications WHERE created_at < NOW(6) - INTERVAL 180 DAY")
     )
     await session.execute(
-        text("DELETE FROM message_log WHERE created_at < now() - interval '90 days'")
+        text("DELETE FROM message_log WHERE created_at < NOW(6) - INTERVAL 90 DAY")
     )
 
 
@@ -249,13 +232,11 @@ HANDLERS: dict[str, Handler] = {
     "send_payment_reminder_email": send_payment_reminder_email,
     "send_statement_email": send_statement_email,
     "process_integration_items": process_integration_items,
-    "create_partitions": create_partitions,
     "purge_retention": purge_retention,
 }
 
 # (job type, period in seconds). The slot number is part of the dedupe key.
 PERIODIC: tuple[tuple[str, int], ...] = (
-    ("create_partitions", 86_400),
     ("purge_retention", 86_400),
     ("send_timesheet_reminders", 86_400),
     ("send_payment_reminders", 86_400),

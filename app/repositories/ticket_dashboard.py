@@ -10,10 +10,11 @@ from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import date, datetime
 
-from sqlalchemy import Date, DateTime, and_, column, func, or_, select, values
+from sqlalchemy import Date, and_, cast, func, literal, or_, select, union_all
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Ticket, TicketStatusHistory, TicketTag, TicketTagLink, User
+from app.db.types import UTCDateTime
 from app.repositories.tickets import TicketRow, ticket_rows_select
 
 
@@ -152,7 +153,14 @@ class TicketDashboardRepository:
                 Ticket.created_at < end,
             )
             .group_by(Ticket.assignee_user_id, User.full_name)
-            .order_by(used.desc(), func.lower(User.full_name).nulls_last(), Ticket.assignee_user_id)
+            # PostgreSQL's order: NULLs last ascending (MySQL sorts them first).
+            .order_by(
+                used.desc(),
+                func.lower(User.full_name).is_(None),
+                func.lower(User.full_name),
+                Ticket.assignee_user_id.is_(None),
+                Ticket.assignee_user_id,
+            )
         )
         return [AssigneeUsage(*row) for row in (await self.session.execute(stmt)).all()]
 
@@ -206,9 +214,19 @@ class TicketDashboardRepository:
             )
             .cte("spans")
         )
-        wanted = values(
-            column("day", Date), column("ends_at", DateTime(timezone=True)), name="wanted_days"
-        ).data(days)
+        if not days:
+            return {}
+        # MySQL has no VALUES list as a table: the same rows as a UNION ALL of one-row selects.
+        wanted = union_all(
+            *(
+                # Cast: a bound value alone would come back as text.
+                select(
+                    cast(literal(day, Date()), Date()).label("day"),
+                    cast(literal(ends_at, UTCDateTime()), UTCDateTime()).label("ends_at"),
+                )
+                for day, ends_at in days
+            )
+        ).subquery("wanted_days")
         stmt = (
             select(wanted.c.day, spans.c.status, func.count())
             .select_from(wanted)

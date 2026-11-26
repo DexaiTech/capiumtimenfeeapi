@@ -1,15 +1,13 @@
 """Client segments: the practice's list, renaming, deactivating, deleting, the staff who look
-after them, permissions and tenant isolation; and the migration of the free-text values."""
+after them, permissions and tenant isolation. (The test of PostgreSQL migration 062, which
+turned free-text values into segments, was retired with the PostgreSQL history.)"""
 
-import subprocess
-import sys
 import uuid
 
 import pytest
 from httpx import AsyncClient
 
 from tests.clients_helpers import create_client, org_url, scalar, sql
-from tests.conftest import ROOT
 from tests.domain_factories import make_client, practice, staff
 from tests.factories import audit_entries, error
 from tests.team_helpers import new_staff
@@ -261,35 +259,3 @@ async def test_other_practices_segments_are_invisible(client):
         json={"segment_ids": [theirs["id"]]},
     )
     assert put.status_code == 422
-
-
-async def test_the_migration_turns_the_values_in_use_into_segments(client):
-    """Downgrade one step, put free-text values on clients, upgrade: one segment per value."""
-    _, org = await practice(client)
-    _, other = await practice(client, "Other")
-    for name, org_, value in (
-        ("A", org, "Gold"),
-        ("B", org, "gold "),
-        ("C", org, "Silver"),
-        ("D", org, "  "),
-        ("E", org, None),
-        ("F", other, "Gold"),
-    ):
-        await make_client(org_, name, segment=value)
-    deleted = await make_client(org, "G", segment="Gone")
-    await sql("UPDATE clients SET deleted_at = now() WHERE id = :i", i=str(deleted.id))
-
-    def alembic(*command: str) -> None:
-        subprocess.run(  # noqa: S603
-            [sys.executable, "-m", "alembic", *command], cwd=ROOT, check=True, capture_output=True
-        )
-
-    # Re-run the data step of the migration by stepping 062 down and up.
-    alembic("downgrade", "061")
-    alembic("upgrade", "head")
-    rows = await sql(
-        "SELECT organization_id::text AS o, name FROM segments ORDER BY organization_id, name"
-    )
-    mine = sorted(r["name"].lower() for r in rows if r["o"] == org["id"])
-    theirs = sorted(r["name"].lower() for r in rows if r["o"] == other["id"])
-    assert mine == ["gold", "silver"] and theirs == ["gold"]

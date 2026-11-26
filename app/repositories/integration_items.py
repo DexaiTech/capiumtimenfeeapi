@@ -11,10 +11,11 @@ from datetime import datetime
 from typing import Any
 
 from sqlalchemy import and_, func, or_, select
-from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.dialects.mysql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import IntegrationConnection, IntegrationSyncItem
+from app.utils.db_time import db_now
 from app.utils.ids import new_id
 from app.utils.pagination import Page, PageParams, paginate
 
@@ -58,34 +59,43 @@ class SyncItemRepository:
     async def insert_once(self, values: dict[str, Any]) -> uuid.UUID | None:
         """Insert the item unless one with the same idempotency key exists; its id when this call
         created it, ``None`` when it was already there (nothing is changed then)."""
+        # Only the idempotency key can collide (the id is new); assigning the id to itself
+        # leaves an existing row unchanged.
         stmt = (
             insert(IntegrationSyncItem)
             .values(**values)
-            .on_conflict_do_nothing(index_elements=ITEM_KEY)
-            .returning(IntegrationSyncItem.id)
+            .on_duplicate_key_update(id=IntegrationSyncItem.__table__.c.id)
         )
-        return (await self.session.execute(stmt)).scalar_one_or_none()
+        await self.session.execute(stmt)
+        found = await self._id_by_key(values)
+        return found if found == values["id"] else None
+
+    async def _id_by_key(self, values: dict[str, Any]) -> uuid.UUID:
+        stmt = select(IntegrationSyncItem.id).where(
+            *(getattr(IntegrationSyncItem, column) == values[column] for column in ITEM_KEY)
+        )
+        found: uuid.UUID = (await self.session.execute(stmt)).scalar_one()
+        return found
 
     async def upsert_latest(self, values: dict[str, Any]) -> uuid.UUID:
         """Insert the item, or put the existing one with this key back to ``pending`` with the new
         payload (the latest change is what must reach the other system)."""
         insert_stmt = insert(IntegrationSyncItem).values(**values)
-        stmt = insert_stmt.on_conflict_do_update(
-            index_elements=ITEM_KEY,
-            set_={
-                "payload": insert_stmt.excluded.payload,
-                "entity_id": insert_stmt.excluded.entity_id,
-                "status": "pending",
-                "attempts": 0,
-                "next_attempt_at": insert_stmt.excluded.next_attempt_at,
-                "completed_at": None,
-                "last_error": None,
-                "last_error_code": None,
-                "external_ref": None,
-            },
-        ).returning(IntegrationSyncItem.id)
-        result: uuid.UUID = (await self.session.execute(stmt)).scalar_one()
-        return result
+        # Only the idempotency key can collide (the id is new).
+        stmt = insert_stmt.on_duplicate_key_update(
+            payload=insert_stmt.inserted.payload,
+            entity_id=insert_stmt.inserted.entity_id,
+            status="pending",
+            attempts=0,
+            next_attempt_at=insert_stmt.inserted.next_attempt_at,
+            completed_at=None,
+            last_error=None,
+            last_error_code=None,
+            external_ref=None,
+            updated_at=db_now(),
+        )
+        await self.session.execute(stmt)
+        return await self._id_by_key(values)
 
     async def list_page(
         self, organization_id: uuid.UUID, filters: SyncItemFilters, params: PageParams
@@ -105,9 +115,9 @@ class SyncItemRepository:
         if filters.q:
             stmt = stmt.where(
                 or_(
-                    IntegrationSyncItem.payload["label"].astext.icontains(
-                        filters.q, autoescape=True
-                    ),
+                    IntegrationSyncItem.payload["label"]
+                    .as_string()
+                    .icontains(filters.q, autoescape=True),
                     IntegrationSyncItem.last_error.icontains(filters.q, autoescape=True),
                 )
             )
@@ -244,7 +254,8 @@ class ConnectionRepository:
             .values(
                 id=new_id, organization_id=organization_id, integration=integration, enabled=enabled
             )
-            .on_conflict_do_nothing(index_elements=["organization_id", "integration"])
+            # Only (organization_id, integration) can collide (the id is new): a no-op then.
+            .on_duplicate_key_update(id=IntegrationConnection.__table__.c.id)
         )
         found = await self.get(organization_id, integration, lock=True)
         assert found is not None
@@ -285,8 +296,5 @@ class ConnectionRepository:
             enabled=enabled_default,
             **values,
         )
-        await self.session.execute(
-            stmt.on_conflict_do_update(
-                index_elements=["organization_id", "integration"], set_=values
-            )
-        )
+        # Only (organization_id, integration) can collide (the id is new).
+        await self.session.execute(stmt.on_duplicate_key_update(**values, updated_at=db_now()))

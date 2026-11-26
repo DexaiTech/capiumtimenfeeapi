@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import Exists, exists, func, or_, select, update
-from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.dialects.mysql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import InstrumentedAttribute
 
@@ -21,6 +21,7 @@ from app.db.models import (
     RolePermission,
     User,
 )
+from app.utils.db_time import db_now
 from app.utils.pagination import Page, PageParams, paginate
 
 
@@ -110,13 +111,20 @@ class NotificationRepository:
         """
         if not rows:
             return {}
+        # The ids are new, so only the dedupe key can collide; assigning the id to itself leaves
+        # the existing row unchanged. The rows inserted are the ones whose new id is there.
         stmt = (
             insert(Notification)
             .values(list(rows))
-            .on_conflict_do_nothing()
-            .returning(Notification.user_id, Notification.id)
+            .on_duplicate_key_update(id=Notification.__table__.c.id)
         )
-        return {row[0]: row[1] for row in (await self.session.execute(stmt)).all()}
+        await self.session.execute(stmt)
+        organization_ids = {row["organization_id"] for row in rows}
+        found = select(Notification.user_id, Notification.id).where(
+            Notification.organization_id.in_(organization_ids),
+            Notification.id.in_([row["id"] for row in rows]),
+        )
+        return {row[0]: row[1] for row in (await self.session.execute(found)).all()}
 
 
 class NotificationSettingsRepository:
@@ -205,11 +213,9 @@ class NotificationSettingsRepository:
             email=email,
             sms=sms,
         )
+        # Only (organization_id, user_id, type) can collide: the id is new.
         await self.session.execute(
-            stmt.on_conflict_do_update(
-                constraint="uq_notification_preferences_organization_id_user_id_type",
-                set_={"in_app": in_app, "email": email, "sms": sms},
-            )
+            stmt.on_duplicate_key_update(in_app=in_app, email=email, sms=sms, updated_at=db_now())
         )
 
     async def save_practice_setting(
@@ -233,11 +239,8 @@ class NotificationSettingsRepository:
         stmt = insert(NotificationSetting).values(
             organization_id=organization_id, type=type_, **values
         )
-        await self.session.execute(
-            stmt.on_conflict_do_update(
-                constraint="uq_notification_settings_organization_id_type", set_=values
-            )
-        )
+        # Only (organization_id, type) can collide: the id is new.
+        await self.session.execute(stmt.on_duplicate_key_update(**values, updated_at=db_now()))
 
     async def member_mobile_number(
         self, organization_id: uuid.UUID, user_id: uuid.UUID

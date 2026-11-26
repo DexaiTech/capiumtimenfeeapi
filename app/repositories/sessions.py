@@ -1,11 +1,12 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import and_, func, select, update
+from sqlalchemy import and_, select, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import RefreshToken, User, UserSession
+from app.utils.db_time import db_now
 
 
 class SessionRepository:
@@ -32,7 +33,7 @@ class SessionRepository:
             UserSession.id == session_id,
             UserSession.user_id == user_id,
             UserSession.revoked_at.is_(None),
-            UserSession.expires_at > func.now(),
+            UserSession.expires_at > db_now(),
         )
         return (await self.session.execute(stmt)).scalar_one_or_none()
 
@@ -50,7 +51,7 @@ class SessionRepository:
                     UserSession.id == session_id,
                     UserSession.user_id == User.id,
                     UserSession.revoked_at.is_(None),
-                    UserSession.expires_at > func.now(),
+                    UserSession.expires_at > db_now(),
                 ),
             )
             .where(User.id == user_id, User.deleted_at.is_(None))
@@ -64,7 +65,7 @@ class SessionRepository:
             .where(
                 UserSession.user_id == user_id,
                 UserSession.revoked_at.is_(None),
-                UserSession.expires_at > func.now(),
+                UserSession.expires_at > db_now(),
             )
             .order_by(UserSession.last_used_at.desc())
         )

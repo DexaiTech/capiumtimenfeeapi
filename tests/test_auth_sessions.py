@@ -100,7 +100,7 @@ async def test_reuse_after_grace_window_revokes_the_session(client, verified_use
     fresh_access = rotated.json()["data"]["access_token"]
     await db.execute(
         text(
-            "UPDATE refresh_tokens SET used_at = now() - interval '5 minutes' WHERE used_at IS NOT NULL"
+            "UPDATE refresh_tokens SET used_at = NOW(6) - INTERVAL 5 MINUTE WHERE used_at IS NOT NULL"
         )
     )
     await db.commit()

@@ -7,9 +7,10 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import CursorResult, TextClause, and_, delete, select, text
+from sqlalchemy import CursorResult, Date, TextClause, and_, bindparam, delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.locks import transaction_lock
 from app.db.models import (
     BookkeepingServiceMapping,
     BookkeepingVatMapping,
@@ -21,18 +22,20 @@ from app.db.models import (
     Service,
     VatRate,
 )
+from app.db.types import Uuid36
 
-# Queue every issued invoice (and every credit note) that has no sync item yet. One statement, so
-# two scanners at the same moment queue each document once (the unique key is the backstop).
+# Queue every issued invoice (and every credit note) that has no sync item yet. Scanners of one
+# practice take turns (``_scan`` holds a named lock), so each document is queued once and the
+# row count is exact; the unique key stays the backstop (a duplicate is left unchanged).
+_SCAN_PARAMS = (bindparam("org", type_=Uuid36()), bindparam("send_from", type_=Date()))
 _SCAN_INVOICES = text(
     """
     INSERT INTO integration_sync_items
         (id, organization_id, integration, entity_type, entity_id, direction, operation,
          idempotency_key, status, attempts, next_attempt_at, payload)
-    SELECT gen_random_uuid(), i.organization_id, 'bookkeeping', 'invoice', i.id, 'outbound',
-           'send_invoice', 'invoice:' || CAST(i.id AS text), 'pending', 0, now(),
-           jsonb_build_object('label', i.number, 'client_name', c.name,
-                              'amount', i.gross_total)
+    SELECT UUID(), i.organization_id, 'bookkeeping', 'invoice', i.id, 'outbound',
+           'send_invoice', CONCAT('invoice:', i.id), 'pending', 0, NOW(6),
+           JSON_OBJECT('label', i.number, 'client_name', c.name, 'amount', i.gross_total)
     FROM invoices i
     JOIN clients c ON c.organization_id = i.organization_id AND c.id = i.client_id
     WHERE i.organization_id = :org AND i.status = 'issued'
@@ -40,21 +43,21 @@ _SCAN_INVOICES = text(
       AND NOT EXISTS (
           SELECT 1 FROM integration_sync_items s
           WHERE s.organization_id = i.organization_id AND s.integration = 'bookkeeping'
-            AND s.idempotency_key = 'invoice:' || CAST(i.id AS text))
+            AND s.idempotency_key = CONCAT('invoice:', i.id))
     ORDER BY i.issued_at, i.id
     LIMIT :limit
-    ON CONFLICT (organization_id, integration, idempotency_key) DO NOTHING
+    ON DUPLICATE KEY UPDATE integration_sync_items.id = integration_sync_items.id
     """
-)
+).bindparams(*_SCAN_PARAMS)
 _SCAN_CREDIT_NOTES = text(
     """
     INSERT INTO integration_sync_items
         (id, organization_id, integration, entity_type, entity_id, direction, operation,
          idempotency_key, status, attempts, next_attempt_at, payload)
-    SELECT gen_random_uuid(), n.organization_id, 'bookkeeping', 'credit_note', n.id, 'outbound',
-           'send_credit_note', 'credit_note:' || CAST(n.id AS text), 'pending', 0, now(),
-           jsonb_build_object('label', n.number, 'client_name', c.name,
-                              'invoice_number', i.number, 'amount', n.gross_total)
+    SELECT UUID(), n.organization_id, 'bookkeeping', 'credit_note', n.id, 'outbound',
+           'send_credit_note', CONCAT('credit_note:', n.id), 'pending', 0, NOW(6),
+           JSON_OBJECT('label', n.number, 'client_name', c.name,
+                       'invoice_number', i.number, 'amount', n.gross_total)
     FROM credit_notes n
     JOIN clients c ON c.organization_id = n.organization_id AND c.id = n.client_id
     JOIN invoices i ON i.organization_id = n.organization_id AND i.id = n.invoice_id
@@ -63,12 +66,12 @@ _SCAN_CREDIT_NOTES = text(
       AND NOT EXISTS (
           SELECT 1 FROM integration_sync_items s
           WHERE s.organization_id = n.organization_id AND s.integration = 'bookkeeping'
-            AND s.idempotency_key = 'credit_note:' || CAST(n.id AS text))
+            AND s.idempotency_key = CONCAT('credit_note:', n.id))
     ORDER BY n.created_at, n.id
     LIMIT :limit
-    ON CONFLICT (organization_id, integration, idempotency_key) DO NOTHING
+    ON DUPLICATE KEY UPDATE integration_sync_items.id = integration_sync_items.id
     """
-)
+).bindparams(*_SCAN_PARAMS)
 
 
 @dataclass(frozen=True, slots=True)
@@ -136,6 +139,7 @@ class BookkeepingRepository:
         send_from: date | None,
         limit: int,
     ) -> int:
+        await transaction_lock(self.session, f"bookkeeping_scan:{organization_id}")
         result = await self.session.execute(
             statement, {"org": organization_id, "send_from": send_from, "limit": limit}
         )

@@ -54,8 +54,9 @@ def kpi(value, previous, kind, percent=None):
 
 
 async def practice_today(zone="Europe/London") -> date:
-    rows = await sql(f"SELECT (now() AT TIME ZONE '{zone}')::date AS d")
-    return rows[0]["d"]
+    # The database clock (UTC) seen in the practice's zone, as PostgreSQL's AT TIME ZONE did.
+    rows = await sql("SELECT NOW(6) AS d")
+    return rows[0]["d"].astimezone(ZoneInfo(zone)).date()
 
 
 # --- The fixed dataset ----------------------------------------------------------------------

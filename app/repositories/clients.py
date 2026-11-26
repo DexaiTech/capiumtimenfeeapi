@@ -14,7 +14,6 @@ from typing import Any
 
 from sqlalchemy import (
     ColumnElement,
-    DateTime,
     Select,
     and_,
     delete,
@@ -46,6 +45,7 @@ from app.db.models import (
     VatRate,
 )
 from app.db.models.clients import ordinary_clients
+from app.db.types import UTCDateTime
 from app.schemas.clients import ClientFilters
 
 OPEN_JOB_STATUSES = ("planned", "in_progress", "on_hold")
@@ -170,14 +170,16 @@ def decode_client_cursor(cursor: str, sort: str, descending: bool) -> tuple[Any,
 
 def last_activity_expr() -> ColumnElement[datetime]:
     """Greatest of the client's own ``updated_at`` and its latest job, time and invoice
-    change. ``GREATEST`` ignores the nulls of a client with none of those."""
+    change. MySQL's ``GREATEST`` is NULL when any argument is (PostgreSQL's ignored nulls), so
+    a client with none of those counts its own ``updated_at`` in their place."""
 
     def latest(column: Any, model: Any) -> Any:
-        return (
+        return func.coalesce(
             select(func.max(column))
             .where(model.organization_id == Client.organization_id, model.client_id == Client.id)
             .correlate(Client)
-            .scalar_subquery()
+            .scalar_subquery(),
+            Client.updated_at,
         )
 
     return func.greatest(
@@ -185,7 +187,7 @@ def last_activity_expr() -> ColumnElement[datetime]:
         latest(TimeEntry.updated_at, TimeEntry),
         latest(Job.updated_at, Job),
         latest(Invoice.updated_at, Invoice),
-        type_=DateTime(timezone=True),
+        type_=UTCDateTime(),
     )
 
 
@@ -522,7 +524,9 @@ class ClientRepository:
             select(func.min(segment), func.count())
             .where(visible)
             .group_by(func.lower(segment))
-            .order_by(func.lower(segment).nulls_last())
+            # PostgreSQL's NULLS LAST (MySQL sorts NULL first ascending). The group's key goes
+            # through min(): MySQL does not see an expression over it as grouped.
+            .order_by(func.min(func.lower(segment)).is_(None), func.min(func.lower(segment)))
         )
         counts.by_segment = [(k, v) for k, v in (await self.session.execute(seg_stmt)).all()]
         linked = (

@@ -11,6 +11,7 @@ from datetime import date
 import pytest
 from alembic.config import Config
 from alembic.script import ScriptDirectory
+from sqlalchemy.exc import IntegrityError
 
 from app.core.permissions import CATALOGUE
 from app.db.base import Base
@@ -74,7 +75,8 @@ async def test_the_permission_catalogue_is_seeded():
 
 
 async def _refused(statement: str, **params: object) -> str:
-    with pytest.raises(Exception) as raised:
+    # IntegrityError, as on PostgreSQL (MySQL's driver says OperationalError; app/db/errors.py).
+    with pytest.raises(IntegrityError) as raised:
         await sql(statement, **params)
     error = database_error(raised.value)
     assert error is not None, raised.value
@@ -140,3 +142,10 @@ async def test_overlapping_hours_of_one_person_are_refused_by_the_database(clien
         )
         == "overlap:ex_staff_hours_bases_user_period"
     )
+
+
+async def test_a_check_violation_is_an_integrity_error_naming_its_constraint(client):
+    _, org = await practice(client)
+    assert (
+        await _refused("UPDATE organizations SET minutes_per_day = -1 WHERE id = :o", o=org["id"])
+    ).startswith("check:ck_organizations_")

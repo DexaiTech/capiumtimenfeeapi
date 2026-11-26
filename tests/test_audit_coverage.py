@@ -126,7 +126,7 @@ async def test_signing_in_is_audited_with_the_person_the_session_and_the_address
     person = await sign_in(client, "newbie@example.com", created["temporary_password"])
 
     rows = await sql(
-        "SELECT organization_id, actor_user_id, target_type, target_id, host(ip_address) AS ip, "
+        "SELECT organization_id, actor_user_id, target_type, target_id, ip_address AS ip, "
         "user_agent, request_id FROM audit_logs WHERE action = 'auth.login' AND actor_user_id = :u",
         u=str(person.id),
     )
@@ -149,7 +149,7 @@ async def test_a_failed_sign_in_is_audited(client):
     )
     assert refused.status_code == 401
     rows = await sql(
-        "SELECT actor_user_id, host(ip_address) AS ip, request_id FROM audit_logs "
+        "SELECT actor_user_id, ip_address AS ip, request_id FROM audit_logs "
         "WHERE action = 'auth.login_failed'"
     )
     assert len(rows) == 1

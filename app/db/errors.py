@@ -12,6 +12,9 @@ import re
 from dataclasses import dataclass
 from typing import Literal
 
+from sqlalchemy.engine import ExceptionContext
+from sqlalchemy.exc import IntegrityError
+
 Kind = Literal[
     "unique",
     "foreign_key",
@@ -80,6 +83,23 @@ def database_error(exc: BaseException) -> DatabaseError | None:
     pattern = {"unique": _DUPLICATE_KEY, "check": _CHECK, "foreign_key": _FOREIGN_KEY}.get(kind)
     match = pattern.search(message) if pattern else None
     return DatabaseError(number, kind, match.group(1) if match else None)
+
+
+# Refusals PostgreSQL raised as integrity errors but PyMySQL raises as OperationalError (a CHECK
+# is error 3819, a trigger's SIGNAL 1644).
+_INTEGRITY_KINDS = ("check", "overlap", "rejected")
+
+
+def as_integrity_error(context: ExceptionContext) -> BaseException | None:
+    """``handle_error`` rule: a CHECK violation or a trigger's refusal becomes ``IntegrityError``
+    again, as on PostgreSQL, so ``except IntegrityError`` in the services still sees it. The
+    driver's error stays in ``.orig`` for ``database_error``."""
+    if isinstance(context.sqlalchemy_exception, IntegrityError):
+        return None
+    error = database_error(context.original_exception)
+    if error is None or error.kind not in _INTEGRITY_KINDS:
+        return None
+    return IntegrityError(context.statement, context.parameters, context.original_exception)
 
 
 def is_overlap(exc: BaseException, constraint: str | None = None) -> bool:

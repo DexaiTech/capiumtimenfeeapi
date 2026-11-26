@@ -144,7 +144,8 @@ async def test_a_practice_holds_at_most_200_tags(client):
     t = await new_team(client)
     await sql(
         "INSERT INTO ticket_tags (id, organization_id, name, color) "
-        "SELECT UUID(), :o, 'Extra ' || n, 'grey' FROM generate_series(1, 193) AS n",
+        "WITH RECURSIVE s (n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM s WHERE n < 193) "
+        "SELECT UUID(), :o, CONCAT('Extra ', n), 'grey' FROM s",
         o=t.id,
     )
     assert await sql(

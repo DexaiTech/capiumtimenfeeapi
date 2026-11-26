@@ -362,8 +362,8 @@ async def test_the_branch_must_be_an_active_branch_of_the_practice(client):
     acme = ok_data(await post_client(client, owner, org, branch_id=london["id"]), 201)
     moved = await patch_client(client, owner, org, acme["id"], branch_id=theirs["id"])
     assert moved.status_code == 404
-    assert await sql("SELECT branch_id::text AS b FROM clients WHERE id = :i", i=acme["id"]) == [
-        {"b": london["id"]}
+    assert await sql("SELECT branch_id AS b FROM clients WHERE id = :i", i=acme["id"]) == [
+        {"b": uuid.UUID(london["id"])}
     ]
     # Deactivating the branch leaves it on the client, and other edits still save.
     await client.post(org_url(org, f"/branches/{london['id']}/deactivate"), headers=owner.headers)
@@ -450,9 +450,9 @@ async def test_the_import_takes_a_branch_and_needs_one_while_branches_are_on(cli
     done = await upload(b"Client Name,Branch\r\nAcme Ltd,london\r\n", dry_run=False)
     assert done.status_code == 200, done.text
     assert await sql(
-        "SELECT branch_id::text AS b FROM clients WHERE organization_id = :o AND NOT is_internal",
+        "SELECT branch_id AS b FROM clients WHERE organization_id = :o AND NOT is_internal",
         o=org["id"],
-    ) == [{"b": london["id"]}]
+    ) == [{"b": uuid.UUID(london["id"])}]
 
 
 async def test_converting_a_lead_needs_a_branch_while_branches_are_on(client):
@@ -469,8 +469,8 @@ async def test_converting_a_lead_needs_a_branch_while_branches_are_on(client):
     converted = await client.post(url, headers=owner.headers, json={"branch_id": london["id"]})
     assert converted.status_code == 200, converted.text
     client_id = ok_data(converted)["converted_client"]["id"]
-    assert await sql("SELECT branch_id::text AS b FROM clients WHERE id = :i", i=client_id) == [
-        {"b": london["id"]}
+    assert await sql("SELECT branch_id AS b FROM clients WHERE id = :i", i=client_id) == [
+        {"b": uuid.UUID(london["id"])}
     ]
 
 
@@ -517,8 +517,8 @@ async def bulk_set_branch(client: AsyncClient, actor, org: dict, ids, value, sta
 
 
 async def branch_of(client_id) -> str | None:
-    [row] = await sql("SELECT branch_id::text AS b FROM clients WHERE id = :i", i=str(client_id))
-    return row["b"]
+    [row] = await sql("SELECT branch_id AS b FROM clients WHERE id = :i", i=str(client_id))
+    return str(row["b"]) if row["b"] else None
 
 
 async def test_bulk_set_branch_gives_the_clients_without_one_a_branch(client):

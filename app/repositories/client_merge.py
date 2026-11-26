@@ -5,8 +5,11 @@ client_id, job_id)`` (jobs, and the time, disbursements and estimates that name 
 ``(organization_id, client_id, invoice_id)`` and ``(organization_id, client_id, payment_id)``
 mean a job, an invoice or a payment and the rows that name it carry the
 client id twice over: changed one table at a time, each statement would leave a row pointing at
-a key that no longer exists. PostgreSQL checks these constraints at the end of a statement, so
-a single statement with one data-modifying ``WITH`` clause per table moves them all together.
+a key that no longer exists. MySQL checks foreign keys row by row (never at the end of a statement
+or transaction), so the tables move one statement each with ``foreign_key_checks`` off for the
+session, inside the merge transaction, and the checks are switched back on before anything else
+runs. Every table that names a client moves in the same transaction and both clients are locked,
+so the keys agree again once the last table has moved.
 
 ``tests/test_client_merge.py`` discovers every table that refers to a client from the model
 metadata and fails when it is not listed here, so a later module cannot be forgotten.
@@ -17,7 +20,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Any
 
-from sqlalchemy import Table, exists, func, select, update
+from sqlalchemy import CursorResult, Table, exists, func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -84,6 +87,9 @@ class MergeCounts:
     rate_history_rows: int = 0
 
 
+_OPEN_END = date(9999, 12, 31)
+
+
 def _iso(value: date | None) -> str | None:
     return value.isoformat() if value else None
 
@@ -108,25 +114,27 @@ class ClientMergeRepository:
         self, organization_id: uuid.UUID, source_id: uuid.UUID, target_id: uuid.UUID
     ) -> dict[str, int]:
         """Move every ``REPOINTED`` row of ``source_id`` to ``target_id``: rows per table."""
-        ctes = []
-        for name in REPOINTED:
-            table: Table = Base.metadata.tables[name]
-            moved = (
-                update(table)
-                .where(table.c.organization_id == organization_id, table.c.client_id == source_id)
-                .values(client_id=target_id)
-                .returning(table.c.id)
-                .cte(f"moved_{name}")
-            )
-            ctes.append((name, moved))
-        stmt = select(
-            *(
-                select(func.count()).select_from(cte).scalar_subquery().label(name)
-                for name, cte in ctes
-            )
-        )
-        row = (await self.session.execute(stmt)).one()
-        return {name: int(row._mapping[name]) for name in REPOINTED}
+        counts: dict[str, int] = {}
+        await self.session.execute(text("SET SESSION foreign_key_checks = 0"))
+        try:
+            for name in REPOINTED:
+                table: Table = Base.metadata.tables[name]
+                counts[name] = await self._update_count(
+                    update(table)
+                    .where(
+                        table.c.organization_id == organization_id,
+                        table.c.client_id == source_id,
+                    )
+                    .values(client_id=target_id)
+                )
+        finally:
+            await self.session.execute(text("SET SESSION foreign_key_checks = 1"))
+        return counts
+
+    async def _update_count(self, stmt: Any) -> int:
+        """Rows an UPDATE matched (the driver reports found rows, as RETURNING listed them)."""
+        result: CursorResult[Any] = await self.session.execute(stmt)  # type: ignore[assignment]
+        return int(result.rowcount)
 
     async def move_contacts(
         self, organization_id: uuid.UUID, source_id: uuid.UUID, target_id: uuid.UUID
@@ -167,12 +175,11 @@ class ClientMergeRepository:
                 ClientContact.client_id == source_id,
             )
             .values(client_id=target_id)
-            .returning(ClientContact.id)
             .execution_options(synchronize_session=False)
         )
         if target_has_primary:
             stmt = stmt.values(is_primary=False)
-        moved = len((await self.session.execute(stmt)).all())
+        moved = await self._update_count(stmt)
         return moved, demoted
 
     async def move_engagements(
@@ -218,10 +225,9 @@ class ClientMergeRepository:
                 ClientService.id.not_in([row[0].id for row in conflicts]),
             )
             .values(client_id=target_id)
-            .returning(ClientService.id)
             .execution_options(synchronize_session=False)
         )
-        return len((await self.session.execute(stmt)).all()), left
+        return await self._update_count(stmt), left
 
     async def move_rate_rules(
         self, organization_id: uuid.UUID, source_id: uuid.UUID, target_id: uuid.UUID
@@ -239,9 +245,9 @@ class ClientMergeRepository:
             theirs.service_id.is_not_distinct_from(mine.service_id),
             theirs.user_id.is_not_distinct_from(mine.user_id),
             theirs.grade_id.is_not_distinct_from(mine.grade_id),
-            func.daterange(theirs.effective_from, theirs.effective_to, "[]").op("&&")(
-                func.daterange(mine.effective_from, mine.effective_to, "[]")
-            ),
+            # Inclusive periods (open-ended when effective_to is NULL) that share a day.
+            theirs.effective_from <= func.coalesce(mine.effective_to, _OPEN_END),
+            mine.effective_from <= func.coalesce(theirs.effective_to, _OPEN_END),
         )
         conflicts = list(
             (
@@ -269,18 +275,35 @@ class ClientMergeRepository:
             }
             for rule in conflicts
         ]
-        stmt = (
-            update(RateRule)
-            .where(
-                RateRule.organization_id == organization_id,
-                RateRule.client_id == source_id,
-                RateRule.id.not_in([rule.id for rule in conflicts]),
-            )
-            .values(client_id=target_id)
-            .returning(RateRule)
-            .execution_options(populate_existing=True, synchronize_session=False)
+        moving = list(
+            (
+                await self.session.execute(
+                    select(RateRule.id).where(
+                        RateRule.organization_id == organization_id,
+                        RateRule.client_id == source_id,
+                        RateRule.id.not_in([rule.id for rule in conflicts]),
+                    )
+                )
+            ).scalars()
         )
-        moved = list((await self.session.execute(stmt)).scalars())
+        if not moving:
+            return [], left
+        await self.session.execute(
+            update(RateRule)
+            .where(RateRule.organization_id == organization_id, RateRule.id.in_(moving))
+            .values(client_id=target_id)
+            .execution_options(synchronize_session=False)
+        )
+        moved = list(
+            (
+                await self.session.execute(
+                    select(RateRule)
+                    .where(RateRule.organization_id == organization_id, RateRule.id.in_(moving))
+                    .order_by(RateRule.effective_from, RateRule.id)
+                    .execution_options(populate_existing=True)
+                )
+            ).scalars()
+        )
         return moved, left
 
     async def add_rate_history(self, rows: list[RateChange]) -> None:
@@ -298,7 +321,6 @@ class ClientMergeRepository:
                 Client.merged_into_client_id == source_id,
             )
             .values(merged_into_client_id=target_id)
-            .returning(Client.id)
             .execution_options(synchronize_session=False)
         )
-        return len((await self.session.execute(stmt)).all())
+        return await self._update_count(stmt)

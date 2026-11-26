@@ -13,7 +13,7 @@ from app.utils.ids import new_id
 
 def _client_key() -> ColumnElement[str]:
     """What a client's segment is matched on: trimmed and case-folded."""
-    return func.lower(func.btrim(Client.segment))
+    return func.lower(func.trim(Client.segment))
 
 
 class SegmentRepository:

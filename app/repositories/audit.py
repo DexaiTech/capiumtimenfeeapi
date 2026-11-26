@@ -2,7 +2,7 @@ import uuid
 from collections.abc import Collection, Sequence
 from typing import Any
 
-from sqlalchemy import Select, Text, and_, cast, func, literal_column, or_, select
+from sqlalchemy import ColumnElement, Select, Text, and_, cast, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import AuditLog, OrganizationMember, User
@@ -83,8 +83,7 @@ class AuditRepository:
         """
         about = and_(AuditLog.target_type == target_type, AuditLog.target_id == target_id)
         if related_key is not None:
-            # A literal key, so the partial expression index can be used.
-            named = AuditLog.meta.op("->>")(literal_column(f"'{related_key}'")) == str(target_id)
+            named = _named_in_details(related_key) == str(target_id)
             about = or_(about, named)
         stmt = self._filtered(organization_id, filters).where(about)
         if record_types is not None:
@@ -117,6 +116,16 @@ class AuditRepository:
         return {user.id: user for user in rows}
 
 
+def _named_in_details(key: str) -> ColumnElement[str | None]:
+    """The metadata's ``key`` as text: the indexed generated column when there is one."""
+    if key == "client_id":
+        return AuditLog.client_ref.expression
+    if key == "ticket_id":
+        return AuditLog.ticket_ref.expression
+    named: ColumnElement[str | None] = AuditLog.meta[key].as_string()
+    return named
+
+
 def _search(organization_id: uuid.UUID, text: str) -> Any:
     """``text`` anywhere in what a person would look for an entry by."""
     people = (
@@ -133,7 +142,7 @@ def _search(organization_id: uuid.UUID, text: str) -> Any:
     return or_(
         AuditLog.action.icontains(text, autoescape=True),
         AuditLog.target_type.icontains(text, autoescape=True),
-        func.host(AuditLog.ip_address, type_=Text).icontains(text, autoescape=True),
+        AuditLog.ip_address.icontains(text, autoescape=True),
         cast(AuditLog.meta, Text).icontains(text, autoescape=True),
         AuditLog.actor_user_id.in_(people),
     )

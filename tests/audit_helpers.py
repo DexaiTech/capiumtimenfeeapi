@@ -69,8 +69,8 @@ async def insert_entry(
     await sql(
         "INSERT INTO audit_logs (id, created_at, organization_id, actor_user_id, action, "
         "target_type, target_id, ip_address, user_agent, request_id, metadata) VALUES "
-        "(:id, :at, :org, :actor, :action, :tt, :tid, CAST(:ip AS inet), :ua, :rid, "
-        "CAST(:meta AS jsonb))",
+        "(:id, :at, :org, :actor, :action, :tt, :tid, CAST(:ip AS CHAR), :ua, :rid, "
+        "CAST(:meta AS JSON))",
         id=entry_id,
         at=created_at or datetime.now(UTC),
         org=org["id"],
@@ -91,7 +91,7 @@ async def entry_rows(org: dict, action: str | None = None, **where: Any) -> list
     text (without a mask) and ``metadata`` as a dict."""
     clauses = "".join(f" AND {column} = :{column}" for column in where)
     rows = await sql(
-        "SELECT action, actor_user_id, target_type, target_id, host(ip_address) AS ip, "  # noqa: S608
+        "SELECT action, actor_user_id, target_type, target_id, ip_address AS ip, "  # noqa: S608
         "user_agent, request_id, metadata FROM audit_logs "
         "WHERE organization_id = :org AND (CAST(:action AS CHAR) IS NULL OR action = :action)"
         f"{clauses} ORDER BY created_at, id",

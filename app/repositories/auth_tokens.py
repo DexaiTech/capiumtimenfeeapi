@@ -1,10 +1,11 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import func, select, update
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import EmailVerificationToken, PasswordResetToken
+from app.utils.db_time import db_now
 
 type OneTimeToken = EmailVerificationToken | PasswordResetToken
 
@@ -26,7 +27,7 @@ class AuthTokenRepository:
             .where(
                 model.token_hash == token_hash,
                 model.used_at.is_(None),
-                model.expires_at > func.now(),
+                model.expires_at > db_now(),
             )
             .with_for_update()
         )
