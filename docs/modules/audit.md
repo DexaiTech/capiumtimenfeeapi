@@ -37,7 +37,7 @@ Staff, Manager, Billing and Viewer can still read the **history of a record** th
 
 ## The entries
 
-An entry is one row of `audit_logs` (monthly partitions, never deleted by the application):
+An entry is one row of `audit_logs` (never deleted by the application):
 
 | Column | Meaning |
 |---|---|
@@ -200,21 +200,24 @@ The entries that match the list filters (`action`, `actor_user_id`, `from`, `to`
 
 ## Append-only
 
-Migration `043` adds a `BEFORE UPDATE OR DELETE` row trigger to `audit_logs`
-(`trg_audit_logs_append_only`, function `reject_audit_log_change`). It exists on the table, on
-every monthly partition and on the default partition, and PostgreSQL clones it onto every
-partition created later (`create_monthly_partition`). Any `UPDATE` or `DELETE` fails with
-`audit_logs is append-only: UPDATE is not allowed` (SQLSTATE `23001`), whoever runs it.
+Two row triggers, `trg_audit_logs_append_only_update` and `trg_audit_logs_append_only_delete`
+(`app/db/triggers.py`, created by migration `100`), refuse every `UPDATE` and `DELETE` of
+`audit_logs` with `SIGNAL SQLSTATE '45000'` and the message `audit_logs is append-only`, whoever
+runs it (`app/db/errors.py` reads it as `rejected`; the API answers 500, since no request may
+cause it).
 
 * The table has no foreign key, so deleting a practice (a soft delete) or even removing its row
   never touches its entries. There is no cascade to allow for.
 * No endpoint modifies or removes an entry (the audit routes are `GET` only; `PUT`, `PATCH`,
   `DELETE` and `POST` answer 404 or 405), and a test scans the application source for any
   `UPDATE`/`DELETE` of `audit_logs`.
-* `TRUNCATE` and dropping a partition are administrative operations, not row changes, and are not
-  blocked by the trigger (the test suite empties the table between tests). In production the
-  application's database role should not be granted `TRUNCATE` or ownership of the table; keep
-  partitions for at least six years (`docs/plan.md`).
+* `TRUNCATE` is an administrative operation, not a row change, and is not blocked by the trigger
+  (the test suite empties the table between tests). In production the application's database
+  user should not be granted `DROP` (which `TRUNCATE` needs) on the table; keep entries for at
+  least six years (`docs/plan.md`).
+* MySQL indexes a JSON value only through a column: `client_ref` and `ticket_ref` are generated
+  from `metadata.client_id` / `metadata.ticket_id` and indexed for the Client 360 and ticket
+  histories (they were expression indexes on PostgreSQL).
 
 The migration also adds the index `ix_audit_logs_organization_id_target_created_at`
 (`organization_id`, `target_type`, `target_id`, `created_at`) that serves the record history and

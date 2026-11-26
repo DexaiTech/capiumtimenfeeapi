@@ -12,13 +12,13 @@ Dokku, a plain server). Two repositories, three containers:
 | Worker | `capiumtimenfeeapi` | `Dockerfile` target `worker`, or `Dockerfile.worker` | none | process running |
 | UI | `capiumtimenfeeui` | `Dockerfile` | 80 | `GET /healthz` |
 
-`docker-compose.dev.yml` is the **local development stack** (its own Postgres, Mailpit and
+`docker-compose.dev.yml` is the **local development stack** (its own MySQL, Azurite, Mailpit and
 development secrets). Never deploy it: choose the *Dockerfile* build type on the platform.
 
 ## Request path
 
 ```text
-Browser ──HTTPS──► UI (nginx) ──/api/*──► API ──► PostgreSQL
+Browser ──HTTPS──► UI (nginx) ──/api/*──► API ──► MySQL 8.4
                      └── static app
 ```
 
@@ -32,7 +32,8 @@ The API checks the `Origin` of the refresh and logout calls against `CORS_ORIGIN
 |---|---|---|
 | `APP_ENV` | `production` | Enables the production checks and hides `/docs` |
 | `APP_DEBUG` | `false` | Must be false in production |
-| `DB_URL` | `postgresql://user:pass@host:5432/db` | Add `?sslmode=require` when the server supports TLS |
+| `DB_URL` | `mysql://user:pass@host:3306/capium` | The database must be `utf8mb4` / `utf8mb4_0900_as_cs`, with `transaction_isolation=READ-COMMITTED` and `log_bin_trust_function_creators=ON` |
+| `DB_SSL_MODE` | `verify_identity` | TLS to MySQL: `disabled`, `required`, `verify_ca`, `verify_identity` (Azure requires TLS). `DB_SSL_CA` names a CA file; empty uses the bundled public CAs |
 | `JWT_SECRET_KEY` | 48+ random characters | `python -c "import secrets; print(secrets.token_urlsafe(48))"` |
 | `FRONTEND_URL` | `https://timenfee.example.com` | The UI's public origin (links in emails, secure cookies) |
 | `BACKEND_URL` | `https://api.timenfee.example.com` | The API's public origin |

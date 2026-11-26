@@ -646,8 +646,7 @@ export are in `docs/modules/audit.md`.
   new]}`. It is written by the owning service in the same transaction as the change; an update
   that changes nothing writes nothing. Sign-ins are account-level (no practice): recorded, never
   listed in a practice's log.
-* **Append-only**: a database trigger refuses every `UPDATE` and `DELETE` of `audit_logs`, on every
-  partition; no endpoint and no code path changes an entry, and a practice's deletion keeps its
+* **Append-only**: database triggers refuse every `UPDATE` and `DELETE` of `audit_logs`; no endpoint and no code path changes an entry, and a practice's deletion keeps its
   trail. Nothing deletes entries: UK practices keep their records at least six years.
 * **Who reads it**: the list needs `audit_log.read`, the export `audit_log.read` and
   `audit_log.export`. The history of **one record** needs `audit_log.read` or the read permission

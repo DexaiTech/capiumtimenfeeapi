@@ -10,7 +10,7 @@ product across both repositories (how they connect, cross-cutting rules, where e
 
 ## Stack
 
-Python 3.14 · FastAPI · Pydantic 2 · SQLAlchemy 2 async (asyncpg) · Alembic · PostgreSQL 18 ·
+Python 3.14 · FastAPI · Pydantic 2 · SQLAlchemy 2 async (aiomysql) · Alembic · MySQL 8.4 ·
 structlog · Jinja2 · fpdf2 · pytest + pytest-asyncio + httpx · ruff · mypy (strict).
 Pinned in `requirements.txt` / `requirements-dev.txt`; tool config in `pyproject.toml`.
 
@@ -32,7 +32,7 @@ Pinned in `requirements.txt` / `requirements-dev.txt`; tool config in `pyproject
 | `app/utils/` | Money, pagination, practice dates, shared rules |
 | `app/templates/email/` | Email templates |
 | `app/maintenance/` | `bootstrap.py` (first practice), `reset_data.py` |
-| `alembic/versions/` | Migrations `NNN_description.py` (001-079, linear) |
+| `alembic/versions/` | Migrations `NNN_description.py`, linear from `100_mysql_baseline.py`; `alembic/postgres_history/` keeps the retired PostgreSQL migrations 001-082 (not run) |
 | `tests/` | pytest suite, `conftest.py`, factories, `*_helpers.py` |
 | `infra/` | Azure infrastructure (Bicep): Container Apps, MySQL, Blob Storage, Key Vault ([infra/README.md](infra/README.md)) |
 | `docs/` | Documentation (index below); `docs/implementation-plans/` for ticket plans |
@@ -44,7 +44,7 @@ python3.14 -m venv .venv                                  # Windows: py -3.14 -m
 source .venv/bin/activate                                 # Windows: .venv\Scripts\Activate.ps1
 pip install -r requirements-dev.txt
 cp .env.example .env                                      # set DB_URL, JWT_SECRET_KEY, FRONTEND_URL, BACKEND_URL, SMTP_*
-docker compose -f docker-compose.dev.yml up -d postgres mailpit   # optional: Postgres on :5433, Mailpit on :8025
+docker compose -f docker-compose.dev.yml up -d mysql azurite mailpit   # optional: MySQL on :3307, Blob emulator on :10000, Mailpit on :8025
 alembic upgrade head                                      # migrate; alembic check = models match migrations
 python -m app.maintenance.bootstrap --practice-name "Smith & Co" --admin-name "Ada Smith" --admin-email ada@smithco.example
 uvicorn app.main:app --reload --port 8000                 # Swagger at http://localhost:8000/docs
@@ -57,17 +57,18 @@ the practice and Owner and prints a temporary password once. Full setup and ever
 
 ## Test and check
 
-* Tests need a local PostgreSQL database whose name contains the word `test`
+* Tests need a local MySQL 8.4 database whose name contains the word `test`
   (`capium_test`, `capium_test_apt80`), passed as `TEST_DB_URL`. Default when unset:
-  `postgresql://postgres@127.0.0.1:5432/capium_tf_test` (not created for you).
-* Each session runs `alembic downgrade base` + `upgrade head`, and every test ends with a
-  `TRUNCATE ... organizations CASCADE`. One database per pytest process (and per worktree).
+  `mysql://capium:capium@127.0.0.1:3307/capium_test` (not created for you).
+* Each session runs `alembic downgrade base` + `upgrade head`, and every test ends by emptying
+  the tables it may have filled (`tests/conftest.py`). One database per pytest process (and per
+  worktree).
 * A DB left half-migrated by an interrupted run fails setup in `downgrade base`: drop and
   recreate it.
-* Migration tests (`tests/test_*migration*.py`) are slow; run the touched module first.
+* The migration test (`tests/test_mysql_baseline_migration.py`) is slow; run the touched module first.
 
 ```bash
-$env:TEST_DB_URL = "postgresql://postgres@127.0.0.1:5432/capium_test_x"   # bash: export TEST_DB_URL=...
+$env:TEST_DB_URL = "mysql://capium:capium@127.0.0.1:3307/capium_test_x"   # bash: export TEST_DB_URL=...
 pytest tests/test_grades.py -q          # one module; pytest for everything
 ruff check .
 ruff format --check .

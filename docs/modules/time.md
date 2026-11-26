@@ -741,7 +741,9 @@ two migrations:
     refuses every UPDATE and every DELETE that somebody typed (`restrict_violation`, "time_entry_history
     is append-only"). The practice's own deletion still removes its rows (the cascade runs one trigger
     level deeper: `pg_trigger_depth() > 1`, as for `period_lock_events`) and so does `TRUNCATE` (the
-    maintenance reset and the tests).
+    maintenance reset and the tests). On MySQL (migration `100`) the guards are
+    `trg_time_entry_history_append_only_update` / `_delete` (`app/db/triggers.py`); MySQL fires no
+    trigger for a foreign-key cascade, so the practice's deletion and `TRUNCATE` still work the same.
   * `timesheet_reminders`: `id`, `organization_id` (cascade), `user_id`, `week_start`, `kind`
     (`timesheet` or `approval`, `ck_timesheet_reminders_kind`), `reminded_at` (default `now()`); unique
     `(organization_id, user_id, week_start, kind)`, which is the once-per-person-and-week guarantee,

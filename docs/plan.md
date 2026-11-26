@@ -55,14 +55,14 @@ Browser (React SPA, Vite build) ──HTTPS──► Reverse proxy / TLS (same s
                                                                  │
                      Worker process(es) ◄── jobs table ──────────┤
                      (email, invoice email + PDF,                ▼
-                      partitions, retention)              PostgreSQL 18
+                      retention)                          MySQL 8.4 (Azure)
                                 │                         (all data, job queue,
                                 ▼                          rate limits, audit)
                               SMTP
 ```
 
 * Layering: router (HTTP) → service (rules, one transaction) → repository (queries scoped to
-  the practice) → PostgreSQL. Background work is enqueued in the same transaction.
+  the practice) → MySQL. Background work is enqueued in the same transaction.
 * Tenancy: `organization_id` on every row, composite foreign keys so no row can reference
   another practice, practice id taken from the URL and checked against the caller's active
   membership on every request.
@@ -77,8 +77,9 @@ Browser (React SPA, Vite build) ──HTTPS──► Reverse proxy / TLS (same s
 * Auth: 15-minute JWT access token in memory, rotating httpOnly refresh cookie with reuse
   detection, Argon2 passwords, per-IP and per-account rate limits.
 
-Stack: Python 3.14, FastAPI, Pydantic 2, SQLAlchemy 2 (async, asyncpg), Alembic,
-PostgreSQL 18, fpdf2, structlog · React 19, TypeScript, Vite, Tailwind 4, TanStack Query,
+Stack: Python 3.14, FastAPI, Pydantic 2, SQLAlchemy 2 (async, aiomysql), Alembic,
+MySQL 8.4 (Azure Database for MySQL Flexible Server), Azure Container Apps and Blob Storage,
+fpdf2, structlog · React 19, TypeScript, Vite, Tailwind 4, TanStack Query,
 react-router 7, react-hook-form + zod, Vitest + MSW, Playwright.
 
 Details: [domain.md](domain.md) (business rules), `docs/modules/*.md` (endpoint contracts per
@@ -105,12 +106,15 @@ dominated by the practice), M10 1 week. Backlog items are 1–4 weeks each.
 
 ## 4. Environments
 
+Target after the move to Azure and MySQL (`docs/implementation-plans/AZURE-MYSQL.md`). Until
+its data-migration step has run, the live staging site keeps its PostgreSQL database below.
+
 | Environment | Database | Purpose | Deploys |
 |---|---|---|---|
-| Local | Local PostgreSQL 18 (`capium_tf_dev`), per-module `*_test` databases | Development, tests | — |
-| CI | Postgres 18 service container | Every push and pull request | — |
-| Staging | Hosted PostgreSQL (`capium-db` on the provided server) until a separate production database exists | UAT, demos | Merge to `main` |
-| Production | Managed PostgreSQL with point-in-time recovery (separate from staging) | Live practices | Tagged release |
+| Local | Local MySQL 8.4 (`capium`), per-module `*_test` databases | Development, tests | — |
+| CI | MySQL 8.4 service container | Every push and pull request | — |
+| Staging (dev) | Azure Database for MySQL Flexible Server, resource group `rg-capium-dev` (`infra/env/dev.bicepparam`) | UAT, demos | *Deploy to Azure* workflow, `dev` |
+| Production | Azure Database for MySQL Flexible Server, General Purpose, 35 days point-in-time restore, geo-redundant backups (`infra/env/prod.bicepparam`) | Live practices | *Deploy to Azure* workflow, `prod`, after approval |
 
 The provided server (`51.195.252.84:5423`, PostgreSQL 18.6, empty) is reachable and the
 `capium` user can create objects. It is configured as `HOSTED_DB_URL` in the API's local
@@ -144,8 +148,8 @@ The provided server (`51.195.252.84:5423`, PostgreSQL 18.6, empty) is reachable 
 ## 6. Quality gates (CI, required to merge)
 
 * API: `ruff check`, `ruff format --check`, `mypy --strict app`, `alembic upgrade head` +
-  `alembic check` (models and migrations in sync), `pytest` on PostgreSQL (unit +
-  integration; billing reconciliation and concurrency tests included).
+  `alembic check` (models and migrations in sync), `pytest` on MySQL 8.4 (unit +
+  integration; billing reconciliation and concurrency tests included), Bicep build and lint.
 * UI: `tsc -b`, `eslint --max-warnings 0`, `vitest --run`, `vite build`; Playwright smoke on
   the built app against the API in CI.
 * Contract: the UI's API types are generated from / checked against `openapi.json`; a schema
@@ -158,7 +162,7 @@ The provided server (`51.195.252.84:5423`, PostgreSQL 18.6, empty) is reachable 
 | Level | What |
 |---|---|
 | Unit | Money and VAT rounding, apportionment, rate resolution, date bucketing |
-| Integration (API) | Every endpoint against a real PostgreSQL: permissions per role, tenant isolation, validation, business rules, error codes |
+| Integration (API) | Every endpoint against a real MySQL: permissions per role, tenant isolation, validation, business rules, error codes |
 | Concurrency | Parallel issue (no duplicate or skipped numbers), parallel allocation (no over-allocation), parallel billing of the same WIP |
 | Reconciliation | End-to-end: time + disbursement → draft with write-off → issue → part payment → credit note → payment → zero balance; reports agree with ledgers |
 | UI component | Pages with MSW-mocked API: rendering, forms, permissions, error states |

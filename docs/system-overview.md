@@ -6,7 +6,7 @@ links: each area has a detailed doc. This file is kept **identical in both repos
 
 | Repository                                                            | What it is                                                                        | Entry point                                                                       |
 | --------------------------------------------------------------------- | --------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| [`capiumtimenfeeapi`](https://github.com/DexaiTech/capiumtimenfeeapi) | FastAPI + SQLAlchemy (async) + Alembic + PostgreSQL API, and a worker process     | [`CLAUDE.md`](https://github.com/DexaiTech/capiumtimenfeeapi/blob/main/CLAUDE.md) |
+| [`capiumtimenfeeapi`](https://github.com/DexaiTech/capiumtimenfeeapi) | FastAPI + SQLAlchemy (async) + Alembic + MySQL 8.4 API, and a worker process     | [`CLAUDE.md`](https://github.com/DexaiTech/capiumtimenfeeapi/blob/main/CLAUDE.md) |
 | [`capiumtimenfeeui`](https://github.com/DexaiTech/capiumtimenfeeui)   | React + TypeScript + Vite single-page app (TanStack Query, react-router, zustand) | [`CLAUDE.md`](https://github.com/DexaiTech/capiumtimenfeeui/blob/main/CLAUDE.md)  |
 
 ## 1. What the product does
@@ -37,7 +37,7 @@ flowchart LR
 ## 2. How the pieces run
 
 ```text
-Browser ──HTTPS──► UI container (nginx, static build) ──/api/*──► API container ──► PostgreSQL
+Browser ──HTTPS──► UI container (nginx, static build) ──/api/*──► API container ──► MySQL 8.4
                                                                     │
                                                          Worker container (emails, PDFs, jobs)
 ```

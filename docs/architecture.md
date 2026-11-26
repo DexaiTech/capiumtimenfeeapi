@@ -26,7 +26,7 @@ app/services/<module>.py    rules, one transaction (unit_of_work), audit rows, j
 app/repositories/<module>.py  SQLAlchemy queries, every one filtered by organization_id
         │
         ▼
-app/db/models/<area>.py     declarative tables (Base in app/db/base.py)  →  PostgreSQL
+app/db/models/<area>.py     declarative tables (Base in app/db/base.py)  →  MySQL 8.4
 ```
 
 | Layer | Folder | Rules evidenced in code |
@@ -164,9 +164,9 @@ Routes check permission codes, never role names (stated in [domain.md](domain.md
   user agent and request id.
 * Action names are `<entity>.<past-tense verb>` (`grade.created`, `grade.deactivated`); `meta`
   names the record and, on updates, `changes: {field: [old, new]}` from `apply_changes`.
-* `audit_logs` is range-partitioned by month on `created_at` and append-only: migration `043`
-  adds a trigger that refuses UPDATE and DELETE. The worker job `create_partitions` keeps
-  partitions three months ahead.
+* `audit_logs` is append-only: triggers (`app/db/triggers.py`) refuse UPDATE and DELETE. The
+  generated columns `client_ref` / `ticket_ref` index the client and ticket an entry's metadata
+  names.
 * Presentation (labels, who may read a record's history, sensitive fields) is in
   `app/services/audit_catalogue.py`. Details: [modules/audit.md](modules/audit.md).
 
@@ -177,8 +177,8 @@ Routes check permission codes, never role names (stated in [domain.md](domain.md
 | Queue | `background_jobs` table (`app/db/models/platform.py`) | Status `queued → running → succeeded / failed / dead`; `dedupe_key` unique while live. |
 | Enqueue | `app/services/jobs.py: enqueue` | In the caller's transaction; copies the request id into the payload. |
 | Claim and run | `app/workers/runner.py: Worker` | Claims `WORKER_CONCURRENCY` jobs under a lease (`WORKER_LEASE_SECONDS`), commits the claim, runs each handler in its own session. Retries with exponential backoff (30 s doubling, capped at 1 h) up to `max_attempts`; `PermanentJobError` fails at once. Failed or dead jobs notify the administrators (`notification_events.failed_job`). |
-| Scheduler | `Worker.tick` | Every 60 s, under a PostgreSQL advisory lock (one worker at a time): reaps expired leases and enqueues `PERIODIC` jobs with a slot dedupe key. |
-| Handlers | `app/workers/handlers.py: HANDLERS` | `send_email`, `send_invoice_email`, `send_invoice_void_email`, `send_notification`, `send_payment_reminder_email`, `send_statement_email`; periodic: `create_partitions`, `purge_retention`, `send_timesheet_reminders`, `send_payment_reminders`, `run_recurring_invoices`, `create_engagement_jobs` (daily), `process_integration_items` (every minute). |
+| Scheduler | `Worker.tick` | Every 60 s, under the named lock `worker_scheduler` (`app/db/locks.py: try_transaction_lock`, one worker at a time): reaps expired leases and enqueues `PERIODIC` jobs with a slot dedupe key. |
+| Handlers | `app/workers/handlers.py: HANDLERS` | `send_email`, `send_invoice_email`, `send_invoice_void_email`, `send_notification`, `send_payment_reminder_email`, `send_statement_email`; periodic: `purge_retention`, `send_timesheet_reminders`, `send_payment_reminders`, `run_recurring_invoices`, `create_engagement_jobs` (daily), `process_integration_items` (every minute). |
 
 Handlers must be idempotent: delivery is at-least-once (module docstring of
 `app/workers/handlers.py`). The API never sends mail itself; without a worker, emails stay queued.
@@ -230,8 +230,12 @@ that matter when changing code:
 * With `APP_ENV=test` no `.env` file is read (tests set the environment in `tests/conftest.py`).
 * `APP_ENV=production` refuses debug, a JWT secret under 32 characters, SMTP without credentials
   and `AUTH_RATE_LIMIT_FACTOR != 1`, and hides `/docs` and `/openapi.json`.
-* `DB_URL` is normalised for asyncpg (`normalise_db_url`: scheme, `sslmode`, encoding of special
-  characters in the password).
+* `DB_URL` is normalised for aiomysql (`normalise_db_url`: scheme, `utf8mb4`, encoding of special
+  characters in the password). TLS comes from `DB_SSL_MODE` / `DB_SSL_CA`, and every connection
+  sets UTC, a strict `sql_mode` and `READ COMMITTED` (`app/db/session.py`).
+* Database errors are read through `app/db/errors.py` (`database_error`: unique, foreign key,
+  check, overlap, rejected, deadlock, lock timeout), never driver classes; named locks are
+  `app/db/locks.py` (a row of `advisory_locks` held `FOR UPDATE` until the transaction ends).
 * Settings are cached; tests change one with `monkeypatch.setattr(get_settings(), ...)`.
 
 ## Rate limits and request limits

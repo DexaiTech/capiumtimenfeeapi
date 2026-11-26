@@ -33,12 +33,12 @@ Money is integer pence everywhere, VAT rates are basis points, durations are min
 
 ## Stack
 
-Python 3.14 · FastAPI · Pydantic 2 · SQLAlchemy 2 (async, asyncpg) · Alembic · PostgreSQL 18 ·
+Python 3.14 · FastAPI · Pydantic 2 · SQLAlchemy 2 (async, aiomysql) · Alembic · MySQL 8.4 ·
 PyJWT · Argon2 · aiosmtplib · Jinja2 · fpdf2 · structlog · pytest · ruff · mypy (strict)
 
 ```text
-Router (HTTP only) → Service (rules, transaction, audit) → Repository (queries, per practice) → PostgreSQL
-                         └→ background_jobs table → Worker → SMTP (emails, invoice PDFs), partitions, retention
+Router (HTTP only) → Service (rules, transaction, audit) → Repository (queries, per practice) → MySQL
+                         └→ background_jobs table → Worker → SMTP (emails, invoice PDFs), retention
 ```
 
 Every business route lives under `/api/v1/organizations/{organization_id}/…` (an
@@ -60,8 +60,11 @@ alembic/           migrations                    tests/         test suite
 
 ## Setup
 
-Requirements: Python 3.14, PostgreSQL 15 or newer (18 recommended), an SMTP server (Mailpit
-for development). Docker is optional.
+Requirements: Python 3.14, MySQL 8.4 (Azure Database for MySQL Flexible Server in production),
+an SMTP server (Mailpit for development). Docker is optional. The database must use
+`utf8mb4` / `utf8mb4_0900_as_cs`, `transaction_isolation=READ-COMMITTED` and
+`log_bin_trust_function_creators=ON` (the schema has triggers); the Docker stack and
+`infra/` set all three.
 
 ### 1. Install
 
@@ -100,7 +103,9 @@ python -c "import secrets; print(secrets.token_urlsafe(48))"   # a value for JWT
 |---|---|---|
 | `APP_ENV` | | `development` (default), `test` or `production`. Production refuses debug, a short JWT secret, missing SMTP credentials and a scaled auth limit; it also hides `/docs`. |
 | `APP_DEBUG` | | Verbose logs. Must be false in production. |
-| `DB_URL` | yes | PostgreSQL URL (`postgresql://user:password@host:5432/db`, `?sslmode=require` for hosted databases). Converted for asyncpg; special characters in the password are encoded for you. |
+| `DB_URL` | yes | MySQL URL (`mysql://user:password@host:3306/db`). Converted for aiomysql with `utf8mb4`; special characters in the password are encoded for you. TLS is set with `DB_SSL_MODE`, not in the URL. |
+| `DB_SSL_MODE` | | `disabled` (default), `required` (encrypted, certificate not checked), `verify_ca` or `verify_identity` (use this on Azure). |
+| `DB_SSL_CA` | | CA bundle file for `verify_*`; empty uses the public CAs bundled with `certifi`, which cover Azure. |
 | `DB_DIRECT_URL` | | Non-pooled URL for migrations, when `DB_URL` goes through a pooler. Defaults to `DB_URL`. |
 | `DB_POOL_SIZE`, `DB_MAX_OVERFLOW` | | Connection pool per process (10 and 5). |
 | `JWT_SECRET_KEY` | yes | At least 32 random characters in production. |
@@ -136,11 +141,11 @@ alembic downgrade -1          # undo the last migration
 The schema changes only through migrations (`alembic/versions/NNN_description.py` with both
 `upgrade` and `downgrade`). The permission catalogue is seeded by migration.
 
-A local PostgreSQL 18 and Mailpit are available through Docker:
+A local MySQL 8.4, Azurite (the Azure Blob Storage emulator) and Mailpit are available through Docker:
 
 ```bash
-docker compose -f docker-compose.dev.yml up -d postgres mailpit
-# Postgres on localhost:5433 (database "capium", test database "capium_test",
+docker compose -f docker-compose.dev.yml up -d mysql azurite mailpit
+# MySQL on localhost:3307 (database "capium", test database "capium_test",
 # user/password "capium"/"capium" - local only); Mailpit inbox on http://localhost:8025
 ```
 
@@ -155,7 +160,7 @@ The API never sends mail itself: without a worker, verification, password and in
 stay queued in `background_jobs`. Health probes: `GET /health/live`, `GET /health/ready` (503
 when the database is unreachable or the migrations are not at head).
 
-Everything in containers (Postgres, Mailpit, migrations, API, worker):
+Everything in containers (MySQL, Azurite, Mailpit, migrations, API, worker):
 
 ```bash
 docker compose -f docker-compose.dev.yml --profile app up --build
@@ -194,22 +199,22 @@ branch; with none, those leads stay open.
 
 ## Tests
 
-The suite runs against a disposable PostgreSQL database whose name **must end in `_test`**; it
-rebuilds the schema from the migrations at the start, truncates after every test and never
+The suite runs against a disposable MySQL 8.4 database whose name **must contain the word `test`**; it
+rebuilds the schema from the migrations at the start, empties the tables after every test and never
 reads `.env`. Email goes to an in-process SMTP server.
 
 ```bash
 # Linux / macOS
-export TEST_DB_URL=postgresql://capium:capium@localhost:5433/capium_test
+export TEST_DB_URL=mysql://capium:capium@127.0.0.1:3307/capium_test
 # Windows (PowerShell)
-$env:TEST_DB_URL = "postgresql://capium:capium@localhost:5433/capium_test"
+$env:TEST_DB_URL = "mysql://capium:capium@127.0.0.1:3307/capium_test"
 
 pytest                                      # everything
 pytest tests/test_members.py -q             # one file
 ruff check . && ruff format --check . && mypy app
 ```
 
-Without `TEST_DB_URL` the default is `postgresql://postgres@127.0.0.1:5432/capium_tf_test`.
+Without `TEST_DB_URL` the default is `mysql://capium:capium@127.0.0.1:3307/capium_test`.
 `scripts/dev_mail_sink.py` is a Mailpit stand-in (SMTP on :1025, a small HTTP API on :8025)
 for browser end-to-end runs without Docker.
 
@@ -226,7 +231,9 @@ for browser end-to-end runs without Docker.
   `DB_URL` in the platform's secret store, never in the repository.
 - Closed deployment: run `python -m app.maintenance.bootstrap` once after the first migration.
 - CI (`.github/workflows/ci.yml`) runs ruff, the format check, mypy, `alembic upgrade head` and
-  `alembic check`, and the tests against a PostgreSQL 18 service.
+  `alembic check`, and the tests against a MySQL 8.4 service; a second job compiles and lints
+  the Bicep templates in `infra/`. Azure releases use the manual *Deploy to Azure* workflow
+  ([infra/README.md](infra/README.md)).
 
 The production architecture and roll-out plan are in [docs/plan.md](docs/plan.md).
 

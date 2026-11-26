@@ -1,22 +1,26 @@
 # Testing
 
-The suite is pytest with `pytest-asyncio` against a real PostgreSQL database. Requests go
+The suite is pytest with `pytest-asyncio` against a real MySQL 8.4 database. Requests go
 through the real application in-process (`httpx.AsyncClient` over `ASGITransport`), so a test
 exercises routing, dependencies, services, SQL, constraints and the error envelope together.
 There are 185 `tests/test_*.py` files and 20 `tests/*_helpers.py` modules.
 
 ## Requirements
 
-* A PostgreSQL database you can drop the schema of. `TEST_DB_URL` points at it. The database
+* A MySQL 8.4 database you can drop the schema of. `TEST_DB_URL` points at it. The database
   name must contain the word `test` delimited by `_` or the ends of the name (`capium_test`,
   `capium_test_j`, `capium_tf_test`); otherwise `tests/conftest.py` raises
   `Refusing to run` before anything runs.
-* Default when `TEST_DB_URL` is unset: `postgresql://postgres@127.0.0.1:5432/capium_tf_test`.
+* Default when `TEST_DB_URL` is unset: `mysql://capium:capium@127.0.0.1:3307/capium_test`.
   That database is not created for you.
-* With Docker: `docker compose -f docker-compose.dev.yml up -d postgres` creates `capium_test`
+* With Docker: `docker compose -f docker-compose.dev.yml up -d mysql` creates `capium_test`
   (`docker/init-test-db.sql`), reachable as
-  `postgresql://capium:capium@localhost:5433/capium_test`.
-* Without Docker: create one with `psql`, e.g. `CREATE DATABASE capium_test_apt80;`.
+  `mysql://capium:capium@127.0.0.1:3307/capium_test`.
+* Without Docker (for example the MySQL 8.4 ZIP on Windows): start the server with
+  `character-set-server=utf8mb4`, `collation-server=utf8mb4_0900_as_cs`,
+  `transaction-isolation=READ-COMMITTED` and `log-bin-trust-function-creators=ON`, then
+  `CREATE DATABASE capium_test_apt80 CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs;` and
+  grant the test user all privileges on it.
 * The real `.env` is never read: `APP_ENV=test` is set before the application is imported and
   `Settings` skips the env file in that mode (`app/core/config.py`).
 
@@ -24,9 +28,9 @@ There are 185 `tests/test_*.py` files and 20 `tests/*_helpers.py` modules.
 
 ```bash
 # Linux / macOS
-export TEST_DB_URL=postgresql://capium:capium@localhost:5433/capium_test
+export TEST_DB_URL=mysql://capium:capium@127.0.0.1:3307/capium_test
 # Windows (PowerShell)
-$env:TEST_DB_URL = "postgresql://capium:capium@localhost:5433/capium_test"
+$env:TEST_DB_URL = "mysql://capium:capium@127.0.0.1:3307/capium_test"
 
 pytest                                   # everything (addopts = -q, testpaths = tests)
 pytest tests/test_grades.py              # one file
@@ -46,7 +50,7 @@ mypy app                                 # strict, configured in pyproject.toml;
 | Environment | import time | Sets `APP_ENV=test`, `DB_URL=TEST_DB_URL`, a test JWT secret, `SMTP_HOST=127.0.0.1` on a free port, `API_RATE_LIMIT_ENABLED=false`, `CLOSED_DEPLOYMENT=false`, `STORAGE_DIR` to a temporary directory; removes `DB_DIRECT_URL`. |
 | `_migrated_database` | session, autouse | Runs `alembic downgrade base` then `alembic upgrade head` in a subprocess: the schema is built exactly as a deployment builds it. |
 | `mailbox` | session | An in-process SMTP server (`aiosmtpd`) collecting every email; `mailbox.to(address)`, `Mailbox.text(message)`, `mailbox.token_for(address)`. |
-| `_clean` | function, autouse | After each test: clears the mailbox, empties the storage directory and runs `TRUNCATE users, user_sessions, refresh_tokens, email_verification_tokens, password_reset_tokens, background_jobs, rate_limit_counters, audit_logs, organizations CASCADE` (every practice table cascades from `organizations`). |
+| `_clean` | function, autouse | After each test: clears the mailbox, empties the storage directory and empties every table that has rows among `users`, `user_sessions`, the token tables, `background_jobs`, `rate_limit_counters`, `audit_logs`, `organizations` and every table that refers to them (what PostgreSQL's `TRUNCATE ... CASCADE` emptied). One query finds the non-empty tables; they are emptied with foreign-key checks off, by `DELETE`, or `TRUNCATE` for the append-only tables whose triggers refuse `DELETE`. `permissions` stays. |
 | `_fresh_memory_rate_limiter` | function, autouse | Resets the in-process rate limiter. |
 | `central_gateway` | function, autouse | A clean mock central client gateway (25 clients, switched on, empty change feed); tests call `central_gateway.set_available(False)` and push events through it. |
 | `integration_gateways` | function, autouse | From `tests/integration_fixtures.py`: clean mock integration gateways and an empty subscription cache. |
@@ -118,13 +122,11 @@ Checklist, taken from what existing tests cover (`tests/test_grades.py` is a com
 ## Slow areas
 
 * Session start: every run (even of one test) downgrades to base and upgrades to head.
-* Migration tests: `tests/test_*migration*.py` (for example `test_foundation_migration.py`,
-  `test_time_migrations.py`, `test_central_migrations.py`,
-  `test_staff_only_rate_mode_migration.py`) and a few others that call Alembic
+* Migration tests: `tests/test_mysql_baseline_migration.py` and a few others that call Alembic
   (`test_audit_append_only.py`, `test_bootstrap.py`, `test_foundation_maintenance.py`,
-  `test_segments.py`). Each round trip runs many migrations in a subprocess. On the team's
-  Windows machine the foundation migration set alone has taken about an hour (observed, not
-  measured in CI).
+  `test_segments.py`). Each round trip drops and recreates the hundred tables in a subprocess
+  (about 15-25 s locally). The PostgreSQL migration tests were retired with their migrations
+  (`alembic/postgres_history/`).
 * Run the module you changed first, then the related modules, then the full suite.
 
 ## Running in parallel
@@ -136,7 +138,7 @@ two processes must never share a database. To split the suite:
 2. Start each process with its own `TEST_DB_URL` and its own list of test files:
 
    ```powershell
-   $env:TEST_DB_URL = "postgresql://postgres@127.0.0.1:5432/capium_test_a"; pytest tests/test_a*.py tests/test_b*.py
+   $env:TEST_DB_URL = "mysql://capium:capium@127.0.0.1:3307/capium_test_a"; pytest tests/test_a*.py tests/test_b*.py
    ```
 
 3. Keep the migration tests in one process, or spread them evenly: they dominate the run time.
@@ -176,5 +178,5 @@ pytest <the modules you touched>           # then the related modules, then ever
 ```
 
 `.github/workflows/ci.yml` runs the same gates (lint, format, mypy, migrations up/check/
-down/up, pytest on PostgreSQL 18) on every pull request and every push to `main`, in about 17
-minutes. Check the result with `gh pr checks <n>`.
+down/up, pytest on MySQL 8.4, and a Bicep build and lint of `infra/`) on every pull request and
+every push to `main`. Check the result with `gh pr checks <n>`.

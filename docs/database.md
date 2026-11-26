@@ -1,8 +1,9 @@
 # Database
 
-PostgreSQL (18 in Docker and CI; README requires 15 or newer). 96 tables, defined as SQLAlchemy
-models in `app/db/models/` (one file per area, all imported by `app/db/models/__init__.py`) and
-created only by the Alembic migrations in `alembic/versions/`. Business meaning of the columns is
+MySQL 8.4 (Azure Database for MySQL Flexible Server in production; `mysql:8.4` in Docker and
+CI). 100 tables, defined as SQLAlchemy models in `app/db/models/` (one file per area, all imported
+by `app/db/models/__init__.py`) and created only by the Alembic migrations in `alembic/versions/`.
+Until migration `100` the schema lived on PostgreSQL; see [MySQL specifics](#mysql-specifics). Business meaning of the columns is
 in [domain.md](domain.md) and the module docs; this page is what you need to change the schema
 safely.
 
@@ -10,18 +11,19 @@ safely.
 
 | Topic | Convention | Evidence |
 |---|---|---|
-| Primary keys | `id UUID`, UUIDv7 generated in Python (`new_id`) | `IdMixin` in `app/db/base.py`, `app/utils/ids.py` |
-| Timestamps | `created_at`, `updated_at` (`timestamptz`, default `now()`); `updated_at` is set by the `set_updated_at()` trigger, not by the ORM | `TimestampMixin`; migration `001` creates the function; `add_updated_at_trigger(s)` in `app/db/migration_helpers.py` |
+| Primary keys | `id CHAR(36)` (ASCII, binary collation): the UUID's hyphenated text, UUIDv7 generated in Python (`new_id`) | `IdMixin` in `app/db/base.py`, `Uuid36` in `app/db/types.py`, `app/utils/ids.py` |
+| Timestamps | `created_at`, `updated_at` (`DATETIME(6)` in UTC, default `CURRENT_TIMESTAMP(6)`); `updated_at` is kept by `ON UPDATE CURRENT_TIMESTAMP(6)`, not by the ORM | `TimestampMixin`; `UTCDateTime` in `app/db/types.py` (aware UTC datetimes in and out) |
 | Tenancy | `organization_id UUID NOT NULL REFERENCES organizations ON DELETE CASCADE` | `OrgScopedMixin` |
 | Soft delete | `deleted_at` on `organizations`, `users`, `roles`, `clients`, `jobs`, `invoices`, `invoice_templates`; `archived_at` on `vat_rates`, `leads` | `SoftDeleteMixin`; a staff member who is referenced is not hard-deleted, `organization_members.status` changes instead (`active`, `suspended`, `removed`, `inactive`, `left`, `deleted`) |
-| Statuses and kinds | `text` columns with a `CHECK (... IN (...))`, no PostgreSQL enum types | e.g. `Timesheet.__table_args__` in `app/db/models/time.py` |
+| Statuses and kinds | `VARCHAR` columns with a `CHECK (... IN (...))`, no `ENUM` types | e.g. `Timesheet.__table_args__` in `app/db/models/time.py` |
 | Money | Integer pence (`BigInteger` for amounts and totals) | `app/utils/money.py`; `invoices.net_total`, `payments.amount` |
 | Rates | Pence per hour (`charge_rate`, `cost_rate`, `default_charge_rate`, `hourly_rate`) | `TimeEntry` docstring |
 | Percentages | Basis points in columns ending `_bp` (`vat_rate_bp` 2000 = 20%, `chargeable_target_bp`, `markup_bp`, `cost_plus_markup_bp`, `overtime_multiplier_bp`) | `app/utils/money.py: BASIS_POINTS` |
 | Durations | Whole minutes (`minutes`, `budget_minutes`, `weekly_capacity_minutes`) | `ck_time_entries_minutes` (1..1440) |
 | Quantities | `Numeric(12, 2)` on invoice, estimate and recurring lines | `app/db/models/billing.py`, `estimates.py` |
 | Snapshots | Values copied at the time of the event, never recomputed: `time_entries.charge_rate/cost_rate/charge_value/cost_value/rate_source`, `invoice_lines.vat_rate_bp` | `TimeEntry` docstring, [domain.md](domain.md#conventions) |
-| JSON | `JSONB` for free-form payloads (`audit_logs.metadata`, `background_jobs.payload`, `integration_sync_items.payload`) | `app/db/models/platform.py`, `integrations.py` |
+| JSON | `JSON` for free-form payloads (`audit_logs.metadata`, `background_jobs.payload`, `integration_sync_items.payload`) and for lists (`organizations.working_days`, `wip_valuation_sources`, recipients); defaults are expressions (`(JSON_ARRAY())`) | `app/db/models/platform.py`, `integrations.py`, `organization.py` |
+| Text | `VARCHAR(n)` where the column is indexed, defaulted or bounded by a CHECK (`n` from the CHECK), `TEXT` for long free text | e.g. `clients.name` `VARCHAR(200)` |
 
 ### Constraint and index names
 
@@ -84,10 +86,10 @@ table has `organization_id`.
 | Area (model file) | Tables | Key relations and notes |
 |---|---|---|
 | Accounts (`user.py`) | `users`, `user_sessions`, `refresh_tokens`, `email_verification_tokens`, `password_reset_tokens` | Not org-scoped. Tokens stored as SHA-256 hashes. `refresh_tokens.replaced_by_id` chains rotations. |
-| Platform (`platform.py`) | `background_jobs`, `rate_limit_counters` (UNLOGGED), `audit_logs` | `audit_logs`: PK `(id, created_at)`, range-partitioned by month, append-only trigger (migration `043`). |
+| Platform (`platform.py`, `locks.py`) | `background_jobs`, `rate_limit_counters`, `audit_logs`, `advisory_locks` | `audit_logs`: PK `(id, created_at)`, append-only triggers, generated `client_ref` / `ticket_ref`. `advisory_locks`: the rows behind the named locks (`app/db/locks.py`). |
 | Practice and access (`organization.py`) | `organizations`, `organization_members`, `roles`, `permissions`, `role_permissions`, `member_permission_overrides` | `organizations` holds the practice settings (time zone, working week, VAT, approval switches, `rate_mode`, period-lock and overtime settings, `branches_enabled`, ...). Member → role, grade, manager (self-reference). |
 | Set-up (`practice.py`) | `vat_rates`, `activity_codes`, `services`, `service_activity_codes`, `service_task_templates`, `grades`, `document_sequences`, `segments`, `staff_segments`, `branches` | Seeded for each new practice (`app/services/practice_defaults.py`). `document_sequences` gives gapless numbers (`app/services/sequences.py`). |
-| Rates (`rates.py`) | `rate_rules`, `rate_changes`, `rate_reruns`, `rate_rerun_items` | `rate_rules` has a `kind` (`charge`/`cost`; cost only at `staff` or `grade` level), a `level` and an effective period, with the exclusion constraint `ex_rate_rules_scope_period` against overlaps. [team-rates.md](modules/team-rates.md#rates) |
+| Rates (`rates.py`) | `rate_rules`, `rate_changes`, `rate_reruns`, `rate_rerun_items` | `rate_rules` has a `kind` (`charge`/`cost`; cost only at `staff` or `grade` level), a `level` and an effective period, with the trigger `ex_rate_rules_scope_period` against overlaps (`app/db/triggers.py`). [team-rates.md](modules/team-rates.md#rates) |
 | Clients (`clients.py`) | `clients`, `client_contacts`, `client_services`, `engagement_job_runs`, `leads` | `clients` → partner/manager member, default VAT rate, default service, invoice template, branch, `merged_into_client_id`; `central_client_id` links to the central service; `is_internal` marks the built-in Internal client. |
 | Jobs (`jobs.py`) | `jobs`, `job_assignees`, `tasks`, `task_assignees`, `job_budget_alerts` | `jobs` → client, service, partner/manager; `pm_job_id` links to practice management. |
 | Time (`time.py`, `time_history.py`) | `timesheets`, `time_entries`, `timers`, `time_entry_history`, `timesheet_reminders` | Entry → timesheet, client, job (of that client), task (of that job), activity code, member. `billing_status` `unbilled → in_draft → billed / written_off`. |
@@ -146,32 +148,36 @@ erDiagram
 ### Layout
 
 * Files: `alembic/versions/NNN_description.py` (`file_template = %%(rev)s_%%(slug)s` in
-  `alembic.ini`). The revision id is the three-digit number as a string (`revision = "079"`,
-  `down_revision = "078"`). The chain is linear with one head.
-* 77 files, `001` to `079`. Numbers `071` and `072` do not exist: `073` revises `070`.
-* `007`-`009`, `033`-`035`, `041`-`042` are empty placeholders (`upgrade`/`downgrade` are `pass`)
-  that were reserved for parallel work. Leave them in place.
-* `alembic/env.py` runs online through an async engine on `DB_DIRECT_URL` (else `DB_URL`) and
-  ignores the runtime monthly partitions `audit_logs_*` when comparing.
+  `alembic.ini`). The revision id is the three-digit number as a string (`revision = "101"`,
+  `down_revision = "100"`). The chain is linear with one head.
+* It starts at `100_mysql_baseline.py`, which creates the whole schema (equivalent to the last
+  PostgreSQL migration, `082`), seeds the permission catalogue and creates the triggers. Its
+  docstring lists every deliberate difference from the PostgreSQL schema. The next migration
+  is `101`.
+* `alembic/postgres_history/` keeps the PostgreSQL migrations `001`-`082` for reference and for
+  the data move; Alembic does not read it.
+* `alembic/env.py` runs online through an async engine on `DB_DIRECT_URL` (else `DB_URL`), with
+  the application's connection settings, and spells `UTCDateTime` / `Uuid36` as plain MySQL
+  types in generated revisions.
 * A post-write hook formats new revision files with `ruff format` (`alembic.ini`).
 
 ### Adding a migration
 
 1. Change the model in `app/db/models/` first.
 2. Create the file with the next number:
-   `alembic revision -m "short description" --rev-id 080` (the `--rev-id` makes the
+   `alembic revision -m "short description" --rev-id 101` (the `--rev-id` makes the
    number the revision id and the file name prefix).
 3. Write the operations by hand. No file in `alembic/versions/` carries Alembic's autogenerate
    markers; if you start from `--autogenerate`, review every line and remove the markers.
 4. Docstring: the description line, `Revision ID` / `Revises`, then the ticket (`Ticket APT79: ...`)
-   and what the upgrade and the downgrade do to existing data (see `078_internal_client.py`,
-   `079_staff_only_rate_mode.py`).
+   and what the upgrade and the downgrade do to existing data (examples in
+   `alembic/postgres_history/078_internal_client.py`, `079_staff_only_rate_mode.py`).
 5. Name constraints exactly as the convention would and wrap them in `op.f(...)` so the
    convention is not applied twice: `op.f("ck_organizations_rate_mode")`.
 6. A new table: `organization_id` with `ON DELETE CASCADE`, `UNIQUE (organization_id, id)` if
    other tables will reference it, composite foreign keys to other practice tables, and
-   `add_updated_at_triggers("<table>")` (`app/db/migration_helpers.py`), or `updated_at` never
-   changes.
+   `timestamps()` from `app/db/migration_helpers.py` (its `updated_at` has `ON UPDATE
+   CURRENT_TIMESTAMP(6)`, or `updated_at` never changes).
 7. A new permission: add it to `CATALOGUE` in `app/core/permissions.py`, call
    `sync_permissions()` in the migration, grant it to roles as needed, and update
    [modules/permissions.md](modules/permissions.md) (checked by `tests/test_permissions_doc.py`).
@@ -179,21 +185,47 @@ erDiagram
    application services (the schema they assume may change later).
 9. Check: `alembic upgrade head`, `alembic check` (models and migrations agree),
    `alembic downgrade -1`, `alembic upgrade head`.
+10. MySQL commits every DDL statement on its own: a migration that fails half-way stays
+    half-applied. Keep each revision small, make data steps re-runnable, and take a backup before
+    a release with migrations ([infra/README.md](../infra/README.md#releases)).
 
 ### Downgrades
 
-Every revision has a `downgrade()`. Recent ones reverse the schema and say in the docstring what
-happens to data the old schema cannot hold (for example `079` turns `staff_only` into
-`staff_first`; `078` keeps an Internal client that is still referenced). The test suite runs
+Every revision has a `downgrade()` that reverses the schema and says in the docstring what
+happens to data the old schema cannot hold. The baseline's downgrade drops every table with
+foreign-key checks off, so it cannot stop half-way. The test suite runs
 `alembic downgrade base` then `upgrade head` at the start of every session
 (`tests/conftest.py: _migrated_database`), so a broken downgrade breaks every test run.
 
 ### Migration tests
 
-Migrations with data steps have a test that downgrades to the previous revision, checks the
-data, and upgrades again in a `finally` block (`tests/test_staff_only_rate_mode_migration.py`,
-helpers in `tests/migration_helpers.py`: `migrate`, `head_revision`). These tests are slow; see
-[testing.md](testing.md#slow-areas).
+`tests/test_mysql_baseline_migration.py` checks the history (one head, starting at `100`), that
+the models match the migrations, downgrade and upgrade, the permission seed and the triggers.
+A migration with data steps gets a test that downgrades to the previous revision, checks the
+data, and upgrades again in a `finally` block (helpers in `tests/migration_helpers.py`:
+`migrate`, `head_revision`). These tests are slow; see [testing.md](testing.md#slow-areas).
+
+## MySQL specifics
+
+What differs from the PostgreSQL schema, and the rule to follow when changing it:
+
+| PostgreSQL had | MySQL has | Where |
+|---|---|---|
+| Partial unique index `... WHERE deleted_at IS NULL` | Functional unique index on `(CASE WHEN <condition> THEN <column> END)` per column: rows outside the condition are NULL and never collide. Same index name, so `UNIQUE_MESSAGES` (`app/core/handlers.py`) still applies | e.g. `uq_clients_organization_id_code` |
+| Exclusion constraint (overlapping periods) | `BEFORE INSERT` / `BEFORE UPDATE` triggers that `SIGNAL` the constraint's name; read as `overlap` by `app/db/errors.py` | `app/db/triggers.py: NO_OVERLAP` |
+| Append-only trigger functions | `BEFORE UPDATE` / `BEFORE DELETE` triggers; MySQL fires no trigger for a foreign-key cascade, so a practice's rows still go with it | `app/db/triggers.py: APPEND_ONLY` |
+| `pg_advisory_xact_lock` | A row of `advisory_locks` held `FOR UPDATE` until the transaction ends | `app/db/locks.py` |
+| `timestamptz` | `DATETIME(6)` in UTC; every session runs with `time_zone = '+00:00'` | `app/db/types.py`, `app/db/session.py` |
+| `uuid` | `CHAR(36)` ASCII text | `Uuid36` |
+| `jsonb`, arrays | `JSON` | |
+| Range-partitioned `audit_logs` | One table; generated columns `client_ref` / `ticket_ref` for the JSON lookups | `app/db/models/platform.py` |
+| `INSERT ... ON CONFLICT` | `INSERT ... ON DUPLICATE KEY UPDATE`, which fires on *any* unique key of the table | repositories |
+| `RETURNING` | Ids are made in Python; rows are read back in the same transaction | repositories |
+
+The database runs `utf8mb4` with `utf8mb4_0900_as_cs` (case- and accent-sensitive, like
+PostgreSQL), `READ COMMITTED` and `log_bin_trust_function_creators=ON` (needed to create the
+triggers when binary logging is on); `infra/modules/mysql.bicep`, `docker-compose.dev.yml` and CI
+set them.
 
 ### Deployment order
 
