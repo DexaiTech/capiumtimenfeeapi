@@ -382,3 +382,16 @@ Changes found necessary while implementing, with the reason:
 * **Local verification:** MySQL 8.4.13 Community (ZIP) runs on this machine on `127.0.0.1:3307`
   with the same settings as Azure, so the schema, the migrations and the suite are checked
   locally, not only in CI.
+* **Hard-deleting a practice row fails on MySQL** (error 1451). MySQL checks each foreign key
+  row by row while it cascades, where PostgreSQL checked at the end of the statement, so the
+  composite keys between a practice's own tables refuse the cascade. No application path
+  hard-deletes a practice (deletion is a soft delete); tests that showed the cascade now check
+  the `CASCADE` rule and remove a bare practice. Changing the delete rules would change client
+  deletion too, so it is left as is.
+* **Lock modes:** MySQL has nothing between shared and exclusive row locks. PostgreSQL's
+  `FOR NO KEY UPDATE` on a job became a shared lock plus the job's named lock (an exclusive
+  lock deadlocked with parallel time writes). One untested combination remains: a task edit at
+  the same moment as a time write on that task can deadlock and answer 503 (retryable, no data
+  harm). Locking the task before the job in the task writers would remove it.
+* **Small numeric difference:** recovery credit shares are computed in `DECIMAL(38,10)`; a
+  result can differ from PostgreSQL only within 1e-10 of a half penny.
