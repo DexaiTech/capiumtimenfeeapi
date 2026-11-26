@@ -177,3 +177,35 @@ submitted twice quickly (single-use step); email case (`Ada@X` and `ada@x` are o
 * Refresh rotation and reuse revocation behave as today.
 * Every sign-in, failure, lockout and MFA event is in the audit log.
 * All existing tests pass unchanged; lint, format, types, builds pass.
+
+## 12. Implementation notes and results (2026-11-26)
+
+Approved with "go" (D1-D5 as recommended). Branch `onelogin-rules` in both repositories, built
+on `azure-mysql-migration`; pushed, no pull request opened.
+
+Changes from the plan, with the reason:
+
+* **Administrator actions are audited in the practice's log** as `staff.login_unlocked` and
+  `staff.two_factor_reset` (the plan said `auth.account_unlocked` / `auth.mfa_reset`): they are
+  actions of one practice's administrator on its member, like `staff.login_unlinked`.
+* **A locked account is answered before the per-email rate limit.** Found by running the API: the
+  limit (5 attempts per 15 minutes, successes included, unchanged) answered 429 and hid the lock
+  and its retry time. The lock check now comes first, without verifying the password.
+* **`MFA_ENCRYPTION_KEY` is in `infra/`** (secure parameter, Key Vault secret, app setting):
+  production refuses to start without it.
+* Found on the way: `.gitignore`'s `ENV/` hid `infra/env/*.bicepparam` on this case-insensitive
+  checkout; fixed on both branches.
+
+Results:
+
+| Check | Result |
+|---|---|
+| API full suite on MySQL 8.4 (4 processes) | 3552 of 3553 passed; the one failure (`test_email_disabled`: a complete production configuration now needs the key) fixed and re-run green; the lockout-order fix re-run on the auth, sessions and audit modules (57 passed) |
+| New API tests | `test_auth_lockout.py` 8, `test_auth_two_factor.py` 14, all passing |
+| UI full suite (vitest) | 2833 of 2834 passed; the failure (`TaskTemplateEditor` "stops at 100 rows", 22 s against a 20 s limit) fails the same way on `main`: existing, machine speed, not touched |
+| UI type check, lint, production build | pass |
+| Running API (uvicorn, MySQL) | 14 of 15 HTTP checks first, the lockout one exposed the rate-limit order; after the fix, lockout answers 401 x4, 423, then 423 with `Retry-After: 900` |
+| Browser (Playwright, UI dev server to the running API) | 5 of 5: code step, wrong code with tries left, right code signs in, account card shows two-factor on, reload stays signed in |
+
+Notes for whoever runs the UI tests on Windows: open the repository as `C:\...` (upper-case drive);
+with `c:\...` vitest loads twice and every test fails with "Vitest failed to find the runner".
