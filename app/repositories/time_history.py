@@ -16,6 +16,7 @@ class TimeHistoryRepository:
     async def add(self, row: TimeEntryHistory) -> TimeEntryHistory:
         self.session.add(row)
         await self.session.flush()
+        await self.session.refresh(row)
         return row
 
     async def list_page(

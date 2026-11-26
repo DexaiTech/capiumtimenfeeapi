@@ -181,7 +181,7 @@ async def test_staff_only_keeps_the_client_job_and_service_rates_but_not_the_gra
     ]
     for _source, scope, rate in ladder:
         await new_rate(client, owner, org, kind="charge", rate=rate, effective_from=FROM, **scope)
-    await sql("UPDATE jobs SET hourly_rate = 6_400 WHERE id = :j", j=str(job.id))
+    await sql("UPDATE jobs SET hourly_rate = 6400 WHERE id = :j", j=str(job.id))
     found = await resolved(client, owner, org, person, job_id=job.id)
     assert (found["charge_rate"], found["charge_source"]) == (7_000, "client")
     await sql("DELETE FROM rate_rules WHERE level = 'client'")
@@ -198,7 +198,7 @@ async def test_staff_only_keeps_the_client_job_and_service_rates_but_not_the_gra
 async def test_levels_one_to_five_are_the_same_in_both_modes(client: AsyncClient) -> None:
     owner, org, person, acme, svc, job = await world(client)
     snr = await grade_id(org, "SNR")
-    await sql("UPDATE jobs SET hourly_rate = 6_400 WHERE id = :j", j=str(job.id))
+    await sql("UPDATE jobs SET hourly_rate = 6400 WHERE id = :j", j=str(job.id))
     ladder = [
         (
             "client_service_staff",

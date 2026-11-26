@@ -7,7 +7,7 @@ from datetime import date
 
 import pytest
 from httpx import AsyncClient
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DBAPIError
 
 from tests.clients_helpers import count_queries, sql
 from tests.domain_factories import (
@@ -456,7 +456,7 @@ async def test_the_database_refuses_overlapping_rules_whatever_the_application_d
         "INSERT INTO rate_rules (id, organization_id, kind, level, user_id, rate, effective_from, "
         "effective_to) VALUES (UUID(), :o, 'charge', 'staff', :u, 1, :f, :t)"
     )
-    with pytest.raises(IntegrityError) as caught:
+    with pytest.raises(DBAPIError) as caught:
         await sql(insert, o=org["id"], u=str(person.id), f=date(2026, 6, 30), t=None)
     assert "ex_rate_rules_scope_period" in str(caught.value)
     # An adjacent period is fine.

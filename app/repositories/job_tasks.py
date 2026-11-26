@@ -86,6 +86,7 @@ class TaskRepository:
     async def add(self, task: Task) -> Task:
         self.session.add(task)
         await self.session.flush()
+        await self.session.refresh(task)
         return task
 
     async def delete(self, task: Task) -> None:

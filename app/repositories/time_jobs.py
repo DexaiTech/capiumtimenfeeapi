@@ -25,6 +25,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.locks import transaction_lock
 from app.db.models import (
     Client,
     Disbursement,
@@ -113,6 +114,7 @@ class ClientJobRepository:
     async def add(self, job: Job) -> Job:
         self.session.add(job)
         await self.session.flush()
+        await self.session.refresh(job)
         return job
 
     async def get(
@@ -127,11 +129,14 @@ class ClientJobRepository:
         return (await self.session.execute(stmt)).scalar_one_or_none()
 
     async def lock_no_key(self, organization_id: uuid.UUID, job_id: uuid.UUID) -> Job | None:
-        """A live job locked ``FOR NO KEY UPDATE``.
+        """A live job locked for its tasks and budget alerts (PostgreSQL's ``FOR NO KEY UPDATE``).
 
         Writers of the job's tasks and budget alerts queue behind each other and behind a
-        status change (``FOR UPDATE``), while time writes, which hold ``FOR KEY SHARE`` on the
-        job, are not held up.
+        status change (``FOR UPDATE``), while time writes, which hold a shared lock on the job,
+        are not held up. MySQL has no lock mode between shared and exclusive, so this is a
+        shared lock on the job (waits for a status change, not for time) followed by the job's
+        named lock (one such writer at a time). Always in that order, so a status change that
+        goes on to write alerts cannot wait on a writer that waits on it.
         """
         stmt = (
             select(Job)
@@ -140,10 +145,13 @@ class ClientJobRepository:
                 Job.id == job_id,
                 Job.deleted_at.is_(None),
             )
-            .with_for_update(key_share=True)
+            .with_for_update(read=True)
             .execution_options(populate_existing=True)
         )
-        return (await self.session.execute(stmt)).scalar_one_or_none()
+        job = (await self.session.execute(stmt)).scalar_one_or_none()
+        if job is not None:
+            await transaction_lock(self.session, f"job_no_key:{organization_id}:{job_id}")
+        return job
 
     async def get_many(
         self,

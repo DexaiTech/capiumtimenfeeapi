@@ -44,6 +44,7 @@ class RateHistoryRepository:
     async def add(self, change: RateChange) -> None:
         self.session.add(change)
         await self.session.flush()
+        await self.session.refresh(change)
 
     async def list_page(
         self, organization_id: uuid.UUID, filters: ChangeFilters, params: PageParams

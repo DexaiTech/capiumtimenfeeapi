@@ -5,7 +5,7 @@ from collections.abc import Iterable
 from typing import Any
 
 from httpx import AsyncClient
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 
 from app.db.session import get_sessionmaker
 from tests.factories import API, Actor, role_id
@@ -36,8 +36,8 @@ async def add_custom_role(
             await session.execute(
                 text(
                     "INSERT INTO role_permissions (role_id, permission_id) "
-                    "SELECT :role, id FROM permissions WHERE code = ANY(:codes)"
-                ),
+                    "SELECT :role, id FROM permissions WHERE code IN :codes"
+                ).bindparams(bindparam("codes", expanding=True)),
                 {"role": new_role, "codes": codes},
             )
         await session.commit()

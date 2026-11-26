@@ -116,6 +116,7 @@ class EngagementJobRepository:
     async def add_run(self, run: EngagementJobRun) -> EngagementJobRun:
         self.session.add(run)
         await self.session.flush()
+        await self.session.refresh(run)
         return run
 
     async def created_periods(

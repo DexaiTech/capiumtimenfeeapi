@@ -419,6 +419,7 @@ class TimeOvertimeRepository:
     async def add(self, row: TimeEntryOvertime) -> None:
         self.session.add(row)
         await self.session.flush()
+        await self.session.refresh(row)
 
     async def delete(self, row: TimeEntryOvertime) -> None:
         await self.session.delete(row)

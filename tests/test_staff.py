@@ -245,7 +245,8 @@ async def test_a_new_person_needs_a_grade_and_a_work_email_but_no_start_date(
     rated = await new_staff(client, owner, org, "Rated", start_date=None, cost_rate=3_000)
     assert rated["start_date"] is None
     [rule] = await sql(
-        "SELECT effective_from::text AS starts FROM rate_rules WHERE user_id = :u", u=rated["id"]
+        "SELECT CAST(effective_from AS CHAR) AS starts FROM rate_rules WHERE user_id = :u",
+        u=rated["id"],
     )
     assert rule["starts"] == today_in(org["timezone"]).isoformat()
 
@@ -1156,7 +1157,7 @@ async def test_a_new_person_can_get_their_rates_in_the_same_request(client: Asyn
         person["cost_rate_source"],
     ) == (8_500, "staff", 4_800, "staff")
     rules = await sql(
-        "SELECT kind, level, rate, effective_from::text AS starts, effective_to FROM rate_rules "
+        "SELECT kind, level, rate, CAST(effective_from AS CHAR) AS starts, effective_to FROM rate_rules "
         "WHERE user_id = :u ORDER BY kind",
         u=person["id"],
     )
@@ -1199,7 +1200,8 @@ async def test_the_rates_of_a_new_person_start_when_asked_and_either_may_be_left
     # Not in force yet: the practice default still prices them.
     assert (later["charge_rate"], later["charge_rate_source"]) == (2_000, "default")
     [rule] = await sql(
-        "SELECT effective_from::text AS starts FROM rate_rules WHERE user_id = :u", u=later["id"]
+        "SELECT CAST(effective_from AS CHAR) AS starts FROM rate_rules WHERE user_id = :u",
+        u=later["id"],
     )
     assert rule["starts"] == "2099-01-01"
     plain = await new_staff(client, owner, org, "No Rates")

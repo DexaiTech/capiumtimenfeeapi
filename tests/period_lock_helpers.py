@@ -15,10 +15,12 @@ from sqlalchemy import text
 
 from app.db.session import get_sessionmaker
 from app.utils.practice_dates import today_in
+from tests.clients_helpers import sql
 from tests.factories import API, Actor
 
 __all__ = [
     "assert_locked",
+    "delete_practice",
     "events",
     "lock_period",
     "locked_periods",
@@ -113,29 +115,22 @@ async def set_lock(org: dict, day: date | None) -> None:
 
 
 async def locked_periods(org: dict) -> list[dict[str, Any]]:
-    async with get_sessionmaker()() as session:
-        rows = await session.execute(
-            text(
-                "SELECT period_type, start_date, end_date FROM locked_periods "
-                "WHERE organization_id = :org ORDER BY start_date"
-            ),
-            {"org": uuid.UUID(org["id"])},
-        )
-        return [dict(row._mapping) for row in rows]
+    return await sql(
+        "SELECT period_type, start_date, end_date FROM locked_periods "
+        "WHERE organization_id = :org ORDER BY start_date",
+        org=org["id"],
+    )
 
 
 async def events(org: dict) -> list[dict[str, Any]]:
     """The history rows, oldest first."""
-    async with get_sessionmaker()() as session:
-        rows = await session.execute(
-            text(
-                "SELECT event_type, period_type, period_start, period_end, reason, "
-                "actor_user_id FROM period_lock_events WHERE organization_id = :org "
-                "ORDER BY created_at, id"
-            ),
-            {"org": uuid.UUID(org["id"])},
-        )
-        return [dict(row._mapping) for row in rows]
+    # ``sql`` reads ids back as UUIDs, as PostgreSQL's driver did.
+    return await sql(
+        "SELECT event_type, period_type, period_start, period_end, reason, "
+        "actor_user_id FROM period_lock_events WHERE organization_id = :org "
+        "ORDER BY created_at, id",
+        org=org["id"],
+    )
 
 
 def assert_locked(response: Response, on: date, locked_through_: date, area: str) -> None:
@@ -148,3 +143,21 @@ def assert_locked(response: Response, on: date, locked_through_: date, area: str
         "locked_through": locked_through_.isoformat(),
         "area": area,
     }
+
+
+async def delete_practice(organization_id: str) -> None:
+    """Delete a practice's row straight in the database, so its ``ON DELETE CASCADE`` data goes.
+
+    MySQL checks each foreign key row by row while it cascades (PostgreSQL checked at the end of
+    the statement), so a client's jobs refuse their client's cascaded delete: the practice's jobs
+    go first. Foreign key checks are switched on explicitly: a cascade only runs with them on.
+    """
+    async with get_sessionmaker()() as session:
+        await session.execute(text("SET FOREIGN_KEY_CHECKS = 1"))
+        await session.execute(
+            text("DELETE FROM jobs WHERE organization_id = :o"), {"o": organization_id}
+        )
+        await session.execute(
+            text("DELETE FROM organizations WHERE id = :o"), {"o": organization_id}
+        )
+        await session.commit()

@@ -9,7 +9,6 @@ from typing import Any
 from sqlalchemy import (
     BigInteger,
     Date,
-    Numeric,
     Subquery,
     and_,
     case,
@@ -21,7 +20,7 @@ from sqlalchemy import (
     or_,
     select,
 )
-from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.mysql import insert as mysql_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -131,11 +130,19 @@ def _time_by_job(organization_id: uuid.UUID, job_ids: Collection[uuid.UUID] | No
 
 def _bp(actual: Any, budget: Any) -> Any:
     """``actual / budget`` in basis points, rounded half up (null without a budget). The same
-    rounding as ``app.utils.money.percentage_bp`` for the non-negative amounts of a budget."""
-    return case(
-        (budget > 0, cast(func.round(cast(actual, Numeric) * 10_000 / budget), BigInteger)),
-        else_=None,
-    )
+    rounding as ``app.utils.money.percentage_bp`` for the non-negative amounts of a budget.
+
+    Exact integer arithmetic: half away from zero is ``sign * ((|a| * 20000 + b) DIV 2b)``, as
+    PostgreSQL's ``round(numeric)`` gave (MySQL's decimal division keeps only four places)."""
+    halves = (func.abs(actual) * 20_000 + budget).self_group()
+    rounded = func.sign(actual) * halves.op("DIV")((budget * 2).self_group()).self_group()
+    return case((budget > 0, cast(rounded, BigInteger)), else_=None)
+
+
+def _greatest(a: Any, b: Any) -> Any:
+    """The larger of two values, ignoring a null one (null only when both are), as PostgreSQL's
+    ``greatest`` does; MySQL's ``GREATEST`` is null as soon as one argument is."""
+    return func.greatest(func.coalesce(a, b), func.coalesce(b, a))
 
 
 def _usage_of(row: Any) -> JobUsage:
@@ -210,7 +217,7 @@ class JobBudgetRepository:
         manager, partner = aliased(User), aliased(User)
         logged = func.coalesce(t.c.logged_minutes, 0)
         value = func.coalesce(t.c.time_value, 0)
-        used = func.greatest(_bp(logged, Job.budget_minutes), _bp(value, Job.budget_fee))
+        used = _greatest(_bp(logged, Job.budget_minutes), _bp(value, Job.budget_fee))
         expr, parse = self._sort(sort, used, logged, value)
         stmt = self._filtered(
             select(
@@ -265,7 +272,7 @@ class JobBudgetRepository:
         manager, partner = aliased(User), aliased(User)
         logged = func.coalesce(t.c.logged_minutes, 0)
         value = func.coalesce(t.c.time_value, 0)
-        used = func.greatest(_bp(logged, Job.budget_minutes), _bp(value, Job.budget_fee))
+        used = _greatest(_bp(logged, Job.budget_minutes), _bp(value, Job.budget_fee))
         has_hours, has_fee = Job.budget_minutes > 0, Job.budget_fee > 0
         stmt = self._filtered(
             select(Job.id),
@@ -401,22 +408,22 @@ class JobBudgetAlertRepository:
         usage_bp: int,
     ) -> uuid.UUID | None:
         """Record the crossing; None when the threshold is already recorded."""
-        stmt = (
-            pg_insert(JobBudgetAlert)
-            .values(
-                id=new_id(),
-                organization_id=organization_id,
-                job_id=job_id,
-                kind=kind,
-                threshold=threshold,
-                usage_bp=usage_bp,
-            )
-            .on_conflict_do_nothing(
-                index_elements=["organization_id", "job_id", "kind", "threshold"]
-            )
-            .returning(JobBudgetAlert.id)
+        alert_id = new_id()
+        stmt = mysql_insert(JobBudgetAlert).values(
+            id=alert_id,
+            organization_id=organization_id,
+            job_id=job_id,
+            kind=kind,
+            threshold=threshold,
+            usage_bp=usage_bp,
         )
-        return (await self.session.execute(stmt)).scalar_one_or_none()
+        # Only (organization, job, kind, threshold) can collide (the id is new): assigning the id
+        # to itself keeps the recorded crossing. Recorded here when the new row exists.
+        await self.session.execute(stmt.on_duplicate_key_update(id=JobBudgetAlert.__table__.c.id))
+        inserted = select(JobBudgetAlert.id).where(
+            JobBudgetAlert.organization_id == organization_id, JobBudgetAlert.id == alert_id
+        )
+        return (await self.session.execute(inserted)).scalar_one_or_none()
 
     async def remove(
         self, organization_id: uuid.UUID, job_id: uuid.UUID, kind: str, threshold: int

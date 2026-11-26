@@ -103,6 +103,7 @@ class RerateRepository:
     async def add_run(self, run: RateRerun, items: list[RateRerunItem]) -> None:
         self.session.add(run)
         await self.session.flush()
+        await self.session.refresh(run)
         self.session.add_all(items)
         await self.session.flush()
 

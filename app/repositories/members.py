@@ -23,6 +23,7 @@ class MemberRepository:
         capacity (APT81: overtime is worked out from it)."""
         self.session.add(member)
         await self.session.flush()
+        await self.session.refresh(member)
         await StaffHoursRepository(self.session).add_default(member.organization_id, member.user_id)
         return member
 

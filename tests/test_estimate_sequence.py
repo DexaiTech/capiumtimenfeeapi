@@ -6,7 +6,7 @@ import asyncio
 import uuid
 
 import pytest
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DBAPIError
 
 from app.db.models.practice import SEQUENCE_KINDS
 from app.db.session import get_sessionmaker
@@ -255,14 +255,14 @@ async def test_another_practice_cannot_touch_it(client):
 
 async def test_the_database_only_accepts_the_seven_kinds(client):
     _, org = await practice(client)
-    with pytest.raises(IntegrityError, match="ck_document_sequences_kind"):
+    with pytest.raises(DBAPIError, match="ck_document_sequences_kind"):
         await sql(
             "INSERT INTO document_sequences (organization_id, kind, prefix, padding, next_number) "
             "VALUES (:o, 'quote', 'Q', 5, 1)",
             o=org["id"],
         )
     # One row per practice and kind.
-    with pytest.raises(IntegrityError, match="document_sequences"):
+    with pytest.raises(DBAPIError, match="document_sequences"):
         await sql(
             "INSERT INTO document_sequences (organization_id, kind, prefix, padding, next_number) "
             "VALUES (:o, 'estimate', 'X', 5, 1)",
@@ -275,7 +275,7 @@ async def test_the_database_only_accepts_the_seven_kinds(client):
         ("prefix", "no spaces", "ck_document_sequences_prefix_format"),
     ):
         values = {"next_number": 5, "padding": 5, "prefix": "EST", column: bad}
-        with pytest.raises(IntegrityError, match=constraint):
+        with pytest.raises(DBAPIError, match=constraint):
             await sql(
                 "UPDATE document_sequences SET next_number = :next_number, padding = :padding, "
                 "prefix = :prefix WHERE organization_id = :o AND kind = 'estimate'",

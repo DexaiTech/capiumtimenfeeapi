@@ -5,7 +5,7 @@ from collections.abc import Collection
 from datetime import date
 
 from sqlalchemy import select
-from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.dialects.mysql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import LockedPeriod, PeriodLock, PeriodLockEvent, User
@@ -85,11 +85,10 @@ class PeriodLockRepository:
 
     async def lock_row(self, organization_id: uuid.UUID) -> PeriodLock:
         """The practice's row ``FOR UPDATE``, created first when a practice has none yet."""
-        await self.session.execute(
-            insert(PeriodLock)
-            .values(id=new_id(), organization_id=organization_id)
-            .on_conflict_do_nothing(index_elements=["organization_id"])
-        )
+        # Only the practice's row can collide (the id is new; (organization, id) follows from
+        # it): assigning the id to itself keeps the existing row.
+        upsert = insert(PeriodLock).values(id=new_id(), organization_id=organization_id)
+        await self.session.execute(upsert.on_duplicate_key_update(id=PeriodLock.__table__.c.id))
         stmt = (
             select(PeriodLock)
             .where(PeriodLock.organization_id == organization_id)

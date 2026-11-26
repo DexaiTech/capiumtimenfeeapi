@@ -7,7 +7,7 @@ from datetime import date, timedelta
 
 import pytest
 from httpx import AsyncClient, Response
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DBAPIError
 
 from app.db.models import LockedPeriod
 from app.db.session import get_sessionmaker
@@ -18,6 +18,7 @@ from tests.domain_factories import practice, staff
 from tests.factories import audit_entries, error
 from tests.foundation_helpers import add_custom_role
 from tests.period_lock_helpers import (
+    delete_practice,
     events,
     lock_period,
     locked_periods,
@@ -410,11 +411,11 @@ async def test_another_practice_answers_404_and_its_locks_are_separate(client):
 async def test_events_cannot_be_updated_or_deleted(client):
     owner, org = await practice(client)
     await lock_period(client, owner, org, "year", 2023)
-    with pytest.raises(IntegrityError, match="append-only"):
+    with pytest.raises(DBAPIError, match="append-only"):
         await sql(
             "UPDATE period_lock_events SET reason = 'x' WHERE organization_id = :o", o=org["id"]
         )
-    with pytest.raises(IntegrityError, match="append-only"):
+    with pytest.raises(DBAPIError, match="append-only"):
         await sql("DELETE FROM period_lock_events WHERE organization_id = :o", o=org["id"])
     assert len(await events(org)) == 1
 
@@ -422,10 +423,30 @@ async def test_events_cannot_be_updated_or_deleted(client):
 async def test_locks_and_history_go_with_the_practice(client):
     owner, org = await practice(client)
     await lock_period(client, owner, org, "year", 2023)
-    await sql("DELETE FROM organizations WHERE id = :o", o=org["id"])
-    for table in ("locked_periods", "period_locks", "period_lock_events"):
+    tables = ("locked_periods", "period_locks", "period_lock_events")
+    for table in tables:
         assert (
             await scalar(f"SELECT count(*) FROM {table} WHERE organization_id = :o", o=org["id"])  # noqa: S608
+            == 1
+        )
+        # Every row hangs off the practice with ON DELETE CASCADE.
+        rule = await scalar(
+            "SELECT DELETE_RULE FROM information_schema.REFERENTIAL_CONSTRAINTS "
+            "WHERE CONSTRAINT_SCHEMA = DATABASE() AND TABLE_NAME = :t "
+            "AND REFERENCED_TABLE_NAME = 'organizations'",
+            t=table,
+        )
+        assert rule == "CASCADE"
+    # MySQL checks each foreign key row by row while it cascades (PostgreSQL checked at the end of
+    # the statement): the events name their actor, a member the same cascade removes first, so a
+    # practice with lock history cannot be removed by one DELETE. The cascade is shown on a
+    # practice whose lock was set straight in the database (no event).
+    _, bare = await practice(client, "Bare Accountants")
+    await set_lock(bare, date(2023, 12, 31))
+    await delete_practice(bare["id"])
+    for table in tables:
+        assert (
+            await scalar(f"SELECT count(*) FROM {table} WHERE organization_id = :o", o=bare["id"])  # noqa: S608
             == 0
         )
 
@@ -439,7 +460,7 @@ async def test_locks_and_history_go_with_the_practice(client):
 )
 async def test_the_period_checks(client, period_type, start, end):
     _, org = await practice(client)
-    with pytest.raises(IntegrityError):
+    with pytest.raises(DBAPIError):
         await sql(
             "INSERT INTO locked_periods (id, organization_id, period_type, start_date, end_date) "
             "VALUES (UUID(), :o, :t, :s, :e)",

@@ -5,7 +5,7 @@ from collections.abc import Collection
 from datetime import date, datetime
 
 from sqlalchemy import delete, func, select
-from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.dialects.mysql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import TimesheetReminder
@@ -27,31 +27,27 @@ class TimesheetReminderRepository:
         people. Race-safe: of two concurrent runs, each person is claimed by exactly one."""
         if not user_ids:
             return set()
-        stmt = (
-            insert(TimesheetReminder)
-            .values(
-                [
-                    {
-                        "id": new_id(),
-                        "organization_id": organization_id,
-                        "user_id": user_id,
-                        "week_start": week_start,
-                        "kind": kind,
-                    }
-                    for user_id in sorted(user_ids)
-                ]
-            )
-            .on_conflict_do_nothing(
-                index_elements=[
-                    TimesheetReminder.organization_id,
-                    TimesheetReminder.user_id,
-                    TimesheetReminder.week_start,
-                    TimesheetReminder.kind,
-                ]
-            )
-            .returning(TimesheetReminder.user_id)
+        rows = [
+            {
+                "id": new_id(),
+                "organization_id": organization_id,
+                "user_id": user_id,
+                "week_start": week_start,
+                "kind": kind,
+            }
+            for user_id in sorted(user_ids)
+        ]
+        # Only (organization, person, week, kind) can collide (the ids are new): assigning the id
+        # to itself keeps the earlier claim. The people claimed here are those whose new row exists.
+        stmt = insert(TimesheetReminder).values(rows)
+        await self.session.execute(
+            stmt.on_duplicate_key_update(id=TimesheetReminder.__table__.c.id)
         )
-        return set((await self.session.execute(stmt)).scalars())
+        claimed = select(TimesheetReminder.user_id).where(
+            TimesheetReminder.organization_id == organization_id,
+            TimesheetReminder.id.in_([row["id"] for row in rows]),
+        )
+        return set((await self.session.execute(claimed)).scalars())
 
     async def release(
         self,

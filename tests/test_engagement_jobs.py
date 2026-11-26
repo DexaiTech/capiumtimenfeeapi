@@ -208,22 +208,14 @@ def create_job_url(org: dict, customer, engagement: dict) -> str:
 
 
 async def set_run_age(engagement_id: str, days: int) -> None:
-    """Make the runs of an engagement look ``days`` old (the trigger keeps ``updated_at`` current,
-    so it is switched off for the statement)."""
+    """Make the runs of an engagement look ``days`` old (an UPDATE that sets ``updated_at`` itself
+    is not overridden by ``ON UPDATE CURRENT_TIMESTAMP``)."""
     await sql(
-        "ALTER TABLE engagement_job_runs DISABLE TRIGGER trg_engagement_job_runs_set_updated_at"
+        "UPDATE engagement_job_runs SET updated_at = NOW(6) - INTERVAL :n DAY "
+        "WHERE client_service_id = :e",
+        n=days,
+        e=engagement_id,
     )
-    try:
-        await sql(
-            "UPDATE engagement_job_runs SET updated_at = now() - make_interval(days => :n) "
-            "WHERE client_service_id = :e",
-            n=days,
-            e=engagement_id,
-        )
-    finally:
-        await sql(
-            "ALTER TABLE engagement_job_runs ENABLE TRIGGER trg_engagement_job_runs_set_updated_at"
-        )
 
 
 # --- The worker -------------------------------------------------------------------------------

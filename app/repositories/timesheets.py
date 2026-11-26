@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import date
 
 from sqlalchemy import ColumnElement, Exists, and_, case, exists, func, not_, or_, select, update
-from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.dialects.mysql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import (
@@ -127,13 +127,12 @@ class TimesheetRepository:
         self, organization_id: uuid.UUID, user_id: uuid.UUID, week_start: date
     ) -> None:
         """Create the person's sheet for the week unless it exists (race-safe)."""
-        await self.session.execute(
-            insert(Timesheet)
-            .values(organization_id=organization_id, user_id=user_id, week_start=week_start)
-            .on_conflict_do_nothing(
-                index_elements=[Timesheet.organization_id, Timesheet.user_id, Timesheet.week_start]
-            )
+        # Only (organization, person, week) can collide (the id is new): assigning the id to
+        # itself leaves the existing sheet alone.
+        stmt = insert(Timesheet).values(
+            organization_id=organization_id, user_id=user_id, week_start=week_start
         )
+        await self.session.execute(stmt.on_duplicate_key_update(id=Timesheet.__table__.c.id))
 
     async def lock_weeks(
         self, organization_id: uuid.UUID, weeks: Collection[tuple[uuid.UUID, date]]

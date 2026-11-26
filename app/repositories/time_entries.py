@@ -7,8 +7,7 @@ from datetime import date
 from typing import Any
 
 from sqlalchemy import ColumnElement, Select, and_, delete, exists, func, or_, select, true
-from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy.engine import CursorResult
+from sqlalchemy.dialects.mysql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import ActivityCode, Client, Job, Service, Task, TimeEntry, Timer, Timesheet
@@ -130,6 +129,7 @@ class TimeEntryRepository:
     async def add(self, entry: TimeEntry) -> TimeEntry:
         self.session.add(entry)
         await self.session.flush()
+        await self.session.refresh(entry)
         return entry
 
     async def delete(self, entry: TimeEntry) -> None:
@@ -263,25 +263,26 @@ class TimerRepository:
 
     async def insert_if_absent(self, timer: Timer) -> bool:
         """Insert the person's timer. False when they already have one (race-safe)."""
-        stmt = (
-            insert(Timer)
-            .values(
-                id=timer.id,
-                organization_id=timer.organization_id,
-                user_id=timer.user_id,
-                client_id=timer.client_id,
-                job_id=timer.job_id,
-                task_id=timer.task_id,
-                activity_code_id=timer.activity_code_id,
-                description=timer.description,
-                is_billable=timer.is_billable,
-                started_at=timer.started_at,
-                accumulated_seconds=timer.accumulated_seconds,
-            )
-            .on_conflict_do_nothing(index_elements=[Timer.organization_id, Timer.user_id])
+        stmt = insert(Timer).values(
+            id=timer.id,
+            organization_id=timer.organization_id,
+            user_id=timer.user_id,
+            client_id=timer.client_id,
+            job_id=timer.job_id,
+            task_id=timer.task_id,
+            activity_code_id=timer.activity_code_id,
+            description=timer.description,
+            is_billable=timer.is_billable,
+            started_at=timer.started_at,
+            accumulated_seconds=timer.accumulated_seconds,
         )
-        result: CursorResult[tuple[()]] = await self.session.execute(stmt)  # type: ignore[assignment]
-        return result.rowcount > 0
+        # Only (organization, person) can collide (the id is new): assigning the id to itself
+        # keeps the running timer. The timer was inserted when its own row exists.
+        await self.session.execute(stmt.on_duplicate_key_update(id=Timer.__table__.c.id))
+        inserted = select(Timer.id).where(
+            Timer.organization_id == timer.organization_id, Timer.id == timer.id
+        )
+        return (await self.session.execute(inserted)).first() is not None
 
     async def delete(self, timer: Timer) -> None:
         await self.session.delete(timer)

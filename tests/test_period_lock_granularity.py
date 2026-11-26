@@ -7,7 +7,7 @@ from itertools import pairwise
 
 import pytest
 from httpx import AsyncClient, Response
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DBAPIError
 
 from app.db.session import get_sessionmaker
 from app.services import period_locks
@@ -473,5 +473,5 @@ async def test_set_granularity_helper_writes_the_columns(client):
 )
 async def test_the_database_refuses_a_bad_setting(client, values):
     _, org = await practice(client)
-    with pytest.raises(IntegrityError):
+    with pytest.raises(DBAPIError):
         await sql(f"UPDATE organizations SET {values} WHERE id = :o", o=org["id"])  # noqa: S608

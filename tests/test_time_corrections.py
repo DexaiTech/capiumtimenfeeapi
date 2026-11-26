@@ -8,10 +8,10 @@ from datetime import date
 
 import pytest
 from httpx import AsyncClient
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DBAPIError
 
 from app.utils.money import time_value
-from tests.clients_helpers import sql
+from tests.clients_helpers import scalar, sql
 from tests.domain_factories import (
     activity_code_id,
     make_client,
@@ -21,7 +21,7 @@ from tests.domain_factories import (
     staff,
 )
 from tests.factories import audit_entries
-from tests.period_lock_helpers import set_lock
+from tests.period_lock_helpers import delete_practice, set_lock
 from tests.time_gap_helpers import (
     approve_sheet,
     approved_entry,
@@ -549,14 +549,14 @@ async def test_history_rows_cannot_be_changed_or_deleted(
     _, org, person, approver, acme = await team(client)
     entry = await approved_entry(client, org, person, approver, client_id=acme.id)
     await correct(client, approver, org, entry["id"], reason="Original reason", minutes=90)
-    with pytest.raises(IntegrityError, match="append-only"):
+    with pytest.raises(DBAPIError, match="append-only"):
         await sql(statement)
     [row] = await history_rows(org, entry["id"])
     assert row["reason"] == "Original reason" and row["after"]["minutes"] == 90
     # Appending is what the table is for.
     await sql(
         "INSERT INTO time_entry_history (id, organization_id, time_entry_id, user_id, "
-        "corrected_by, reason, before, after) "
+        "corrected_by, reason, `before`, after) "
         "VALUES (UUID(), :o, :e, :u, :c, 'Direct', '{}', '{}')",
         o=org["id"], e=str(entry["id"]), u=str(person.id), c=str(approver.id),
     )  # fmt: skip
@@ -568,9 +568,28 @@ async def test_the_history_goes_with_the_practice(client: AsyncClient) -> None:
     entry = await approved_entry(client, org, person, approver, client_id=acme.id)
     await correct(client, approver, org, entry["id"], reason="Original reason", minutes=90)
     assert len(await history_rows(org, entry["id"])) == 1
-    # Only the practice's own deletion removes the rows: the cascade is not a direct DELETE.
-    await sql("DELETE FROM organizations WHERE id = :o", o=org["id"])
-    assert await history_rows(org, entry["id"]) == []
+    # The rows hang off the practice with ON DELETE CASCADE.
+    rule = await scalar(
+        "SELECT DELETE_RULE FROM information_schema.REFERENTIAL_CONSTRAINTS "
+        "WHERE CONSTRAINT_SCHEMA = DATABASE() AND TABLE_NAME = 'time_entry_history' "
+        "AND REFERENCED_TABLE_NAME = 'organizations'"
+    )
+    assert rule == "CASCADE"
+    # Only the practice's own deletion removes the rows: the cascade is not a direct DELETE (MySQL
+    # fires no trigger for a cascaded delete). MySQL checks every other foreign key row by row
+    # during the cascade, so a practice whose clients have jobs cannot be removed by one DELETE
+    # (``delete_practice``); the cascade is shown on a new practice holding a history row.
+    _, bare = await practice(client, "Bare Accountants")
+    entry_id = uuid.uuid4()
+    await sql(
+        "INSERT INTO time_entry_history (id, organization_id, time_entry_id, user_id, "
+        "corrected_by, reason, `before`, after) "
+        "VALUES (UUID(), :o, :e, UUID(), UUID(), 'Direct', '{}', '{}')",
+        o=bare["id"], e=str(entry_id),
+    )  # fmt: skip
+    assert len(await history_rows(bare, entry_id)) == 1
+    await delete_practice(bare["id"])
+    assert await history_rows(bare, entry_id) == []
 
 
 @pytest.mark.parametrize(
@@ -587,11 +606,11 @@ async def test_the_history_table_refuses_bad_rows(
 ) -> None:
     _, org, person, approver, acme = await team(client)
     entry = await approved_entry(client, org, person, approver, client_id=acme.id)
-    with pytest.raises(IntegrityError, match=constraint):
+    with pytest.raises(DBAPIError, match=constraint):
         await sql(
             "INSERT INTO time_entry_history (id, organization_id, time_entry_id, user_id, "
-            "corrected_by, reason, before, after) VALUES (UUID(), :o, :e, :u, :c, :r, "
-            "CAST(:b AS jsonb), CAST(:a AS jsonb))",
+            "corrected_by, reason, `before`, after) VALUES (UUID(), :o, :e, :u, :c, :r, "
+            "CAST(:b AS JSON), CAST(:a AS JSON))",
             o=org["id"], e=str(entry["id"]), u=str(person.id), c=str(approver.id),
             r=reason, b=before, a=after,
         )  # fmt: skip
