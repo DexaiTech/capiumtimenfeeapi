@@ -44,6 +44,8 @@ schema is `/openapi.json`; every route there has a summary, a description and it
 | POST | `/staff/{staff_id}/invite` | `member.invite` |
 | POST | `/staff/{staff_id}/link-login` | `member.invite` |
 | POST | `/staff/{staff_id}/unlink-login` | `member.remove` |
+| POST | `/staff/{staff_id}/unlock-login` | `member.remove` |
+| POST | `/staff/{staff_id}/reset-two-factor` | `member.remove` |
 | GET | `/grades` | `member.read` |
 | POST | `/grades` | `rate.manage` |
 | GET | `/grades/{grade_id}` | `member.read` |

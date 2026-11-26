@@ -22,7 +22,8 @@ the JSON keep the word `organization`.
 |---|---|---|---|
 | GET | `/system` | public | `closed_deployment` and, when closed, the one practice's name and slug |
 | POST | `/auth/register` | public (403 `REGISTRATION_DISABLED` when closed) | Create an unverified account; 202 whether or not the email exists |
-| POST | `/auth/login` | public | Access token in the body, refresh token as an httpOnly cookie (`ctf_refresh`, `__Secure-ctf_refresh` over HTTPS) scoped to `/api/v1/auth` |
+| POST | `/auth/login` | public | Access token in the body, refresh token as an httpOnly cookie (`ctf_refresh`, `__Secure-ctf_refresh` over HTTPS) scoped to `/api/v1/auth`; for an account with two-factor sign-in, `{requires_two_factor, challenge_token, expires_in}` and no session until the code (or `totp_code` in the same request) |
+| POST | `/auth/2fa/validate` | public (rate-limited) | The code for a two-factor challenge; answers like a successful login |
 | POST | `/auth/refresh` | cookie + `X-Requested-With` + allowed `Origin` | Rotate the refresh token (20 s grace for parallel tabs; reuse after it revokes the session) |
 | POST | `/auth/logout` | cookie + browser headers | Revoke this session |
 | POST | `/auth/logout-all` | signed in | Revoke every session; `{revoked: n}` |
@@ -33,6 +34,9 @@ the JSON keep the word `organization`.
 | GET | `/users/me` | signed in (also unverified, also with a temporary password) | The profile |
 | PATCH | `/users/me` | verified | `full_name`, `timezone` |
 | POST | `/users/me/password` | verified (allowed with a temporary password) | Change the password; other sessions are revoked |
+| POST | `/users/me/2fa/setup` | verified | A pending authenticator secret (`secret`, `otpauth_uri`), shown once |
+| POST | `/users/me/2fa/verify` | verified | Confirm the pending secret with a code: two-factor on; other sessions are revoked |
+| POST | `/users/me/2fa/disable` | verified | Password and code: two-factor off; other sessions are revoked |
 | GET | `/users/me/sessions` | signed in | Active sessions, `is_current` marked |
 | DELETE | `/users/me/sessions/{session_id}` | signed in | Revoke one of one's own sessions (another user's id is 404) |
 | GET | `/permissions` | verified | The permission catalogue, by category then code |
@@ -287,6 +291,9 @@ Response `PersonCreated`: `{member, temporary_password, email_sent}` with
 | Status | Code | When |
 |---|---|---|
 | 401 | `AUTH_REQUIRED`, `AUTH_TOKEN_INVALID`, `AUTH_INVALID_CREDENTIALS`, `AUTH_REFRESH_INVALID` | No/invalid token, wrong password, bad refresh cookie |
+| 401 | `AUTH_MFA_CODE_INVALID`, `AUTH_MFA_TOO_MANY_ATTEMPTS`, `AUTH_MFA_CHALLENGE_INVALID` | Wrong two-factor code (`details.attempts_left`), the challenge's last wrong code, an expired, used or revoked challenge |
+| 423 | `AUTH_ACCOUNT_LOCKED` | Too many consecutive failed sign-ins; `details.retry_after` seconds and `Retry-After` |
+| 409 / 422 | `MFA_ALREADY_ENABLED`, `MFA_SETUP_REQUIRED`, `MFA_NOT_ENABLED` / `MFA_CODE_INVALID` | Two-factor set-up and turning off |
 | 400 | `AUTH_INVALID_CREDENTIALS` | Wrong current password on change (400 so the UI does not refresh) |
 | 403 | `PERMISSION_DENIED` | Missing permission; own role/status change; granting permissions one lacks; non-Owner touching Owner |
 | 403 | `AUTH_EMAIL_NOT_VERIFIED`, `AUTH_ACCOUNT_DISABLED` | Unverified or disabled account |
@@ -300,6 +307,35 @@ Response `PersonCreated`: `{member, temporary_password, email_sent}` with
 | 413 | `REQUEST_TOO_LARGE` | Body over `MAX_REQUEST_BODY_KB` |
 | 422 | `VALIDATION_ERROR` | `details: [{field, code, message}]`; also unknown role/manager ids |
 | 429 | `RATE_LIMITED` | Auth limits or the global ceiling; `Retry-After` header |
+
+## Sign-in rules (the Capium OneLogin rules)
+
+Time & Fees' own sign-in follows the account rules of the Capium OneLogin service
+(`docs/implementation-plans/ONELOGIN.md`); nothing connects to OneLogin itself.
+
+* **Lockout.** Each wrong password, or wrong two-factor code, for an existing account counts
+  (`users.failed_login_count`). At `LOGIN_LOCKOUT_THRESHOLD` (5) consecutive failures the
+  account is locked for `LOGIN_LOCKOUT_MINUTES` (15): every sign-in answers 423
+  `AUTH_ACCOUNT_LOCKED`, the right password too. A successful sign-in resets the count; a
+  password reset or an administrator's `unlock-login` ends the lock. An unknown email counts
+  nothing and answers the same 401 as a wrong password. The per-email rate limit (5 per 15
+  minutes, 429) stays in front of it.
+* **Two-factor sign-in** (TOTP, any authenticator app), optional per person. With it on, a
+  right password opens a challenge (`mfa_challenges`) instead of a session: it lasts
+  `MFA_CHALLENGE_MINUTES` (5), takes `MFA_CHALLENGE_MAX_ATTEMPTS` (5) wrong codes (then it is
+  revoked) and works once. Codes are accepted for the current 30-second step and one either
+  side, never at or before the last accepted step, so a code cannot be replayed. Codes are
+  checked under the account's row lock.
+* **Secrets** are encrypted with Fernet (`MFA_ENCRYPTION_KEY`, required in production) and
+  never returned after set-up. Set-up is pending until a first code is confirmed. Turning it
+  on or off signs out the person's other sessions and ends any challenge in progress.
+* **Administrators** with `member.remove` can unlock a login and reset someone's two-factor
+  (a lost phone: they are signed out everywhere), with the same guards as removing a login
+  (not oneself, the owner rule, not an account another practice shares).
+* **Audit**: `auth.login_locked`, `auth.account_locked`, `auth.mfa_challenge_started`,
+  `auth.mfa_failed`, `auth.mfa_login`, `auth.mfa_enabled`, `auth.mfa_disabled` (account-level,
+  like the other sign-in rows) and `staff.login_unlocked`, `staff.two_factor_reset` (in the
+  practice's log).
 
 ## Rule decisions beyond docs/domain.md
 

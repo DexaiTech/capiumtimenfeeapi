@@ -45,12 +45,13 @@ Routers (3 routes): `health.py`, `system.py`. Module doc: [deployment](deploymen
 
 ## Authentication
 
-Routers (9 routes): `auth.py`. Module doc: [foundation](modules/foundation.md).
+Routers (10 routes): `auth.py`. Module doc: [foundation](modules/foundation.md).
 
 | Method | Path | Permission | Purpose |
 |---|---|---|---|
 | POST | `/api/v1/auth/register` | public; 403 when closed | Create an account |
-| POST | `/api/v1/auth/login` | public (rate-limited) | Sign in |
+| POST | `/api/v1/auth/login` | public (rate-limited) | Sign in (or a two-factor challenge) |
+| POST | `/api/v1/auth/2fa/validate` | public (rate-limited) | Finish a two-factor sign-in |
 | POST | `/api/v1/auth/refresh` | public (rate-limited) | Exchange the refresh cookie for a new access token |
 | POST | `/api/v1/auth/logout` | public (rate-limited) | Sign out of this device |
 | POST | `/api/v1/auth/logout-all` | signed in | Sign out of every device |
@@ -61,13 +62,16 @@ Routers (9 routes): `auth.py`. Module doc: [foundation](modules/foundation.md).
 
 ## Users (the signed-in person)
 
-Routers (8 routes): `users.py`. Module doc: [foundation](modules/foundation.md).
+Routers (11 routes): `users.py`. Module doc: [foundation](modules/foundation.md).
 
 | Method | Path | Permission | Purpose |
 |---|---|---|---|
 | GET | `/api/v1/users/me` | signed in | Get the current user |
 | PATCH | `/api/v1/users/me` | signed in | Update the profile |
 | POST | `/api/v1/users/me/password` | signed in | Change the password |
+| POST | `/api/v1/users/me/2fa/setup` | signed in | Start setting up two-factor sign-in |
+| POST | `/api/v1/users/me/2fa/verify` | signed in | Turn two-factor sign-in on |
+| POST | `/api/v1/users/me/2fa/disable` | signed in | Turn two-factor sign-in off |
 | GET | `/api/v1/users/me/sessions` | signed in | List active sessions |
 | DELETE | `/api/v1/users/me/sessions/{session_id}` | signed in | Revoke a session |
 | POST | `/api/v1/users/me/avatar` | signed in | Set the profile picture |
@@ -198,6 +202,8 @@ Routers (40 routes): `staff.py`, `grades.py`, `rates.py`, `rate_rules.py`. Modul
 | POST | `/staff/{staff_id}/invite` | `member.invite` | Invite a staff member to sign in |
 | POST | `/staff/{staff_id}/link-login` | `member.invite` | Link a login to a staff member |
 | POST | `/staff/{staff_id}/unlink-login` | `member.remove` | Remove a staff member's login |
+| POST | `/staff/{staff_id}/unlock-login` | `member.remove` | Unlock a staff member's login |
+| POST | `/staff/{staff_id}/reset-two-factor` | `member.remove` | Reset a staff member's two-factor sign-in |
 | GET | `/grades` | `member.read` | List grades |
 | POST | `/grades` | `rate.manage` | Create a grade |
 | GET | `/grades/{grade_id}` | `member.read` | Get a grade |

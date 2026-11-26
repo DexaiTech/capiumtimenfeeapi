@@ -15,6 +15,7 @@ param frontendUrl string
 param closedDeployment bool
 param dbUrlSecretUri string
 param jwtSecretUri string
+param mfaKeySecretUri string
 param smtpPasswordSecretUri string
 param smtpHost string
 param smtpPort int
@@ -77,6 +78,7 @@ var secrets = concat(
   [
     { name: 'db-url', keyVaultUrl: dbUrlSecretUri, identity: identityId }
     { name: 'jwt-secret-key', keyVaultUrl: jwtSecretUri, identity: identityId }
+    { name: 'mfa-encryption-key', keyVaultUrl: mfaKeySecretUri, identity: identityId }
   ],
   hasSmtpPassword ? [{ name: 'smtp-password', keyVaultUrl: smtpPasswordSecretUri, identity: identityId }] : []
 )
@@ -89,6 +91,7 @@ var backendEnv = concat(
     { name: 'DB_URL', secretRef: 'db-url' }
     { name: 'DB_SSL_MODE', value: 'verify_identity' }
     { name: 'JWT_SECRET_KEY', secretRef: 'jwt-secret-key' }
+    { name: 'MFA_ENCRYPTION_KEY', secretRef: 'mfa-encryption-key' }
     { name: 'FRONTEND_URL', value: publicUrl }
     // Only the SMTP greeting uses it; the API is reached through the UI's origin.
     { name: 'BACKEND_URL', value: publicUrl }

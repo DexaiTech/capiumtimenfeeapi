@@ -72,6 +72,7 @@ jobs:
       # Placeholders so the parameter files compile; nothing is deployed.
       MYSQL_ADMIN_PASSWORD: ci-placeholder-password
       JWT_SECRET_KEY: ci-placeholder-0123456789-0123456789
+      MFA_ENCRYPTION_KEY: Y2ktcGxhY2Vob2xkZXItbm90LWEtcmVhbC1rZXktMDA=
     steps:
       - uses: actions/checkout@v4
       - name: Bicep compiles and lints

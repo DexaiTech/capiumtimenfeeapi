@@ -17,7 +17,7 @@ Browser ──HTTPS──► ui (Container App, nginx) ──/api──► api (
 | `registry.bicep` | Container Registry (`capium-api`, `capium-worker`, `capium-ui`), AcrPull for the identity |
 | `mysql.bicep` | MySQL 8.4 Flexible Server in the private subnet + private DNS zone, TLS required, `READ-COMMITTED`, database `capium` (`utf8mb4_0900_as_cs`) |
 | `storage.bicep` | Storage account (no public blobs, no shared keys, 14-day soft delete), private container `uploads`, *Storage Blob Data Contributor* for the identity |
-| `keyvault.bicep` | Key Vault (RBAC): `db-url`, `jwt-secret-key`, `smtp-password` (when set), *Key Vault Secrets User* for the identity |
+| `keyvault.bicep` | Key Vault (RBAC): `db-url`, `jwt-secret-key`, `mfa-encryption-key`, `smtp-password` (when set), *Key Vault Secrets User* for the identity |
 | `apps.bicep` | Container Apps environment (VNet), apps `api`, `worker`, `ui`, manual job `migrate` |
 | `email.bicep` | Optional (`deployEmail=true`): Communication Services Email with an Azure-managed domain |
 
@@ -35,6 +35,7 @@ account carry a 6-character suffix derived from the resource group, since they m
 ```bash
 export MYSQL_ADMIN_PASSWORD='<12+ characters>'
 export JWT_SECRET_KEY="$(python -c 'import secrets; print(secrets.token_urlsafe(48))')"
+export MFA_ENCRYPTION_KEY="$(python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')"
 az group create -n rg-capium-dev -l uksouth
 
 # 1. Everything except the apps (the images do not exist yet).
@@ -57,8 +58,10 @@ az containerapp exec -n capium-dev-api -g rg-capium-dev --command \
   "python -m app.maintenance.bootstrap --practice-name 'Smith & Co' --admin-name 'Ada Smith' --admin-email ada@smithco.example"
 ```
 
-Keep `MYSQL_ADMIN_PASSWORD` and `JWT_SECRET_KEY` for later deployments (they are in the vault):
-deploying with a different value rotates them.
+Keep `MYSQL_ADMIN_PASSWORD`, `JWT_SECRET_KEY` and `MFA_ENCRYPTION_KEY` for later deployments
+(they are in the vault): deploying with a different value rotates them. Rotating
+`MFA_ENCRYPTION_KEY` makes every stored two-factor secret unreadable, so those people need an
+administrator to reset their two-factor sign-in.
 
 The `deployApps=false` → `true` sequence is only needed once. Role assignments can take a few
 minutes to apply; if step 3 fails pulling an image or reading a secret, run it again.

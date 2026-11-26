@@ -110,6 +110,9 @@ python -c "import secrets; print(secrets.token_urlsafe(48))"   # a value for JWT
 | `DB_POOL_SIZE`, `DB_MAX_OVERFLOW` | | Connection pool per process (10 and 5). |
 | `JWT_SECRET_KEY` | yes | At least 32 random characters in production. |
 | `JWT_ALGORITHM`, `ACCESS_TOKEN_EXPIRE_MINUTES`, `REFRESH_TOKEN_EXPIRE_DAYS` | | HS256, 15 minutes, 30 days. |
+| `LOGIN_LOCKOUT_THRESHOLD`, `LOGIN_LOCKOUT_MINUTES` | | Consecutive failed sign-ins before an account locks (5) and for how long (15 minutes); see [foundation](docs/modules/foundation.md#sign-in-rules-the-capium-onelogin-rules). |
+| `MFA_ENCRYPTION_KEY` | production | Fernet key that encrypts two-factor secrets (`python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`). Keep it with the other secrets: changing it makes stored secrets unreadable. Outside production an empty value derives one from `JWT_SECRET_KEY`. |
+| `MFA_CHALLENGE_MINUTES`, `MFA_CHALLENGE_MAX_ATTEMPTS` | | How long a two-factor sign-in waits for its code (5) and how many wrong codes it takes (5). |
 | `FRONTEND_URL` | yes | The web app's origin; email links are built from it. |
 | `BACKEND_URL` | yes | The API's public origin. |
 | `CORS_ORIGINS` | | Comma-separated allowed origins. Defaults to `FRONTEND_URL`. |

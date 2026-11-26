@@ -14,6 +14,9 @@ param dbUrl string
 param jwtSecretKey string
 
 @secure()
+param mfaEncryptionKey string
+
+@secure()
 param smtpPassword string
 
 var secretsUserRole = '4633458b-17de-408a-b874-0445c86b69e6'
@@ -44,6 +47,13 @@ resource jwtSecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
   properties: { value: jwtSecretKey }
 }
 
+// Encrypts the two-factor secrets; changing it makes them unreadable.
+resource mfaKeySecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+  parent: vault
+  name: 'mfa-encryption-key'
+  properties: { value: mfaEncryptionKey }
+}
+
 // Only with an SMTP relay; without one the apps get no SMTP_PASSWORD at all.
 resource smtpSecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (!empty(smtpPassword)) {
   parent: vault
@@ -64,4 +74,5 @@ resource readSecrets 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
 output name string = vault.name
 output dbUrlSecretUri string = dbUrlSecret.properties.secretUri
 output jwtSecretUri string = jwtSecret.properties.secretUri
+output mfaKeySecretUri string = mfaKeySecret.properties.secretUri
 output smtpPasswordSecretUri string = empty(smtpPassword) ? '' : smtpSecret!.properties.secretUri

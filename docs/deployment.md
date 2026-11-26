@@ -35,6 +35,7 @@ The API checks the `Origin` of the refresh and logout calls against `CORS_ORIGIN
 | `DB_URL` | `mysql://user:pass@host:3306/capium` | The database must be `utf8mb4` / `utf8mb4_0900_as_cs`, with `transaction_isolation=READ-COMMITTED` and `log_bin_trust_function_creators=ON` |
 | `DB_SSL_MODE` | `verify_identity` | TLS to MySQL: `disabled`, `required`, `verify_ca`, `verify_identity` (Azure requires TLS). `DB_SSL_CA` names a CA file; empty uses the bundled public CAs |
 | `JWT_SECRET_KEY` | 48+ random characters | `python -c "import secrets; print(secrets.token_urlsafe(48))"` |
+| `MFA_ENCRYPTION_KEY` | a Fernet key (44 characters) | Required in production: encrypts two-factor secrets. `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`. Never change it casually: stored secrets become unreadable |
 | `FRONTEND_URL` | `https://timenfee.example.com` | The UI's public origin (links in emails, secure cookies) |
 | `BACKEND_URL` | `https://api.timenfee.example.com` | The API's public origin |
 | `CORS_ORIGINS` | `https://timenfee.example.com` | Comma-separated; every origin the UI is served from |

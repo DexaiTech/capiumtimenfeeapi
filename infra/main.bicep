@@ -64,6 +64,12 @@ param mysqlGeoRedundantBackup bool = false
 @minLength(32)
 param jwtSecretKey string
 
+@description('Fernet key that encrypts two-factor secrets (44 characters, kept in Key Vault). Changing it makes stored secrets unreadable.')
+@secure()
+@minLength(44)
+@maxLength(44)
+param mfaEncryptionKey string
+
 @description('SMTP relay host. Empty: the mock gateway records messages instead of sending them.')
 param smtpHost string = ''
 
@@ -180,6 +186,7 @@ module vault 'modules/keyvault.bicep' = {
     // The API normalises mysql:// to its async driver and adds TLS from DB_SSL_MODE.
     dbUrl: 'mysql://${mysqlAdminLogin}:${uriComponent(mysqlAdminPassword)}@${mysql.outputs.fqdn}:3306/${mysql.outputs.databaseName}'
     jwtSecretKey: jwtSecretKey
+    mfaEncryptionKey: mfaEncryptionKey
     smtpPassword: smtpPassword
     tags: allTags
   }
@@ -211,6 +218,7 @@ module apps 'modules/apps.bicep' = if (deployApps) {
     closedDeployment: closedDeployment
     dbUrlSecretUri: vault.outputs.dbUrlSecretUri
     jwtSecretUri: vault.outputs.jwtSecretUri
+    mfaKeySecretUri: vault.outputs.mfaKeySecretUri
     smtpPasswordSecretUri: vault.outputs.smtpPasswordSecretUri
     smtpHost: smtpHost
     smtpPort: smtpPort
