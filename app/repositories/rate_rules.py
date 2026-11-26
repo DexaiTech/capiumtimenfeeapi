@@ -10,6 +10,7 @@ from sqlalchemy import ColumnElement, and_, delete, func, literal, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
+from app.db.locks import transaction_lock
 from app.db.models import (
     Client,
     Grade,
@@ -440,9 +441,7 @@ class RateRuleRepository:
             f"rate:{organization_id}:{kind}:{scope.client_id}:{scope.service_id}:"
             f"{scope.user_id}:{scope.grade_id}"
         )
-        await self.session.execute(
-            select(func.pg_advisory_xact_lock(func.hashtextextended(key, 0)))
-        )
+        await transaction_lock(self.session, key)
 
     async def add(self, rule: RateRule) -> RateRule:
         self.session.add(rule)

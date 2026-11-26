@@ -7,9 +7,10 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Any
 
-from sqlalchemy import ColumnElement, and_, delete, func, or_, select, text
+from sqlalchemy import ColumnElement, and_, delete, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.locks import transaction_lock
 from app.db.models import (
     Client,
     Grade,
@@ -38,7 +39,7 @@ def _covers(
 
 async def _lock(session: AsyncSession, key: str) -> None:
     """Serialise changes to one person's or one grade's periods (until the transaction ends)."""
-    await session.execute(select(func.pg_advisory_xact_lock(func.hashtextextended(key, 0))))
+    await transaction_lock(session, key)
 
 
 class StaffHoursRepository:

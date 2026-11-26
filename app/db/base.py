@@ -3,10 +3,10 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, MetaData, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import ForeignKey, MetaData, Uuid
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
+from app.db.types import NOW, NOW_ON_UPDATE, UTCDateTime
 from app.utils.ids import new_id
 
 NAMING_CONVENTION = {
@@ -23,27 +23,25 @@ class Base(DeclarativeBase):
 
 
 class IdMixin:
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=new_id)
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(), primary_key=True, default=new_id)
 
 
 class TimestampMixin:
-    """``updated_at`` is maintained by the ``set_updated_at`` trigger, not by the ORM."""
+    """``updated_at`` is kept current by MySQL (``ON UPDATE CURRENT_TIMESTAMP(6)``)."""
 
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
-    )
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), server_default=NOW, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
+        UTCDateTime(), server_default=NOW_ON_UPDATE, nullable=False
     )
 
 
 class SoftDeleteMixin:
-    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
 
 
 class OrgScopedMixin:
     """The practice a business row belongs to. Deleting a practice deletes its data."""
 
     organization_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+        Uuid(), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
     )

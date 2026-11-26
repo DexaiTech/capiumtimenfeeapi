@@ -26,6 +26,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.locks import transaction_lock
 from app.db.models import (
     Client,
     Disbursement,
@@ -462,13 +463,7 @@ class WipRepository:
         one fixed-fee job then see each other's fixed-fee line instead of both billing the
         whole fee. Only billing takes these locks, so they cannot deadlock with row locks."""
         for job_id in sorted(set(job_ids)):
-            await self.session.execute(
-                select(
-                    func.pg_advisory_xact_lock(
-                        func.hashtextextended(f"fixed_fee:{organization_id}:{job_id}", 0)
-                    )
-                )
-            )
+            await transaction_lock(self.session, f"fixed_fee:{organization_id}:{job_id}")
 
     async def fixed_fee_billed(
         self, organization_id: uuid.UUID, job_ids: Iterable[uuid.UUID]

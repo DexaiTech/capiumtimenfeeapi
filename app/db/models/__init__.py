@@ -45,6 +45,7 @@ from app.db.models.integrations import (
 )
 from app.db.models.invoice_templates import InvoiceTemplate
 from app.db.models.jobs import Job, JobAssignee, JobBudgetAlert, Task, TaskAssignee
+from app.db.models.locks import AdvisoryLock
 from app.db.models.notifications import (
     EmailTemplate,
     MessageLog,
@@ -105,6 +106,7 @@ from app.db.models.wip import (
 
 __all__ = [
     "ActivityCode",
+    "AdvisoryLock",
     "AuditLog",
     "BackgroundJob",
     "BookkeepingServiceMapping",

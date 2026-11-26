@@ -11,6 +11,7 @@ from sqlalchemy.pool import NullPool
 from app.core.config import get_settings
 from app.db import models  # noqa: F401  (registers every table on Base.metadata)
 from app.db.base import Base
+from app.db.session import engine_options
 
 target_metadata = Base.metadata
 
@@ -47,7 +48,10 @@ def _run(connection: Connection) -> None:
 
 
 async def run_migrations_online() -> None:
-    engine = create_async_engine(get_settings().direct_database_url, poolclass=NullPool)
+    settings = get_settings()
+    engine = create_async_engine(
+        settings.direct_database_url, poolclass=NullPool, **engine_options(settings)
+    )
     async with engine.connect() as connection:
         await connection.run_sync(_run)
     await engine.dispose()

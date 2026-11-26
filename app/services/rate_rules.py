@@ -26,13 +26,13 @@ from dataclasses import replace
 from datetime import date, timedelta
 from typing import Any
 
-from asyncpg.exceptions import ExclusionViolationError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.context import RequestContext
 from app.core.exceptions import ConflictError, NotFoundError, ValidationError
+from app.db.errors import is_overlap
 from app.db.models import RateChange, RateRerun, RateRule
 from app.db.models.organization import GONE_STATUSES
 from app.db.session import unit_of_work
@@ -69,8 +69,8 @@ VALID_SCOPES = (
 
 
 def is_exclusion_violation(exc: IntegrityError) -> bool:
-    cause = exc.orig.__cause__ if exc.orig is not None else None
-    return isinstance(cause, ExclusionViolationError)
+    """An overlap trigger refused the row (MySQL's stand-in for an exclusion constraint)."""
+    return is_overlap(exc)
 
 
 def overlap_error(conflicts: list[RateRule] | None = None) -> ConflictError:

@@ -335,3 +335,30 @@ A new engine (MySQL 8.4) with a new baseline schema that is functionally the sam
   ticket exists? Recommended: merging C before the data move would point the live site at an
   empty database.
 * **D6.** Azure Communication Services Email: include the optional module, or keep the current SMTP provider?
+
+## 17. Decisions taken and changes to the plan during implementation
+
+Approved with "go" on 2026-11-26, taking the recommended option for D1-D6: MySQL 8.4 Flexible
+Server; Bicep with private networking; PostgreSQL history archived with a MySQL baseline; the
+PostgreSQL migration tests replaced by baseline tests; Blob Storage committed first and nothing
+merged before the data-migration ticket; Communication Services Email as an optional module, off.
+
+Changes found necessary while implementing, with the reason:
+
+* **Exclusion constraints → `BEFORE INSERT/UPDATE` triggers** (not service checks). A trigger
+  `SIGNAL`s `SQLSTATE '45000'` with the constraint's name (`ex_rate_rules_scope_period`, …).
+  That keeps the guarantee in the database and keeps every existing service path
+  (`is_exclusion_violation` → `RATE_OVERLAP`) unchanged; writers are already serialised by the
+  named locks, so the trigger's read cannot race. Needs `log_bin_trust_function_creators=ON`
+  on Azure (added to `infra/modules/mysql.bicep`).
+* **Naive datetimes are taken as UTC, not refused.** asyncpg treated a naive value written to
+  `timestamptz` as UTC, so refusing it would change behaviour for any caller that relied on that.
+* **`updated_at` uses `ON UPDATE CURRENT_TIMESTAMP(6)`** in place of the `set_updated_at` trigger.
+* **Scope found larger than estimated:** the models have 99 tables, 323 `Text` columns (no
+  `String` at all) and 394 CHECK constraints in PostgreSQL syntax. MySQL cannot index or
+  uniquely constrain `TEXT` without a length, does not allow literal defaults on `TEXT`/`JSON`,
+  and refuses CHECK constraints on columns used by `ON DELETE` actions (error 3823). Each table
+  needs a per-column decision (`VARCHAR(n)` from its CHECK length, or `TEXT`).
+* **Verification needs a MySQL server.** This machine has none (no Docker, no MySQL), so DDL
+  acceptance, the triggers, the locks and the suite can only be checked in CI (a draft PR) or
+  on a local MySQL 8.4.

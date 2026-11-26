@@ -2,14 +2,6 @@
 
 from typing import Any
 
-from asyncpg.exceptions import (
-    CheckViolationError,
-    DeadlockDetectedError,
-    ExclusionViolationError,
-    ForeignKeyViolationError,
-    SerializationError,
-    UniqueViolationError,
-)
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -20,6 +12,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from app.core.context import request_id_var
 from app.core.exceptions import AppException
 from app.core.logging import get_logger
+from app.db.errors import database_error
 
 log = get_logger(__name__)
 
@@ -204,31 +197,33 @@ def _unavailable() -> JSONResponse:
 
 async def _database_error(_: Request, exc: Exception) -> JSONResponse:
     assert isinstance(exc, DBAPIError | PoolTimeoutError)
-    if isinstance(exc, PoolTimeoutError | OperationalError | InterfaceError):
-        log.error("database_unavailable", exc_info=exc)
-        return _unavailable()
-    # SQLAlchemy wraps the asyncpg error; the original carries the SQLSTATE class.
-    cause = exc.orig.__cause__ if exc.orig is not None else None
-    if isinstance(cause, UniqueViolationError):
+    # MySQL reports constraint failures, deadlocks and lock timeouts with an error number,
+    # some of them as OperationalError: classify before treating it as "unavailable".
+    error = None if isinstance(exc, PoolTimeoutError) else database_error(exc)
+    kind = error.kind if error is not None else "other"
+    if kind == "unique":
         field, message = UNIQUE_MESSAGES.get(
-            cause.constraint_name or "", ("", "This value is already in use.")
+            (error.constraint if error else None) or "", ("", "This value is already in use.")
         )
         details = [{"field": field, "code": "duplicate", "message": message}] if field else None
         return error_response(409, "CONFLICT", message, details)
-    if isinstance(cause, ExclusionViolationError):
-        if cause.constraint_name == "ex_rate_rules_scope_period":
+    if kind == "overlap":
+        if error is not None and error.constraint == "ex_rate_rules_scope_period":
             return error_response(
                 409,
                 "RATE_OVERLAP",
                 "Another rate of the same kind already covers part of this period.",
             )
         return error_response(409, "CONFLICT", "This overlaps with an existing record.")
-    if isinstance(cause, ForeignKeyViolationError):
+    if kind == "foreign_key":
         return error_response(422, "VALIDATION_ERROR", "A referenced item does not exist.")
-    if isinstance(cause, CheckViolationError):
-        log.warning("check_violation", constraint=cause.constraint_name)
+    if kind in ("check", "too_long"):
+        log.warning("check_violation", constraint=error.constraint if error else None)
         return error_response(422, "VALIDATION_ERROR", "Some fields are invalid.")
-    if isinstance(cause, SerializationError | DeadlockDetectedError):
+    if kind in ("deadlock", "lock_timeout"):
+        return _unavailable()
+    if isinstance(exc, PoolTimeoutError | OperationalError | InterfaceError):
+        log.error("database_unavailable", exc_info=exc)
         return _unavailable()
     if isinstance(exc, IntegrityError):
         log.error("integrity_error", exc_info=exc)

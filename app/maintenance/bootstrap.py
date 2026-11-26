@@ -32,6 +32,7 @@ from app.core.config import get_settings
 from app.core.context import RequestContext
 from app.core.exceptions import AppException
 from app.core.security import COMMON_PASSWORDS, generate_password, hash_password
+from app.db.locks import transaction_lock
 from app.db.models import Organization, User
 from app.db.session import unit_of_work
 from app.repositories.organizations import OrganizationRepository
@@ -42,7 +43,7 @@ from app.services.organizations import OrganizationService
 from app.utils.ids import new_id
 
 _EMAIL: TypeAdapter[str] = TypeAdapter(EmailStr)
-_LOCK_KEY = 20_261_011
+_LOCK_KEY = "bootstrap"
 # Practice fields as the operator typed them on the command line.
 _OPTION_NAMES = {"name": "practice-name"}
 
@@ -110,7 +111,7 @@ async def bootstrap(
 
     async with unit_of_work(session):
         # Two operators running this at once must not each create a practice.
-        await session.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": _LOCK_KEY})
+        await transaction_lock(session, _LOCK_KEY)
         if await OrganizationRepository(session).first() is not None:
             raise BootstrapError("A practice already exists. Nothing was changed.")
         users = UserRepository(session)

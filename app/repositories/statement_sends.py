@@ -22,6 +22,7 @@ from sqlalchemy import (
 from sqlalchemy.engine import RowMapping
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.locks import transaction_lock
 from app.db.models import Client, ClientContact, Invoice, Payment, StatementSend
 from app.repositories.expense_paging import AnyRow, SortKind, keyset_page
 from app.utils.pagination import PageParams
@@ -204,9 +205,7 @@ class StatementSendRepository:
     async def lock_client(self, organization_id: uuid.UUID, client_id: uuid.UUID) -> None:
         """Serialise the statement requests of one client (held until the transaction ends)."""
         key = f"statement_send:{organization_id}:{client_id}"
-        await self.session.execute(
-            select(func.pg_advisory_xact_lock(func.hashtextextended(key, 0)))
-        )
+        await transaction_lock(self.session, key)
 
     async def queued_since(
         self, organization_id: uuid.UUID, client_id: uuid.UUID, since: datetime

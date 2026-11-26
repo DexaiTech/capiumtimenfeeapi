@@ -9,11 +9,11 @@ import time
 from datetime import UTC, datetime, timedelta
 
 import structlog
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import Settings
 from app.core.logging import get_logger
+from app.db.locks import try_transaction_lock
 from app.db.models import BackgroundJob
 from app.repositories.jobs import JobRepository
 from app.services import jobs as job_service
@@ -24,7 +24,7 @@ from app.workers.handlers import HANDLERS, PERIODIC, PermanentJobError
 log = get_logger(__name__)
 
 TICK_SECONDS = 60
-SCHEDULER_LOCK_ID = 7_301_001
+SCHEDULER_LOCK_KEY = "worker_scheduler"
 BACKOFF_BASE_SECONDS, BACKOFF_MAX_SECONDS = 30, 3600
 
 
@@ -138,9 +138,7 @@ class Worker:
     async def tick(self) -> None:
         """Reap expired leases and enqueue periodic jobs. One worker at a time."""
         async with self.sessionmaker() as session:
-            locked = await session.scalar(
-                text("SELECT pg_try_advisory_xact_lock(:id)"), {"id": SCHEDULER_LOCK_ID}
-            )
+            locked = await try_transaction_lock(session, SCHEDULER_LOCK_KEY)
             if not locked:
                 return
             reaped = await JobRepository(session).reap_expired()

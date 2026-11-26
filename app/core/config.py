@@ -13,14 +13,10 @@ from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-_ASYNC_SCHEME = "postgresql+asyncpg"
-_SYNC_SCHEMES = {
-    "postgres",
-    "postgresql",
-    "postgresql+psycopg2",
-    "postgresql+psycopg",
-    _ASYNC_SCHEME,
-}
+_ASYNC_SCHEME = "mysql+aiomysql"
+_SCHEMES = {"mysql", "mysql+pymysql", "mysql+aiomysql", "mysql+asyncmy"}
+# TLS is configured by DB_SSL_MODE / DB_SSL_CA, never by URL parameters (they differ per driver).
+_URL_TLS_PARAMS = {"ssl", "ssl-mode", "ssl_mode", "sslmode", "ssl_ca", "ssl-ca"}
 
 
 _BARE_PERCENT = re.compile(r"%(?![0-9A-Fa-f]{2})")
@@ -47,16 +43,18 @@ def _encode_userinfo(netloc: str) -> str:
 
 
 def normalise_db_url(url: str, *, scheme: str = _ASYNC_SCHEME) -> str:
-    """Rewrite a PostgreSQL URL to the given scheme and translate ``sslmode`` for asyncpg."""
+    """Rewrite a MySQL URL to the async driver's scheme, with the utf8mb4 character set.
+
+    TLS parameters in the URL are refused: use ``DB_SSL_MODE`` and ``DB_SSL_CA``.
+    """
     parts = urlsplit(url)
-    if parts.scheme not in _SYNC_SCHEMES:
-        raise ValueError("must be a PostgreSQL URL")
-    query = []
-    for key, value in parse_qsl(parts.query, keep_blank_values=True):
-        if key == "sslmode" and scheme == _ASYNC_SCHEME:
-            query.append(("ssl", value))
-        else:
-            query.append((key, value))
+    if parts.scheme not in _SCHEMES:
+        raise ValueError("must be a MySQL URL (mysql://user:password@host:3306/database)")
+    query = parse_qsl(parts.query, keep_blank_values=True)
+    if any(key.lower() in _URL_TLS_PARAMS for key, _ in query):
+        raise ValueError("set TLS with DB_SSL_MODE and DB_SSL_CA, not in the URL")
+    query = [(key, value) for key, value in query if key != "charset"]
+    query.append(("charset", "utf8mb4"))
     netloc = _encode_userinfo(parts.netloc)
     return urlunsplit((scheme, netloc, parts.path, urlencode(query), parts.fragment))
 
@@ -79,6 +77,10 @@ class Settings(BaseSettings):
     db_max_overflow: int = 5
     db_pool_pre_ping: bool = False
     db_pool_recycle_seconds: int = Field(default=1800, ge=60)
+    # TLS to MySQL. Azure Database for MySQL requires it: use verify_identity there. DB_SSL_CA is
+    # a CA bundle file; empty means the bundled public CAs (certifi), which cover Azure.
+    db_ssl_mode: Literal["disabled", "required", "verify_ca", "verify_identity"] = "disabled"
+    db_ssl_ca: str = ""
 
     jwt_secret_key: SecretStr
     jwt_algorithm: Literal["HS256", "HS384", "HS512"] = "HS256"
@@ -222,20 +224,6 @@ class Settings(BaseSettings):
         if self.db_direct_url and self.db_direct_url.get_secret_value():
             return self.db_direct_url.get_secret_value()
         return self.database_url
-
-    @property
-    def listen_database_url(self) -> str:
-        """Plain ``postgresql://`` URL for the raw asyncpg LISTEN connection.
-
-        From ``DB_DIRECT_URL`` (a pooler in transaction mode cannot LISTEN), falling back
-        to ``DB_URL``. asyncpg's own DSN parser wants ``sslmode`` again, not ``ssl``.
-        """
-        parts = urlsplit(self.direct_database_url)
-        query = [
-            ("sslmode" if key == "ssl" else key, value)
-            for key, value in parse_qsl(parts.query, keep_blank_values=True)
-        ]
-        return urlunsplit(("postgresql", parts.netloc, parts.path, urlencode(query), ""))
 
     @property
     def uses_blob_storage(self) -> bool:

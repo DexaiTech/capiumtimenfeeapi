@@ -80,6 +80,15 @@ resource isolation 'Microsoft.DBforMySQL/flexibleServers/configurations@2023-12-
   dependsOn: [secureTransport]
 }
 
+// The schema's triggers (overlapping periods) are created by the migration user; with binary
+// logging on, MySQL refuses that unless function creators are trusted.
+resource triggers 'Microsoft.DBforMySQL/flexibleServers/configurations@2023-12-30' = {
+  parent: server
+  name: 'log_bin_trust_function_creators'
+  properties: { value: 'ON', source: 'user-override' }
+  dependsOn: [isolation]
+}
+
 resource database 'Microsoft.DBforMySQL/flexibleServers/databases@2023-12-30' = {
   parent: server
   name: databaseName
@@ -87,7 +96,7 @@ resource database 'Microsoft.DBforMySQL/flexibleServers/databases@2023-12-30' = 
     charset: 'utf8mb4'
     collation: 'utf8mb4_0900_as_cs'
   }
-  dependsOn: [isolation]
+  dependsOn: [triggers]
 }
 
 output fqdn string = server.properties.fullyQualifiedDomainName

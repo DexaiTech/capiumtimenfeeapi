@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.context import RequestContext
 from app.core.exceptions import AuthorizationError, ConflictError, NotFoundError, ValidationError
 from app.core.permissions import OWNER_KEY
+from app.db.errors import database_error
 from app.db.models import OrganizationMember, Role
 from app.db.models.organization import GONE_STATUSES
 from app.db.session import unit_of_work
@@ -33,10 +34,9 @@ INITIALS_INDEX = "uq_organization_members_organization_id_initials"
 
 
 def integrity_constraint(exc: IntegrityError) -> str | None:
-    """The name of the violated constraint, from the asyncpg error SQLAlchemy wraps."""
-    cause = exc.orig.__cause__ if exc.orig is not None else None
-    name = getattr(cause, "constraint_name", None)
-    return name if isinstance(name, str) else None
+    """The name of the violated constraint, from the MySQL error SQLAlchemy wraps."""
+    error = database_error(exc)
+    return error.constraint if error is not None else None
 
 
 def initials_taken_error() -> ConflictError:

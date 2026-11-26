@@ -11,6 +11,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.expression import ColumnElement, ColumnExpressionArgument
 
+from app.db.locks import transaction_lock
 from app.db.models import CentralClientCache, Client
 from app.db.models.clients import ordinary_clients
 from app.utils.ids import new_id
@@ -242,10 +243,4 @@ class CentralClientRepository:
         advisory lock per id, in id order. Two requests enabling or linking the same central
         client then run one after the other and the second sees the first one's client."""
         for central_id in sorted(set(central_ids)):
-            await self.session.execute(
-                select(
-                    func.pg_advisory_xact_lock(
-                        func.hashtextextended(f"central_client:{organization_id}:{central_id}", 0)
-                    )
-                )
-            )
+            await transaction_lock(self.session, f"central_client:{organization_id}:{central_id}")
