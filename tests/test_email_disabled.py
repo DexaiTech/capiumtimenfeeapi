@@ -24,6 +24,8 @@ def test_production_needs_smtp_credentials_only_when_a_host_is_set() -> None:
         "app_debug": False,
         "jwt_secret_key": "x" * 48,
         "auth_rate_limit_factor": 1,
+        # Production also needs the two-factor encryption key (any valid Fernet key).
+        "mfa_encryption_key": "Y2ktcGxhY2Vob2xkZXItbm90LWEtcmVhbC1rZXktMDA=",
     }
     assert _settings_without_smtp(**production).is_production
     try:
