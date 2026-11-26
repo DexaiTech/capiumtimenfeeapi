@@ -358,3 +358,37 @@ async def unlink_login(
     staff_id: uuid.UUID, org: StaffRemover, service: StaffLoginServiceDep, ctx: ContextDep
 ) -> ApiResponse[StaffDetail]:
     return ok(await service.unlink_login(org, staff_id, ctx), "Login removed")
+
+
+@router.post(
+    "/staff/{staff_id}/unlock-login",
+    summary="Unlock a staff member's login",
+    description=(
+        "Ends a lockout after too many failed sign-ins (`locked_until` in the staff record), "
+        "so they can sign in again at once. Nothing happens when the login is not locked. "
+        "409 `NO_LOGIN`; 409 `ACCOUNT_SHARED` when the account also belongs to another "
+        "practice; 403 for oneself; only an owner changes an owner. Requires `member.remove`."
+    ),
+    responses=error_responses(403, 404, 409),
+)
+async def unlock_login(
+    staff_id: uuid.UUID, org: StaffRemover, service: StaffLoginServiceDep, ctx: ContextDep
+) -> ApiResponse[StaffDetail]:
+    return ok(await service.unlock_login(org, staff_id, ctx), "Login unlocked")
+
+
+@router.post(
+    "/staff/{staff_id}/reset-two-factor",
+    summary="Reset a staff member's two-factor sign-in",
+    description=(
+        "Turns their two-factor sign-in off (for a lost or replaced phone) and signs them out "
+        "everywhere; they sign in with the password and set it up again from their account. "
+        "409 `MFA_NOT_ENABLED`, 409 `NO_LOGIN`, 409 `ACCOUNT_SHARED`; 403 for oneself; only an "
+        "owner changes an owner. Requires `member.remove`."
+    ),
+    responses=error_responses(403, 404, 409),
+)
+async def reset_two_factor(
+    staff_id: uuid.UUID, org: StaffRemover, service: StaffLoginServiceDep, ctx: ContextDep
+) -> ApiResponse[StaffDetail]:
+    return ok(await service.reset_two_factor(org, staff_id, ctx), "Two-factor sign-in reset")

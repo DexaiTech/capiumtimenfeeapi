@@ -21,10 +21,12 @@ from app.schemas.auth import (
     RevokedCount,
     TokenRequest,
     TokenResponse,
+    TwoFactorChallenge,
+    TwoFactorValidateRequest,
 )
 from app.schemas.common import ApiResponse, error_responses, ok
 from app.schemas.user import UserRead
-from app.services.auth import AuthService, TokenBundle
+from app.services.auth import AuthService, TokenBundle, TwoFactorRequired
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
@@ -68,14 +70,16 @@ def _clear_refresh_cookie(response: Response, settings: Settings) -> None:
     )
 
 
-def _token_response(bundle: TokenBundle, settings: Settings) -> ApiResponse[TokenResponse]:
-    return ok(
-        TokenResponse(
-            access_token=bundle.access_token,
-            expires_in=bundle.expires_in,
-            user=UserRead.from_model(bundle.user),
-        )
+def _token_payload(bundle: TokenBundle) -> TokenResponse:
+    return TokenResponse(
+        access_token=bundle.access_token,
+        expires_in=bundle.expires_in,
+        user=UserRead.from_model(bundle.user),
     )
+
+
+def _token_response(bundle: TokenBundle, settings: Settings) -> ApiResponse[TokenResponse]:
+    return ok(_token_payload(bundle))
 
 
 @router.post(
@@ -99,8 +103,16 @@ async def register(
 @router.post(
     "/login",
     summary="Sign in",
-    description="Returns a short-lived access token and sets the httpOnly refresh cookie.",
-    responses=error_responses(403),
+    description=(
+        "Returns a short-lived access token and sets the httpOnly refresh cookie. For an "
+        "account with two-factor sign-in and no `totp_code`, a right password starts no "
+        "session: the answer is `requires_two_factor: true` with a `challenge_token` for "
+        "`POST /auth/2fa/validate`. 401 `AUTH_INVALID_CREDENTIALS` (wrong email or password), "
+        "401 `AUTH_MFA_CODE_INVALID` (wrong `totp_code`), 403 `AUTH_ACCOUNT_DISABLED`, "
+        "423 `AUTH_ACCOUNT_LOCKED` after too many consecutive failures (`retry_after` "
+        "seconds in `details` and the `Retry-After` header), 429 `RATE_LIMITED`."
+    ),
+    responses=error_responses(403, 423),
 )
 async def login(
     body: LoginRequest,
@@ -108,8 +120,41 @@ async def login(
     service: AuthServiceDep,
     settings: SettingsDep,
     ctx: ContextDep,
+) -> ApiResponse[TokenResponse | TwoFactorChallenge]:
+    outcome = await service.login(body, ctx)
+    payload: TokenResponse | TwoFactorChallenge
+    if isinstance(outcome, TwoFactorRequired):
+        payload = TwoFactorChallenge(
+            challenge_token=outcome.challenge_token, expires_in=outcome.expires_in
+        )
+        return ok(payload, "Enter the code from your authenticator app")
+    _set_refresh_cookie(response, settings, outcome.refresh_token)
+    payload = _token_payload(outcome)
+    return ok(payload)
+
+
+@router.post(
+    "/2fa/validate",
+    summary="Finish a two-factor sign-in",
+    description=(
+        "The second step of a two-factor sign-in: the `challenge_token` from `POST /auth/login` "
+        "and the code from the authenticator app. Answers like a successful login (access "
+        "token, refresh cookie). A challenge lasts 5 minutes, takes 5 wrong codes and works "
+        "once; wrong codes also count toward the account lockout. 401 `AUTH_MFA_CODE_INVALID` "
+        "(`attempts_left` in `details`), 401 `AUTH_MFA_TOO_MANY_ATTEMPTS`, 401 "
+        "`AUTH_MFA_CHALLENGE_INVALID` (expired, used or revoked: sign in again), 423 "
+        "`AUTH_ACCOUNT_LOCKED`, 429 `RATE_LIMITED`."
+    ),
+    responses=error_responses(423),
+)
+async def validate_two_factor(
+    body: TwoFactorValidateRequest,
+    response: Response,
+    service: AuthServiceDep,
+    settings: SettingsDep,
+    ctx: ContextDep,
 ) -> ApiResponse[TokenResponse]:
-    bundle = await service.login(body, ctx)
+    bundle = await service.validate_two_factor(body, ctx)
     _set_refresh_cookie(response, settings, bundle.refresh_token)
     return _token_response(bundle, settings)
 

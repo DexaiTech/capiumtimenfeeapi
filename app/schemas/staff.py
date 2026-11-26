@@ -1,7 +1,7 @@
 """Request and response models of staff: records, lifecycle and login linking."""
 
 import uuid
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from typing import Annotated, Literal, Self, cast
 
 from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
@@ -84,6 +84,13 @@ class StaffRead(BaseModel):
         "or active"
     )
     invited_at: datetime | None
+    two_factor_enabled: bool = Field(
+        default=False, description="They sign in with an authenticator code as well"
+    )
+    locked_until: datetime | None = Field(
+        default=None,
+        description="Set while too many failed sign-ins lock their login: until when (UTC)",
+    )
     status: StaffStatus
     is_selectable: bool = Field(
         description="Active and not past the leaving date: time can be recorded for them"
@@ -127,6 +134,10 @@ class StaffRead(BaseModel):
             login_email=user.email if member.login_enabled else None,
             login_status=login_status(row),
             invited_at=member.invited_at,
+            two_factor_enabled=member.login_enabled and user.two_factor_enabled,
+            locked_until=user.locked_until
+            if member.login_enabled and user.locked_at(datetime.now(UTC))
+            else None,
             status=cast(StaffStatus, status),
             is_selectable=status == "active"
             and (member.leaving_date is None or member.leaving_date >= today),

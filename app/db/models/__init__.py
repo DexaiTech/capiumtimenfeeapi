@@ -91,6 +91,7 @@ from app.db.models.time import TimeEntry, Timer, Timesheet
 from app.db.models.time_history import TimeEntryHistory, TimesheetReminder
 from app.db.models.user import (
     EmailVerificationToken,
+    MfaChallenge,
     PasswordResetToken,
     RefreshToken,
     User,
@@ -153,6 +154,7 @@ __all__ = [
     "LockedPeriod",
     "MemberPermissionOverride",
     "MessageLog",
+    "MfaChallenge",
     "Notification",
     "NotificationPreference",
     "NotificationSetting",

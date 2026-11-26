@@ -9,9 +9,13 @@
   signs in with the given address: their time, rates and jobs move to that member, who takes
   over the staff profile (code, grade, hours, dates).
 * ``unlink_login``: the person keeps their record and history but can no longer sign in.
+* ``unlock_login``: ends a lockout after too many failed sign-ins (the Capium OneLogin rule).
+* ``reset_two_factor``: turns a person's two-factor sign-in off (a lost phone) and signs them out
+  everywhere; they set it up again from their account.
 
-Granting access needs ``member.invite`` and the right to hand out the role; taking it away
-needs ``member.remove``. Every change takes the practice row lock.
+Granting access needs ``member.invite`` and the right to hand out the role; taking it away,
+unlocking it and resetting two-factor need ``member.remove``. Every change takes the practice
+row lock.
 """
 
 import uuid
@@ -30,6 +34,7 @@ from app.db.session import unit_of_work
 from app.repositories import staff_references
 from app.repositories.auth_tokens import AuthTokenRepository
 from app.repositories.members import MemberRepository
+from app.repositories.mfa import MfaChallengeRepository
 from app.repositories.roles import RoleRepository
 from app.repositories.staff import StaffRepository, StaffRow
 from app.repositories.users import UserRepository
@@ -55,6 +60,7 @@ from app.services.staff_common import (
     staff_integrity_error,
     unusable_password_hash,
 )
+from app.services.two_factor import clear_two_factor
 
 # What the login member takes over from the record that is merged into it.
 _PROFILE = (
@@ -367,6 +373,78 @@ class StaffLoginService:
             )
             detail = await self.staff.detail(ctx, await self.staff.fetch_row(ctx, user_id))
         return detail
+
+    async def unlock_login(
+        self, ctx: OrgContext, user_id: uuid.UUID, rctx: RequestContext
+    ) -> StaffDetail:
+        async with unit_of_work(self.session):
+            ctx, row = await self._account_change(ctx, user_id, "unlock")
+            user = row.user
+            if user.locked_until is not None:
+                was_locked_until = user.locked_until
+                user.locked_until = None
+                user.failed_login_count = 0
+                await self.session.flush()
+                await record_audit(
+                    self.session,
+                    ctx,
+                    rctx,
+                    "staff.login_unlocked",
+                    "member",
+                    user.id,
+                    {"staff_name": user.full_name, "locked_until": was_locked_until.isoformat()},
+                )
+            detail = await self.staff.detail(ctx, await self.staff.fetch_row(ctx, user_id))
+        return detail
+
+    async def reset_two_factor(
+        self, ctx: OrgContext, user_id: uuid.UUID, rctx: RequestContext
+    ) -> StaffDetail:
+        async with unit_of_work(self.session):
+            ctx, row = await self._account_change(ctx, user_id, "reset two-factor sign-in for")
+            user = row.user
+            if user.mfa_secret is None:
+                raise ConflictError(
+                    "This person does not use two-factor sign-in.", code="MFA_NOT_ENABLED"
+                )
+            now = datetime.now(UTC)
+            clear_two_factor(user)
+            await MfaChallengeRepository(self.session).revoke_open(user.id, now)
+            await self.sessions.revoke_all(user.id, "admin")
+            await self.session.flush()
+            await record_audit(
+                self.session,
+                ctx,
+                rctx,
+                "staff.two_factor_reset",
+                "member",
+                user.id,
+                {"staff_name": user.full_name, "staff_code": row.member.staff_code},
+            )
+            detail = await self.staff.detail(ctx, await self.staff.fetch_row(ctx, user_id))
+        return detail
+
+    async def _account_change(
+        self, ctx: OrgContext, user_id: uuid.UUID, verb: str
+    ) -> tuple[OrgContext, StaffRow]:
+        """The checks of a change to someone's account, as for removing their login: the
+        practice row lock, ``member.remove``, a login, not oneself, the owner rule, and an account
+        that no other practice shares (the change would reach that practice too)."""
+        ctx = await lock_and_refresh(self.session, ctx, "member.remove")
+        row = await self.staff.fetch_row(ctx, user_id)
+        if not row.member.login_enabled:
+            raise ConflictError("This person has no login.", code="NO_LOGIN")
+        if row.member.user_id == ctx.user.id:
+            raise AuthorizationError(f"You cannot {verb} your own login.")
+        await self.staff.guard_owner(ctx, row)
+        if await self.members.other_organizations(ctx.organization_id, row.user.id):
+            raise ConflictError(
+                "This person also belongs to another practice, so their account cannot be "
+                "changed here.",
+                code="ACCOUNT_SHARED",
+            )
+        await self.session.refresh(row.user, with_for_update=True)
+        return ctx, row
 
     # --- Internals ------------------------------------------------------------------------
 

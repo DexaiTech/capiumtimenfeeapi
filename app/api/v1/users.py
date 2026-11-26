@@ -1,4 +1,4 @@
-"""The current user: profile, password and sessions."""
+"""The current user: profile, password, two-factor sign-in and sessions."""
 
 import uuid
 from typing import Annotated
@@ -9,10 +9,16 @@ from fastapi.responses import Response, StreamingResponse
 from app.core.exceptions import FileUploadError
 from app.dependencies.auth import PrincipalDep, VerifiedPrincipalDep
 from app.dependencies.common import ContextDep, SessionDep, SettingsDep
-from app.schemas.auth import ChangePasswordRequest
+from app.schemas.auth import (
+    ChangePasswordRequest,
+    TwoFactorCodeRequest,
+    TwoFactorDisableRequest,
+    TwoFactorSetup,
+)
 from app.schemas.common import ApiResponse, error_responses, ok
 from app.schemas.user import SessionRead, UserRead, UserUpdate
 from app.services.avatar_files import MAX_AVATAR_BODY_BYTES, AvatarTooLargeError
+from app.services.two_factor import TwoFactorService
 from app.services.users import UserService
 from app.utils.multipart import FormPart, parse_form_data
 
@@ -24,6 +30,13 @@ def get_user_service(session: SessionDep, settings: SettingsDep) -> UserService:
 
 
 UserServiceDep = Annotated[UserService, Depends(get_user_service)]
+
+
+def get_two_factor_service(session: SessionDep, settings: SettingsDep) -> TwoFactorService:
+    return TwoFactorService(session, settings)
+
+
+TwoFactorServiceDep = Annotated[TwoFactorService, Depends(get_two_factor_service)]
 
 
 @router.get(
@@ -63,6 +76,67 @@ async def change_password(
 ) -> ApiResponse[None]:
     await service.change_password(principal.user, body, principal.session_id, ctx)
     return ok(message="Password changed")
+
+
+@router.post(
+    "/me/2fa/setup",
+    summary="Start setting up two-factor sign-in",
+    description=(
+        "Makes a new authenticator secret, pending until a code from it is confirmed with "
+        "`POST /users/me/2fa/verify`, and returns it once: `secret` for manual entry and "
+        "`otpauth_uri` for a QR code. Starting again replaces a pending secret. 409 "
+        "`MFA_ALREADY_ENABLED`. Requires a verified email."
+    ),
+    responses=error_responses(403, 409),
+)
+async def setup_two_factor(
+    response: Response, principal: VerifiedPrincipalDep, service: TwoFactorServiceDep
+) -> ApiResponse[TwoFactorSetup]:
+    setup = await service.setup(principal.user)
+    response.headers["Cache-Control"] = "no-store"
+    return ok(setup, "Scan the code with your authenticator app")
+
+
+@router.post(
+    "/me/2fa/verify",
+    summary="Turn two-factor sign-in on",
+    description=(
+        "Confirms the pending secret with a code from the authenticator app and turns "
+        "two-factor sign-in on. Other sessions are signed out. 422 `MFA_CODE_INVALID`, "
+        "409 `MFA_SETUP_REQUIRED` (no pending set-up), 409 `MFA_ALREADY_ENABLED`."
+    ),
+    responses=error_responses(403, 409),
+)
+async def verify_two_factor(
+    body: TwoFactorCodeRequest,
+    principal: VerifiedPrincipalDep,
+    service: TwoFactorServiceDep,
+    ctx: ContextDep,
+) -> ApiResponse[UserRead]:
+    user = await service.enable(principal.user, body.code, principal.session_id, ctx)
+    return ok(UserRead.from_model(user), "Two-factor sign-in is on")
+
+
+@router.post(
+    "/me/2fa/disable",
+    summary="Turn two-factor sign-in off",
+    description=(
+        "Needs the current password and a code from the authenticator app. Other sessions "
+        "are signed out. 400 `AUTH_INVALID_CREDENTIALS` (wrong password), 422 "
+        "`MFA_CODE_INVALID`, 409 `MFA_NOT_ENABLED`."
+    ),
+    responses=error_responses(400, 403, 409),
+)
+async def disable_two_factor(
+    body: TwoFactorDisableRequest,
+    principal: VerifiedPrincipalDep,
+    service: TwoFactorServiceDep,
+    ctx: ContextDep,
+) -> ApiResponse[UserRead]:
+    user = await service.disable(
+        principal.user, body.password, body.code, principal.session_id, ctx
+    )
+    return ok(UserRead.from_model(user), "Two-factor sign-in is off")
 
 
 @router.get(

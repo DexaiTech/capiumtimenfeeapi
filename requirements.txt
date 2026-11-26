@@ -13,6 +13,8 @@ pydantic==2.13.5
 pydantic-settings==2.15.0
 email-validator==2.3.0
 PyJWT==2.15.1
+# Two-factor sign-in codes (TOTP, RFC 6238): app/core/totp.py.
+pyotp==2.12.1
 pwdlib==0.3.1
 argon2-cffi==25.1.0
 aiosmtplib==5.1.3

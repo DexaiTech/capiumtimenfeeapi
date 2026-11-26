@@ -17,11 +17,13 @@ async def test_me_returns_the_profile_without_secrets(client, verified_user):
         "timezone",
         "email_verified",
         "must_change_password",
+        "two_factor_enabled",
         "created_at",
         "avatar_updated_at",
     }
     assert data["email"] == "ada@example.com" and data["timezone"] == "Europe/London"
     assert data["email_verified"] is True and data["must_change_password"] is False
+    assert data["two_factor_enabled"] is False
 
 
 async def test_me_requires_a_token(client: AsyncClient):

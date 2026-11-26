@@ -1,4 +1,4 @@
-from typing import Self
+from typing import Annotated, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, model_validator
 
@@ -7,6 +7,17 @@ from app.schemas.common import RequestModel
 from app.schemas.user import UserRead
 
 PASSWORD_MIN, PASSWORD_MAX = 10, 128
+
+# A six-digit code from an authenticator app (TOTP).
+TotpCode = Annotated[
+    str,
+    Field(
+        min_length=6,
+        max_length=6,
+        pattern=r"^[0-9]{6}$",
+        description="Six-digit code from the authenticator app",
+    ),
+]
 
 
 class _NewPassword(RequestModel):
@@ -42,6 +53,29 @@ class LoginRequest(RequestModel):
 
     email: EmailStr = Field(max_length=254)
     password: str = Field(min_length=1, max_length=PASSWORD_MAX)
+    totp_code: TotpCode | None = Field(
+        default=None,
+        description="Only for an account with two-factor sign-in: the code, to sign in in one "
+        "step. Without it such an account gets a challenge (`requires_two_factor`).",
+    )
+
+
+class TwoFactorValidateRequest(RequestModel):
+    challenge_token: str = Field(
+        min_length=20, max_length=200, description="`challenge_token` from `POST /auth/login`"
+    )
+    code: TotpCode
+
+
+class TwoFactorCodeRequest(RequestModel):
+    code: TotpCode
+
+
+class TwoFactorDisableRequest(RequestModel):
+    model_config = ConfigDict(str_strip_whitespace=False, extra="forbid")
+
+    password: str = Field(min_length=1, max_length=PASSWORD_MAX, description="Current password")
+    code: TotpCode
 
 
 class EmailRequest(RequestModel):
@@ -65,6 +99,23 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"  # noqa: S105
     expires_in: int
     user: UserRead
+
+
+class TwoFactorChallenge(BaseModel):
+    """The password was right and the account uses two-factor sign-in: no session yet."""
+
+    requires_two_factor: Literal[True] = Field(
+        default=True, description="Always true: send the code to `POST /auth/2fa/validate`"
+    )
+    challenge_token: str = Field(description="Answer it with a code within `expires_in` seconds")
+    expires_in: int = Field(description="Seconds the challenge stays valid")
+
+
+class TwoFactorSetup(BaseModel):
+    secret: str = Field(
+        description="Base32 secret for manual entry in the authenticator app; shown once"
+    )
+    otpauth_uri: str = Field(description="`otpauth://totp/...` URI to show as a QR code")
 
 
 class RevokedCount(BaseModel):

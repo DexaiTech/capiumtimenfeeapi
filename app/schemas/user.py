@@ -15,6 +15,7 @@ class UserRead(BaseModel):
     timezone: str
     email_verified: bool
     must_change_password: bool
+    two_factor_enabled: bool = False
     created_at: datetime
     avatar_updated_at: datetime | None = None
 
@@ -27,6 +28,7 @@ class UserRead(BaseModel):
             timezone=user.timezone,
             email_verified=user.email_verified,
             must_change_password=user.must_change_password,
+            two_factor_enabled=user.two_factor_enabled,
             created_at=user.created_at,
             avatar_updated_at=user.avatar_updated_at,
         )

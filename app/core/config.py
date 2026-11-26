@@ -86,6 +86,17 @@ class Settings(BaseSettings):
     jwt_algorithm: Literal["HS256", "HS384", "HS512"] = "HS256"
     access_token_expire_minutes: int = Field(default=15, ge=1, le=60)
     refresh_token_expire_days: int = Field(default=30, ge=1, le=365)
+    # Account lockout (the Capium OneLogin rule): after this many consecutive wrong passwords or
+    # codes the account refuses every sign-in for ``login_lockout_minutes``.
+    login_lockout_threshold: int = Field(default=5, ge=1, le=50)
+    login_lockout_minutes: int = Field(default=15, ge=1, le=1440)
+    # Two-factor sign-in: the Fernet key that encrypts the TOTP secrets. Make one with
+    # python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    # Required in production; elsewhere an empty value derives one from JWT_SECRET_KEY.
+    mfa_encryption_key: SecretStr = SecretStr("")
+    # How long a two-factor sign-in waits for its code, and how many wrong codes it takes.
+    mfa_challenge_minutes: int = Field(default=5, ge=1, le=30)
+    mfa_challenge_max_attempts: int = Field(default=5, ge=1, le=20)
     refresh_grace_seconds: int = 20
 
     frontend_url: str
@@ -191,6 +202,8 @@ class Settings(BaseSettings):
         problems = []
         if self.app_debug:
             problems.append("APP_DEBUG must be false in production")
+        if not self.mfa_encryption_key.get_secret_value().strip():
+            problems.append("MFA_ENCRYPTION_KEY is required in production")
         if len(self.jwt_secret_key.get_secret_value()) < 32:
             problems.append("JWT_SECRET_KEY must be at least 32 characters in production")
         if self.smtp_host and (not self.smtp_user or not self.smtp_password.get_secret_value()):
