@@ -373,10 +373,8 @@ async def test_delete_a_template_nobody_uses(client):
     [entry] = await audit_entries(team.id, "invoice_template.deleted")
     assert entry["metadata"]["name"] == "Disposable" and entry["target_id"] == made["id"]
     assert (
-        await scalar(
-            "SELECT deleted_at IS NOT NULL FROM invoice_templates WHERE id = :i", i=made["id"]
-        )
-        is True
+        await scalar("SELECT deleted_at FROM invoice_templates WHERE id = :i", i=made["id"])
+        is not None
     )
 
 

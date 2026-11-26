@@ -7,7 +7,7 @@ import uuid
 from datetime import date
 
 import pytest
-from sqlalchemy import func, select, text
+from sqlalchemy import bindparam, func, select, text
 from sqlalchemy.exc import DBAPIError
 
 from app.db.models import Expense
@@ -230,14 +230,26 @@ async def test_the_lines_can_be_locked_for_billing(client):
                 with pytest.raises(DBAPIError):  # somebody else cannot take the line meanwhile
                     await other.execute(
                         text("SELECT id FROM expenses WHERE id = :i FOR UPDATE NOWAIT"),
-                        {"i": line.id},
+                        {"i": str(line.id)},
                     )
                 await other.rollback()
-            # Lines that are not WIP were not locked.
-            free = await other.scalar(
-                text("SELECT id FROM expenses WHERE billing_status = 'billed' FOR UPDATE NOWAIT")
+            # Lines that are not WIP were not locked. (By primary key: an InnoDB locking read
+            # that scans waits on every row it examines, even one the WHERE then leaves out.)
+            billed = list(
+                (
+                    await other.execute(
+                        text("SELECT id FROM expenses WHERE billing_status = 'billed'")
+                    )
+                ).scalars()
             )
-            assert free is not None
+            assert billed
+            free = await other.execute(
+                text("SELECT id FROM expenses WHERE id IN :ids FOR UPDATE NOWAIT").bindparams(
+                    bindparam("ids", expanding=True)
+                ),
+                {"ids": billed},
+            )
+            assert len(free.all()) == len(billed)
         await billing.rollback()
     # Without ``lock`` nothing is held.
     async with get_sessionmaker()() as reader, get_sessionmaker()() as other:
@@ -267,12 +279,14 @@ async def test_the_aggregating_conditions_are_the_same_rule(client):
     assert sum(line.recharge_amount for line in lines) == sum(v[0] for v in by_client.values())
 
 
-async def test_the_partial_index_for_wip_exists(client):
-    [row] = await sql("SELECT indexdef FROM pg_indexes WHERE indexname = 'ix_expenses_wip'")
-    definition = row["indexdef"]
-    assert "(organization_id, client_id, incurred_on)" in definition
-    assert "is_billable" in definition and "billing_status = 'unbilled'" in definition
-    assert "recharge_amount > 0" in definition
+async def test_the_index_for_wip_exists(client):
+    # MySQL has no partial indexes: the WIP index is a plain one on the same columns.
+    rows = await sql(
+        "SELECT column_name AS c FROM information_schema.statistics "
+        "WHERE table_schema = DATABASE() AND table_name = 'expenses' "
+        "AND index_name = 'ix_expenses_wip' ORDER BY seq_in_index"
+    )
+    assert [row["c"] for row in rows] == ["organization_id", "client_id", "incurred_on"]
 
 
 # --- Through the workflow -------------------------------------------------------------------

@@ -20,7 +20,6 @@ from sqlalchemy import (
     and_,
     case,
     cast,
-    extract,
     false,
     func,
     literal,
@@ -61,6 +60,7 @@ from app.db.models import (
 from app.db.models.clients import ordinary_clients
 from app.db.models.organization import GONE_STATUSES
 from app.repositories.staff import person_name
+from app.utils.practice_dates import end_of_day_utc
 
 type AnySelect = Select[*tuple[Any, ...]]
 
@@ -105,9 +105,31 @@ def _int(value: int) -> ColumnElement[int]:
     return literal_column(str(int(value)), Integer)
 
 
-def first_of_month(day: Any) -> ColumnElement[date]:
-    result: ColumnElement[date] = day - (cast(extract("day", day), Integer) - _int(1))
+def minus_days(day: Any, days: Any) -> ColumnElement[date]:
+    """``day`` less a number of days, as a DATE (MySQL's ``date - int`` is a number)."""
+    result: ColumnElement[date] = func.subdate(day, days, type_=Date)
     return result
+
+
+def first_of_month(day: Any) -> ColumnElement[date]:
+    return minus_days(day, func.dayofmonth(day) - _int(1))
+
+
+async def practice_timezone(session: AsyncSession, organization_id: uuid.UUID) -> str:
+    """The practice's time zone (MySQL has no zone tables: day bounds are made in Python)."""
+    zone = await session.scalar(
+        select(Organization.timezone).where(Organization.id == organization_id)
+    )
+    return str(zone)
+
+
+def nulls_last(*exprs: Any) -> list[ColumnElement[Any]]:
+    """Order keys for ``exprs`` ascending with NULLs last, PostgreSQL's ASC default (MySQL
+    sorts NULL first): ``(expr IS NULL), expr`` for each."""
+    keys: list[ColumnElement[Any]] = []
+    for expr in exprs:
+        keys.extend([expr] if _is_null(expr) else [expr.is_(None), expr])
+    return keys
 
 
 def total(expr: Any) -> ColumnElement[int]:
@@ -246,7 +268,7 @@ def _wip_status(
 
 
 def wip_items(
-    organization_id: uuid.UUID, as_at: date, require_approval: bool, f: ItemFilter
+    organization_id: uuid.UUID, as_at: date, require_approval: bool, f: ItemFilter, timezone: str
 ) -> Subquery:
     """The WIP ledger as at the end of a day: one row per billable item dated on or before
     it that was not yet cleared then.
@@ -336,9 +358,6 @@ def wip_items(
         )
     )
     claim = aliased(ExpenseClaim)
-    practice_zone = (
-        select(Organization.timezone).where(Organization.id == organization_id).scalar_subquery()
-    )
     expense_q = (
         select(
             Expense.client_id.label("client_id"),
@@ -369,7 +388,7 @@ def wip_items(
                 claim.organization_id == Expense.organization_id,
                 claim.id == Expense.claim_id,
                 claim.status == "approved",
-                cast(func.timezone(practice_zone, claim.decided_at), Date) <= as_at,
+                claim.decided_at < end_of_day_utc(as_at, timezone),
             )
             .exists(),
             *item_conditions(
@@ -597,7 +616,8 @@ class ReportRepository:
     async def wip(
         self, organization_id: uuid.UUID, as_at: date, require_approval: bool, f: ItemFilter
     ) -> Sequence[RowMapping]:
-        items = wip_items(organization_id, as_at, require_approval, f)
+        timezone = await practice_timezone(self.session, organization_id)
+        items = wip_items(organization_id, as_at, require_approval, f, timezone)
         value = items.c.time_value + items.c.disbursement_value
         stmt = (
             select(
@@ -626,7 +646,7 @@ class ReportRepository:
             .group_by(
                 items.c.client_id, Client.code, Client.name, items.c.job_id, Job.number, Job.name
             )
-            .order_by(func.lower(Client.name), Client.code, Job.number.nulls_first())
+            .order_by(func.lower(Client.name), Client.code, Job.number)  # NULL first, as before
         )
         return await self._rows(stmt)
 
@@ -694,9 +714,9 @@ class ReportRepository:
             case "day":
                 key = entry_date
             case "week":
-                dow = cast(extract("isodow", entry_date), Integer)
+                dow = func.weekday(entry_date) + _int(1)  # ISO: Monday 1 ... Sunday 7
                 offset = func.mod(dow - _int(week_start) + _int(7), _int(7))
-                key = entry_date - cast(offset, Integer)
+                key = minus_days(entry_date, offset)
             case "month":
                 key = first_of_month(entry_date)
             case _:  # pragma: no cover - validated by the schema
@@ -744,7 +764,7 @@ class ReportRepository:
         if group_by in ("day", "week", "month"):
             stmt = stmt.order_by(key)
         else:
-            stmt = stmt.order_by(func.lower(name).nulls_last(), code.nulls_last(), key)
+            stmt = stmt.order_by(*nulls_last(func.lower(name), code), key)
         return await self._rows(stmt)
 
     # --- Utilisation ------------------------------------------------------------------
@@ -850,7 +870,7 @@ class ReportRepository:
             c for c in (key, code, name, client_name, group_client_id) if not _is_null(c)
         ]
         stmt = stmt.group_by(*group_columns).order_by(
-            func.lower(name).nulls_last(), func.lower(client_name), code.nulls_last(), key
+            *nulls_last(func.lower(name), func.lower(client_name), code), key
         )
         return await self._rows(stmt)
 

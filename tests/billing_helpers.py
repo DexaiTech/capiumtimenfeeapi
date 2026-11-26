@@ -1,12 +1,13 @@
 """Helpers for the billing tests (disbursements, WIP, invoices, credit notes, payments)."""
 
+import json
 import uuid
 from dataclasses import dataclass
 from datetime import date
 from typing import Any
 
 from httpx import AsyncClient, Response
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 
 from app.db.models import Client, Job
 from app.db.session import get_sessionmaker
@@ -47,11 +48,19 @@ def org_url(org: dict, path: str) -> str:
 
 async def set_org(org: dict, **fields: Any) -> None:
     """Change practice settings directly (vat_registered, require_timesheet_approval, ...)."""
-    assignments = ", ".join(f"{name} = :{name}" for name in fields)
+    # Lists and objects go to the JSON columns (PostgreSQL arrays and jsonb before).
+    json_fields = {name for name, value in fields.items() if isinstance(value, list | dict)}
+    assignments = ", ".join(
+        f"{name} = CAST(:{name} AS JSON)" if name in json_fields else f"{name} = :{name}"
+        for name in fields
+    )
+    values = {
+        name: json.dumps(value) if name in json_fields else value for name, value in fields.items()
+    }
     async with get_sessionmaker()() as session:
         await session.execute(
             text(f"UPDATE organizations SET {assignments} WHERE id = :id"),  # noqa: S608
-            {"id": str(org["id"]), **fields},
+            {"id": str(org["id"]), **values},
         )
         await session.commit()
 
@@ -70,11 +79,14 @@ async def hourly_job(p: Practice, client: Client | None = None, **fields: Any) -
 
 async def billing_status(table: str, ids: list[uuid.UUID]) -> dict[uuid.UUID, str]:
     async with get_sessionmaker()() as session:
+        if not ids:
+            return {}
+        statement = text(f"SELECT id, billing_status FROM {table} WHERE id IN :ids")  # noqa: S608
         rows = await session.execute(
-            text(f"SELECT id, billing_status FROM {table} WHERE id = ANY(:ids)"),  # noqa: S608
+            statement.bindparams(bindparam("ids", expanding=True)),
             {"ids": [str(i) for i in ids]},
         )
-        return {row[0]: row[1] for row in rows}
+        return {uuid.UUID(row[0]): row[1] for row in rows}
 
 
 async def count_rows(sql: str, **params: Any) -> int:

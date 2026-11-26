@@ -201,7 +201,7 @@ async def test_confirmed_backdated_rate_is_placed_and_reprices_unbilled_time(
 
     # Rate history: the new rule created, the earlier one end-dated.
     rows = await sql(
-        'SELECT rule_id, action, "new" AS after FROM rate_changes '
+        "SELECT rule_id, action, `new` AS after FROM rate_changes "
         "WHERE organization_id = :o AND rule_id IN (:new, :old)",
         o=org["id"],
         new=created["id"],

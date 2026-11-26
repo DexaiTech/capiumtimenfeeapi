@@ -63,7 +63,7 @@ class InvoiceTemplate(Base, IdMixin, OrgScopedMixin, TimestampMixin, SoftDeleteM
     )
     footer_text: Mapped[str | None] = mapped_column(String(1000))
     # ``#RRGGBB``: the title, the practice name and the table headings. Null: black and grey.
-    accent_color: Mapped[str | None] = mapped_column(String(6))
+    accent_color: Mapped[str | None] = mapped_column(String(7))
     # Printed large and pale across every page of an issued document. Null: none.
     watermark_text: Mapped[str | None] = mapped_column(String(24))
     # Or a picture, printed the same way: its key in the file store and its content type.

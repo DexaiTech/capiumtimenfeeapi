@@ -8,7 +8,7 @@ from datetime import date
 from typing import Any
 from typing import cast as typing_cast
 
-from sqlalchemy import BigInteger, ColumnElement, cast, func, literal_column, or_, select
+from sqlalchemy import BigInteger, ColumnElement, cast, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.expression import ColumnExpressionArgument
 
@@ -133,7 +133,9 @@ class ClientOverviewRepository:
         rate, else ``fallback_rate_bp`` (the client's or the practice's default), rounded half
         up like an invoice line."""
         rate = func.coalesce(VatRate.rate_bp, fallback_rate_bp)
-        vat = func.div(Disbursement.amount * rate + 5000, 10000)
+        # Integer division truncating toward zero, as PostgreSQL's div() did.
+        numerator = (Disbursement.amount * rate + 5000).self_group()
+        vat = numerator.op("DIV", return_type=BigInteger)(10000).self_group()
         stmt = (
             select(func.count(), _total(Disbursement.amount), _total(Disbursement.amount + vat))
             .select_from(Disbursement)
@@ -252,10 +254,8 @@ class ClientOverviewRepository:
             select(AuditLog)
             .where(
                 AuditLog.organization_id == organization_id,
-                # A literal key, so the partial expression index can be used.
-                AuditLog.meta.op("->>")(literal_column("'client_id'")).in_(
-                    [str(i) for i in wanted]
-                ),
+                # The generated column of the metadata's client_id, which is indexed.
+                AuditLog.client_ref.in_([str(i) for i in wanted]),
                 allowed,
             )
             .order_by(AuditLog.created_at.desc(), AuditLog.id.desc())

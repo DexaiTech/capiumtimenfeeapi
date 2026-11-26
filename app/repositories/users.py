@@ -36,4 +36,6 @@ class UserRepository:
     async def add(self, user: User) -> User:
         self.session.add(user)
         await self.session.flush()
+        # Load the server defaults (timezone, ...): MySQL has no RETURNING to fetch them.
+        await self.session.refresh(user)
         return user

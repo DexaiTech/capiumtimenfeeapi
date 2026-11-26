@@ -28,7 +28,7 @@ from app.db.models import (
     User,
     WipAllocation,
 )
-from app.repositories.reports import DateRange, ItemFilter, item_conditions, total
+from app.repositories.reports import DateRange, ItemFilter, item_conditions, nulls_last, total
 from app.repositories.staff import person_name
 
 
@@ -108,8 +108,10 @@ class RecoveryRepository:
             .group_by(CreditNote.invoice_id)
             .subquery("credits")
         )
+        # An exact decimal share (MySQL's bare DECIMAL is DECIMAL(10,0); the scale keeps the
+        # quotient's fraction for the one rounding in the service).
         share = (
-            cast(WipAllocation.billed_value, Numeric)
+            cast(WipAllocation.billed_value, Numeric(38, 10))
             * func.coalesce(credits.c.net, 0)
             / func.nullif(Invoice.net_total, 0)
         )
@@ -178,7 +180,7 @@ class RecoveryRepository:
                 ),
             )
             .group_by(*keys)
-            .order_by(*keys)
+            .order_by(*nulls_last(*keys))
         )
         rows: Sequence[RowMapping] = (await self.session.execute(stmt)).mappings().all()
         return rows

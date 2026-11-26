@@ -8,16 +8,18 @@ totals, the names of the people) is fetched in batches, never per row."""
 import uuid
 from collections.abc import Collection, Sequence
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import date
 
-from sqlalchemy import BigInteger, ColumnElement, case, exists, func, or_, select
+from sqlalchemy import BigInteger, ColumnElement, case, exists, func, literal_column, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Expense, ExpenseClaim, ExpenseClaimEvent, OrganizationMember, User
+from app.db.types import UTCDateTime
 from app.repositories.expense_paging import AnySelect, SortExpr, SortKind, keyset_page
 from app.utils.pagination import PageParams
 
-_EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
+# A DATETIME(6) constant: MySQL's COALESCE of a DATETIME and a text parameter is text.
+_EPOCH = literal_column("CAST('1970-01-01 00:00:00' AS DATETIME(6))", UTCDateTime())
 
 
 @dataclass(frozen=True, slots=True)

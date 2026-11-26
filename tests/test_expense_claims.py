@@ -143,8 +143,7 @@ async def test_create_read_update_and_delete_a_claim(client):
     [removed] = await audit_entries(team.id, "expense_claim.deleted")
     assert removed["metadata"]["line_count"] == 2 and removed["metadata"]["gross"] == 2000
     rows = await sql(
-        "SELECT ip_address::text AS ip, request_id FROM audit_logs "
-        "WHERE action LIKE 'expense_claim.%'"
+        "SELECT ip_address AS ip, request_id FROM audit_logs WHERE action LIKE 'expense_claim.%'"
     )
     assert len(rows) == 4 and all(r["ip"] and r["request_id"] for r in rows)
 

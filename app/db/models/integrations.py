@@ -119,7 +119,7 @@ class IntegrationSyncLog(Base, IdMixin, OrgScopedMixin):
         ),
     )
 
-    integration: Mapped[str] = mapped_column(String(39), nullable=False)
+    integration: Mapped[str] = mapped_column(String(40), nullable=False)
     direction: Mapped[str] = mapped_column(String(32), nullable=False, server_default="inbound")
     operation: Mapped[str] = mapped_column(String(60), nullable=False)
     entity_type: Mapped[str | None] = mapped_column(Text)
@@ -144,7 +144,7 @@ class IntegrationCursor(Base, OrgScopedMixin):
         ),
     )
 
-    integration: Mapped[str] = mapped_column(String(39), nullable=False)
+    integration: Mapped[str] = mapped_column(String(40), nullable=False)
     cursor: Mapped[str] = mapped_column(Text, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False, server_default=NOW)
 

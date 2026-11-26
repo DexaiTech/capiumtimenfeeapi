@@ -52,9 +52,7 @@ async def test_two_approvals_at_once_give_one_decision(client):
     assert await events_of(cid) == ["submitted", "approved"]
     [entry] = await audit_entries(team.id, "expense_claim.approved")
     assert entry["actor_user_id"] == winner
-    assert (
-        await scalar("SELECT decided_by::text FROM expense_claims WHERE id = :c", c=cid) == winner
-    )
+    assert str(await scalar("SELECT decided_by FROM expense_claims WHERE id = :c", c=cid)) == winner
     notes = [n for n in await inbox(client, staff, org) if n["type"] == "expense_approved"]
     assert len(notes) == 1
 
@@ -127,11 +125,11 @@ async def test_overlapping_bulk_approvals_never_deadlock_and_leave_one_winner(cl
         client.post(url, headers=admin.headers, json={"claim_ids": [ids[2], ids[1]]}),
     )
     assert sorted([first.status_code, second.status_code]) == [200, 409]
-    approved = await sql("SELECT id::text AS id FROM expense_claims WHERE status = 'approved'")
-    assert len(approved) == 2 and ids[1] in {row["id"] for row in approved}
+    approved = await sql("SELECT id FROM expense_claims WHERE status = 'approved'")
+    assert len(approved) == 2 and ids[1] in {str(row["id"]) for row in approved}
     # The refused call changed nothing: its other claim is still waiting.
-    waiting = await sql("SELECT id::text AS id FROM expense_claims WHERE status = 'submitted'")
-    assert len(waiting) == 1 and waiting[0]["id"] in (ids[0], ids[2])
+    waiting = await sql("SELECT id FROM expense_claims WHERE status = 'submitted'")
+    assert len(waiting) == 1 and str(waiting[0]["id"]) in (ids[0], ids[2])
     assert len(await audit_entries(team.id, "expense_claim.approved")) == 2
 
 

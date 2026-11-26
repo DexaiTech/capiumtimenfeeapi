@@ -214,14 +214,16 @@ async def _empty_tables(session: AsyncSession) -> None:
     names = list((await session.execute(text(_ANY_ROWS))).scalars())
     if not names:
         return
+    # One connection throughout: the session keeps it until the commit, so the checks are
+    # switched back on for the same connection before it returns to the pool.
     await session.execute(text("SET FOREIGN_KEY_CHECKS = 0"))
     try:
         for name in names:
             verb = "TRUNCATE TABLE" if name in _APPEND_ONLY else "DELETE FROM"
             await session.execute(text(f"{verb} `{name}`"))
-        await session.commit()
     finally:
         await session.execute(text("SET FOREIGN_KEY_CHECKS = 1"))
+    await session.commit()
 
 
 @pytest.fixture

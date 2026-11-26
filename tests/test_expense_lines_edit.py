@@ -202,7 +202,7 @@ async def test_line_edits_are_audited_with_their_changes_and_an_unchanged_edit_i
     [removed] = await audit_entries(team.id, "expense.deleted")
     assert removed["metadata"]["gross"] == 2400 and removed["target_id"] == lid
     rows = await sql(
-        "SELECT ip_address::text AS ip, request_id FROM audit_logs WHERE action LIKE 'expense.%'"
+        "SELECT ip_address AS ip, request_id FROM audit_logs WHERE action LIKE 'expense.%'"
     )
     assert len(rows) == 3 and all(r["ip"] and r["request_id"] for r in rows)
 

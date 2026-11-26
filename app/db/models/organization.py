@@ -561,7 +561,7 @@ class OrganizationMember(Base, IdMixin, TimestampMixin):
     invited_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     # Where SMS notifications go: digits with an optional leading +. Set by the person in their
     # notification settings; without it no SMS is sent.
-    mobile_number: Mapped[str | None] = mapped_column(String(15))
+    mobile_number: Mapped[str | None] = mapped_column(String(16))
 
     user: Mapped[User] = relationship(lazy="raise", foreign_keys=[user_id])
     role: Mapped[Role] = relationship(

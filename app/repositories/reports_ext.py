@@ -29,6 +29,7 @@ from app.repositories.reports import (
     client_conditions,
     first_of_month,
     live_payment,
+    nulls_last,
     total,
     when,
 )
@@ -165,9 +166,7 @@ class ReportExtRepository:
         if group_by in ("month", "status"):
             stmt = stmt.order_by(key)
         else:
-            stmt = stmt.order_by(
-                func.lower(name).nulls_last(), func.lower(client_name), code.nulls_last(), key
-            )
+            stmt = stmt.order_by(*nulls_last(func.lower(name), func.lower(client_name), code), key)
         return await self._rows(stmt)
 
     @staticmethod

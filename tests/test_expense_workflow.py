@@ -132,7 +132,7 @@ async def test_a_claim_goes_through_submission_return_resubmission_and_approval(
     [appr] = await audit_entries(org["id"], "expense_claim.approved")
     assert appr["metadata"]["old_status"] == "submitted" and appr["metadata"]["gross"] == 3000
     rows = await sql(
-        "SELECT ip_address::text AS ip, request_id FROM audit_logs "
+        "SELECT ip_address AS ip, request_id FROM audit_logs "
         "WHERE action IN ('expense_claim.submitted', 'expense_claim.returned', 'expense_claim.approved')"
     )
     assert len(rows) == 4 and all(r["ip"] and r["request_id"] for r in rows)

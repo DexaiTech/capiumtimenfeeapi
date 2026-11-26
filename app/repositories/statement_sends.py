@@ -2,20 +2,19 @@
 
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import date, datetime
 from typing import Any
 
 from sqlalchemy import (
     BigInteger,
     ColumnElement,
-    DateTime,
     Subquery,
     and_,
     case,
     cast,
     exists,
     func,
-    literal,
+    literal_column,
     or_,
     select,
 )
@@ -24,11 +23,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.locks import transaction_lock
 from app.db.models import Client, ClientContact, Invoice, Payment, StatementSend
+from app.db.types import UTCDateTime
 from app.repositories.expense_paging import AnyRow, SortKind, keyset_page
 from app.utils.pagination import PageParams
 
-# A client never sent a statement sorts as if it was sent at the epoch.
-_NEVER = datetime(1970, 1, 1, tzinfo=UTC)
+# A client never sent a statement sorts as if it was sent at the epoch. A DATETIME(6) constant:
+# MySQL's COALESCE of a DATETIME and a text parameter would be text.
+_NEVER = literal_column("CAST('1970-01-01 00:00:00' AS DATETIME(6))", UTCDateTime())
 
 SORTS: dict[str, tuple[str, SortKind]] = {
     "client": ("name_key", "str"),
@@ -55,7 +56,7 @@ def _sum(expr: Any) -> ColumnElement[int]:
 
 
 def _filled(column: Any) -> ColumnElement[bool]:
-    return and_(column.is_not(None), func.length(func.trim(column)) > 0)
+    return and_(column.is_not(None), func.char_length(func.trim(column)) > 0)
 
 
 def _matching(organization_id: uuid.UUID, f: StatementFilters) -> Subquery:
@@ -85,15 +86,22 @@ def _matching(organization_id: uuid.UUID, f: StatementFilters) -> Subquery:
         .group_by(Payment.client_id)
         .subquery("cash")
     )
-    last_sends = (
+    ranked_sends = (
         select(
             StatementSend.client_id.label("client_id"),
             StatementSend.sent_at.label("sent_at"),
             StatementSend.recipients.label("recipients"),
+            func.row_number()
+            .over(partition_by=StatementSend.client_id, order_by=StatementSend.sent_at.desc())
+            .label("position"),
         )
         .where(StatementSend.organization_id == organization_id, StatementSend.status == "sent")
-        .distinct(StatementSend.client_id)
-        .order_by(StatementSend.client_id, StatementSend.sent_at.desc())
+        .subquery("ranked_sends")
+    )
+    # The latest send per client (PostgreSQL's DISTINCT ON).
+    last_sends = (
+        select(ranked_sends.c.client_id, ranked_sends.c.sent_at, ranked_sends.c.recipients)
+        .where(ranked_sends.c.position == 1)
         .subquery("last_sends")
     )
     outstanding = func.coalesce(owed.c.outstanding, 0)
@@ -123,9 +131,7 @@ def _matching(organization_id: uuid.UUID, f: StatementFilters) -> Subquery:
             owed.c.oldest_overdue_due_date.label("oldest_overdue_due_date"),
             last_sends.c.sent_at.label("last_sent_at"),
             last_sends.c.recipients.label("last_sent_to"),
-            func.coalesce(last_sends.c.sent_at, literal(_NEVER, DateTime(timezone=True))).label(
-                "last_sent_key"
-            ),
+            func.coalesce(last_sends.c.sent_at, _NEVER, type_=UTCDateTime()).label("last_sent_key"),
             or_(_filled(Client.invoice_email), contact_with_address, _filled(Client.email)).label(
                 "has_recipient"
             ),

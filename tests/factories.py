@@ -5,6 +5,7 @@ verify and invite flows and lets a test put anyone into any role and status.
 """
 
 import itertools
+import json
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -115,6 +116,10 @@ async def add_member(
     return user
 
 
+def _json(value: Any) -> Any:
+    return json.loads(value) if isinstance(value, str | bytes) else value
+
+
 async def audit_entries(organization_id: str | uuid.UUID, action: str | None = None) -> list[dict]:
     """Audit rows of the organization, oldest first."""
     async with get_sessionmaker()() as session:
@@ -132,7 +137,8 @@ async def audit_entries(organization_id: str | uuid.UUID, action: str | None = N
                 "actor_user_id": str(row.actor_user_id) if row.actor_user_id else None,
                 "target_type": row.target_type,
                 "target_id": str(row.target_id) if row.target_id else None,
-                "metadata": row._mapping["metadata"],
+                # MySQL returns JSON as text from raw SQL.
+                "metadata": _json(row._mapping["metadata"]),
             }
             for row in rows
         ]

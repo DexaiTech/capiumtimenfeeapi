@@ -6,8 +6,8 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import and_, func, or_, select, text
-from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy import and_, func, or_, select
+from sqlalchemy.dialects.mysql import insert as mysql_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Invoice, PaymentReminder
@@ -130,16 +130,18 @@ class PaymentReminderRepository:
         is left out (two requests at once cannot both remind). Returns the invoices inserted."""
         if not rows:
             return set()
-        stmt = (
-            pg_insert(PaymentReminder)
-            .values([{"id": new_id(), "status": "queued", **row} for row in rows])
-            .on_conflict_do_nothing(
-                index_elements=["organization_id", "invoice_id", "sent_on"],
-                index_where=text("status IN ('queued', 'sent')"),
-            )
-            .returning(PaymentReminder.invoice_id)
+        values = [{"id": new_id(), "status": "queued", **row} for row in rows]
+        # The only unique key a new row can hit is the queued-or-sent one on
+        # (organization_id, invoice_id, sent_on): ids are fresh. Assigning ``id`` to itself makes
+        # a duplicate a no-op (PostgreSQL's ON CONFLICT DO NOTHING); the rows that carry our ids
+        # afterwards are the ones inserted.
+        stmt = mysql_insert(PaymentReminder).values(values)
+        stmt = stmt.on_duplicate_key_update(id=PaymentReminder.__table__.c.id)
+        await self.session.execute(stmt)
+        inserted = select(PaymentReminder.invoice_id).where(
+            PaymentReminder.id.in_([value["id"] for value in values])
         )
-        return set((await self.session.execute(stmt)).scalars())
+        return set((await self.session.execute(inserted)).scalars())
 
     async def batch(self, organization_id: uuid.UUID, batch_id: uuid.UUID) -> list[PaymentReminder]:
         """The reminders that go out in one email, oldest invoice first."""

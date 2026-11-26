@@ -46,6 +46,7 @@ from app.repositories.reports import (
     ItemFilter,
     debt_buckets,
     invoice_balances,
+    practice_timezone,
     total,
     when,
     wip_items,
@@ -373,7 +374,8 @@ class DashboardPagesRepository:
     ) -> Sequence[RowMapping]:
         """The clients with the most WIP as at ``as_at`` (largest first). Every row carries
         ``all_amount`` (the practice's WIP) and ``client_count`` (clients with WIP)."""
-        items = wip_items(organization_id, as_at, require_approval, ItemFilter())
+        timezone = await practice_timezone(self.session, organization_id)
+        items = wip_items(organization_id, as_at, require_approval, ItemFilter(), timezone)
         value = items.c.time_value + items.c.disbursement_value
         amount = total(value)
         stmt = (
@@ -411,7 +413,8 @@ class DashboardPagesRepository:
         """The WIP of each of these clients as at ``as_at``."""
         if not client_ids:
             return {}
-        items = wip_items(organization_id, as_at, require_approval, ItemFilter())
+        timezone = await practice_timezone(self.session, organization_id)
+        items = wip_items(organization_id, as_at, require_approval, ItemFilter(), timezone)
         stmt = (
             select(items.c.client_id, total(items.c.time_value + items.c.disbursement_value))
             .where(items.c.client_id.in_(list(client_ids)))

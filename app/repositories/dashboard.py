@@ -19,7 +19,14 @@ from app.db.models import (
     Timer,
     Timesheet,
 )
-from app.repositories.reports import ItemFilter, invoice_balances, total, when, wip_items
+from app.repositories.reports import (
+    ItemFilter,
+    invoice_balances,
+    practice_timezone,
+    total,
+    when,
+    wip_items,
+)
 
 OPEN_JOB_STATUSES = ("planned", "in_progress", "on_hold")
 
@@ -161,7 +168,8 @@ class DashboardRepository:
     async def wip_totals(
         self, organization_id: uuid.UUID, as_at: date, require_approval: bool
     ) -> RowMapping:
-        items = wip_items(organization_id, as_at, require_approval, ItemFilter())
+        timezone = await practice_timezone(self.session, organization_id)
+        items = wip_items(organization_id, as_at, require_approval, ItemFilter(), timezone)
         value = items.c.time_value + items.c.disbursement_value
         stmt = select(
             total(value).label("total"),
@@ -172,7 +180,8 @@ class DashboardRepository:
     async def top_wip_clients(
         self, organization_id: uuid.UUID, as_at: date, require_approval: bool, limit: int
     ) -> Sequence[RowMapping]:
-        items = wip_items(organization_id, as_at, require_approval, ItemFilter())
+        timezone = await practice_timezone(self.session, organization_id)
+        items = wip_items(organization_id, as_at, require_approval, ItemFilter(), timezone)
         amount = total(items.c.time_value + items.c.disbursement_value)
         stmt = (
             select(

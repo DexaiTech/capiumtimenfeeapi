@@ -31,7 +31,7 @@ class OnboardingProgress(Base, IdMixin, OrgScopedMixin, TimestampMixin):
         ),
     )
 
-    step_key: Mapped[str] = mapped_column(String(39), nullable=False)
+    step_key: Mapped[str] = mapped_column(String(40), nullable=False)
     state: Mapped[str] = mapped_column(String(32), nullable=False)
     # Who made the decision; kept null when that account is deleted.
     updated_by: Mapped[uuid.UUID | None] = mapped_column(

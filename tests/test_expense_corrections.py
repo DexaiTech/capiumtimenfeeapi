@@ -75,8 +75,7 @@ async def test_an_approved_line_is_corrected_with_a_reason_and_the_claim_says_so
     )
     assert await audit_entries(org["id"], "expense.updated") == []
     [row] = await sql(
-        "SELECT ip_address::text AS ip, request_id FROM audit_logs "
-        "WHERE action = 'expense.corrected'"
+        "SELECT ip_address AS ip, request_id FROM audit_logs WHERE action = 'expense.corrected'"
     )
     assert row["ip"] and row["request_id"]
 

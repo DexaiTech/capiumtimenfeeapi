@@ -8,7 +8,7 @@ from datetime import date
 
 import pytest
 from httpx import AsyncClient
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DBAPIError
 
 from app.db.models.organization import RATE_MODE_SOURCES
 from app.services import period_locks, wip_valuation
@@ -23,7 +23,6 @@ from tests.domain_factories import (
     staff,
 )
 from tests.factories import API, audit_entries
-from tests.migration_helpers import head_revision, migrate
 from tests.team_helpers import bill, grade_id, new_rate, set_grade, set_grade_rates
 from tests.time_helpers import entry_row, err, log_time, ok_data, org_url, set_practice
 
@@ -359,10 +358,12 @@ async def test_bad_orders_and_callers_are_refused(client: AsyncClient) -> None:
         "Keep at least one rate switched on."
     )
     # The database refuses an empty order or a repeated source as well.
-    for bad in ("'{}'", "'{client,client}'", "'{client,role}'"):
-        with pytest.raises(IntegrityError, match="ck_organizations_wip_valuation_sources"):
+    for bad in ("[]", '["client", "client"]', '["client", "role"]'):
+        # A CHECK failure is error 3819, an OperationalError in PyMySQL.
+        with pytest.raises(DBAPIError, match="ck_organizations_wip_valuation_sources"):
             await sql(
-                f"UPDATE organizations SET wip_valuation_sources = {bad}::text[] WHERE id = :o",  # noqa: S608
+                "UPDATE organizations SET wip_valuation_sources = CAST(:bad AS JSON) WHERE id = :o",
+                bad=bad,
                 o=org["id"],
             )
     # Editing the practice settings is needed.
@@ -481,10 +482,13 @@ async def test_the_routes_are_documented(client: AsyncClient) -> None:
     assert "Deprecated" in read["rate_mode"]["description"]
 
 
-# --- Migration 080 -----------------------------------------------------------------------
+# --- The former rate mode column (kept for one release) -----------------------------------
+# Migration 080's data step (each practice's order from its rate mode) ran on PostgreSQL only;
+# its downgrade test was retired with the PostgreSQL history. What the application itself keeps
+# doing is tested here.
 
 
-async def test_migration_080_gives_each_practice_the_order_of_its_rate_mode(
+async def test_every_write_of_the_order_keeps_the_former_rate_mode_in_step(
     client: AsyncClient,
 ) -> None:
     practices = {}
@@ -496,50 +500,13 @@ async def test_migration_080_gives_each_practice_the_order_of_its_rate_mode(
             )
         )
         practices[mode] = (owner, org)
-    owner, org = practices["staff_first"]
     custom_owner, custom = await practice(client, "Custom Order")
     ok_data(await put(client, custom_owner, custom, ["grade", "client"]))
-    person = await staff(org)
-    no_rate = await make_time_entry(org, person, charge_rate=0, cost_rate=0, rate_source="none")
-    # Every write of the order keeps the former rate mode column in step (one release).
-    rows = await sql("SELECT id::text AS id, rate_mode FROM organizations")
-    modes = {row["id"]: row["rate_mode"] for row in rows}
+    rows = await sql("SELECT id, rate_mode FROM organizations")
+    modes = {str(row["id"]): row["rate_mode"] for row in rows}
     for mode, (_, practice_org) in practices.items():
         assert modes[practice_org["id"]] == mode
     assert modes[custom["id"]] == "grade_only"
-
-    try:
-        down = await migrate("downgrade", "079")
-        assert down.returncode == 0, down.stderr
-        rows = await sql("SELECT id::text AS id, rate_mode FROM organizations")
-        modes = {row["id"]: row["rate_mode"] for row in rows}
-        for mode, (_, practice_org) in practices.items():
-            assert modes[practice_org["id"]] == mode
-        assert modes[custom["id"]] == "grade_only"
-        assert await sql(
-            "SELECT rate_source FROM time_entries WHERE id = :i", i=str(no_rate.id)
-        ) == [{"rate_source": "default"}]
-        # The time entries refuse "none" again.
-        with pytest.raises(IntegrityError, match="ck_time_entries_rate_source"):
-            await sql(
-                "UPDATE time_entries SET rate_source = 'none' WHERE id = :i", i=str(no_rate.id)
-            )
-    finally:
-        up = await migrate("upgrade", "head")
-    assert up.returncode == 0, up.stderr
-    assert await sql("SELECT version_num FROM alembic_version") == [
-        {"version_num": head_revision()}
-    ]
-    rows = await sql("SELECT id::text AS id, wip_valuation_sources AS s FROM organizations")
-    sources = {row["id"]: row["s"] for row in rows}
-    for mode, (_, practice_org) in practices.items():
-        assert sources[practice_org["id"]] == list(RATE_MODE_SOURCES[mode]), mode
-    assert sources[custom["id"]] == list(RATE_MODE_SOURCES["grade_only"])
-    # The former column stays for one release, in step with the order.
-    rows = await sql("SELECT id::text AS id, rate_mode FROM organizations")
-    modes = {row["id"]: row["rate_mode"] for row in rows}
-    for mode, (_, practice_org) in practices.items():
-        assert modes[practice_org["id"]] == mode
     ok_data(await put(client, custom_owner, custom, ["client", "staff"]))
     assert await sql("SELECT rate_mode FROM organizations WHERE id = :o", o=custom["id"]) == [
         {"rate_mode": "staff_only"}
@@ -547,5 +514,3 @@ async def test_migration_080_gives_each_practice_the_order_of_its_rate_mode(
     # A practice created now starts with the ticket's default order.
     _, fresh = await practice(client, "Fresh Practice")
     assert fresh["wip_valuation_sources"] == NEW_PRACTICE
-    check = await migrate("check")
-    assert check.returncode == 0, check.stdout + check.stderr

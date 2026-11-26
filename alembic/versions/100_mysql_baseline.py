@@ -1022,7 +1022,7 @@ def upgrade() -> None:
     )
     op.create_table(
         "email_templates",
-        sa.Column("template_key", sa.String(length=49), nullable=False),
+        sa.Column("template_key", sa.String(length=50), nullable=False),
         sa.Column("subject", sa.String(length=200), nullable=False),
         sa.Column("html_body", sa.Text(), nullable=False),
         sa.Column("text_body", sa.Text(), nullable=False),
@@ -1200,7 +1200,7 @@ def upgrade() -> None:
     )
     op.create_table(
         "integration_cursors",
-        sa.Column("integration", sa.String(length=39), nullable=False),
+        sa.Column("integration", sa.String(length=40), nullable=False),
         sa.Column("cursor", sa.Text(), nullable=False),
         sa.Column(
             "updated_at",
@@ -1323,7 +1323,7 @@ def upgrade() -> None:
     )
     op.create_table(
         "integration_sync_logs",
-        sa.Column("integration", sa.String(length=39), nullable=False),
+        sa.Column("integration", sa.String(length=40), nullable=False),
         sa.Column("direction", sa.String(length=32), server_default="inbound", nullable=False),
         sa.Column("operation", sa.String(length=60), nullable=False),
         sa.Column("entity_type", sa.Text(), nullable=True),
@@ -1410,7 +1410,7 @@ def upgrade() -> None:
             "show_bank_details", sa.Boolean(), server_default=sa.text("true"), nullable=False
         ),
         sa.Column("footer_text", sa.String(length=1000), nullable=True),
-        sa.Column("accent_color", sa.String(length=6), nullable=True),
+        sa.Column("accent_color", sa.String(length=7), nullable=True),
         sa.Column("watermark_text", sa.String(length=24), nullable=True),
         sa.Column("watermark_image_key", sa.Text(), nullable=True),
         sa.Column("watermark_image_type", sa.Text(), nullable=True),
@@ -1586,7 +1586,7 @@ def upgrade() -> None:
     )
     op.create_table(
         "notification_settings",
-        sa.Column("type", sa.String(length=49), nullable=False),
+        sa.Column("type", sa.String(length=50), nullable=False),
         sa.Column("enabled", sa.Boolean(), server_default=sa.text("true"), nullable=False),
         sa.Column("default_in_app", sa.Boolean(), server_default=sa.text("true"), nullable=False),
         sa.Column("default_email", sa.Boolean(), server_default=sa.text("true"), nullable=False),
@@ -1632,7 +1632,7 @@ def upgrade() -> None:
     )
     op.create_table(
         "onboarding_progress",
-        sa.Column("step_key", sa.String(length=39), nullable=False),
+        sa.Column("step_key", sa.String(length=40), nullable=False),
         sa.Column("state", sa.String(length=32), nullable=False),
         sa.Column(
             "updated_by", mysql.CHAR(36, charset="ascii", collation="ascii_bin"), nullable=True
@@ -2634,7 +2634,7 @@ def upgrade() -> None:
         sa.Column("leaving_date", sa.Date(), nullable=True),
         sa.Column("login_enabled", sa.Boolean(), server_default=sa.text("true"), nullable=False),
         sa.Column("invited_at", mysql.DATETIME(fsp=6), nullable=True),
-        sa.Column("mobile_number", sa.String(length=15), nullable=True),
+        sa.Column("mobile_number", sa.String(length=16), nullable=True),
         sa.Column("id", mysql.CHAR(36, charset="ascii", collation="ascii_bin"), nullable=False),
         sa.Column(
             "created_at",
@@ -3445,7 +3445,7 @@ def upgrade() -> None:
         sa.Column(
             "user_id", mysql.CHAR(36, charset="ascii", collation="ascii_bin"), nullable=False
         ),
-        sa.Column("type", sa.String(length=49), nullable=False),
+        sa.Column("type", sa.String(length=50), nullable=False),
         sa.Column("in_app", sa.Boolean(), nullable=False),
         sa.Column("email", sa.Boolean(), nullable=False),
         sa.Column("sms", sa.Boolean(), nullable=False),
@@ -3496,7 +3496,7 @@ def upgrade() -> None:
         sa.Column(
             "user_id", mysql.CHAR(36, charset="ascii", collation="ascii_bin"), nullable=False
         ),
-        sa.Column("type", sa.String(length=49), nullable=False),
+        sa.Column("type", sa.String(length=50), nullable=False),
         sa.Column("title", sa.String(length=200), nullable=False),
         sa.Column("body", sa.Text(), server_default=sa.text("('')"), nullable=False),
         sa.Column("link", sa.String(length=300), nullable=True),

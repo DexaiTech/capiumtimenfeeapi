@@ -93,7 +93,7 @@ class Notification(Base, IdMixin, OrgScopedMixin, TimestampMixin):
     )
 
     user_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
-    type: Mapped[str] = mapped_column(String(49), nullable=False)
+    type: Mapped[str] = mapped_column(String(50), nullable=False)
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     body: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("('')"))
     link: Mapped[str | None] = mapped_column(String(300))
@@ -122,7 +122,7 @@ class NotificationPreference(Base, IdMixin, OrgScopedMixin, TimestampMixin):
     )
 
     user_id: Mapped[uuid.UUID] = mapped_column(Uuid36(), nullable=False)
-    type: Mapped[str] = mapped_column(String(49), nullable=False)
+    type: Mapped[str] = mapped_column(String(50), nullable=False)
     in_app: Mapped[bool] = mapped_column(Boolean, nullable=False)
     email: Mapped[bool] = mapped_column(Boolean, nullable=False)
     sms: Mapped[bool] = mapped_column(Boolean, nullable=False)
@@ -139,7 +139,7 @@ class NotificationSetting(Base, IdMixin, OrgScopedMixin, TimestampMixin):
         CheckConstraint(_TYPE_FORMAT, name="type_format"),
     )
 
-    type: Mapped[str] = mapped_column(String(49), nullable=False)
+    type: Mapped[str] = mapped_column(String(50), nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
     default_in_app: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("true")
@@ -173,7 +173,7 @@ class EmailTemplate(Base, IdMixin, OrgScopedMixin, TimestampMixin):
         CheckConstraint("char_length(text_body) BETWEEN 1 AND 50000", name="text_body_length"),
     )
 
-    template_key: Mapped[str] = mapped_column(String(49), nullable=False)
+    template_key: Mapped[str] = mapped_column(String(50), nullable=False)
     subject: Mapped[str] = mapped_column(String(200), nullable=False)
     html_body: Mapped[str] = mapped_column(Text, nullable=False)
     text_body: Mapped[str] = mapped_column(Text, nullable=False)

@@ -4,7 +4,7 @@ VAT resolution and rounding."""
 import asyncio
 from datetime import date
 
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 
 from app.db.session import get_sessionmaker
 from tests.billing_helpers import (
@@ -491,7 +491,9 @@ async def low_default_and_standard_services(client, p) -> tuple:
     accounts = await service_id(p.org, "ACCS")
     async with get_sessionmaker()() as session:
         await session.execute(
-            text("UPDATE services SET vat_rate_id = :rate WHERE id = ANY(:ids)"),
+            text("UPDATE services SET vat_rate_id = :rate WHERE id IN :ids").bindparams(
+                bindparam("ids", expanding=True)
+            ),
             {"rate": str(standard), "ids": [str(books), str(accounts)]},
         )
         await session.commit()

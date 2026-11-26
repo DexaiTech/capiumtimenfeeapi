@@ -1,6 +1,7 @@
 """The payment reminder schedule: days counted from the due date (before, on and after it), one
 reminder for each day as it comes, until the invoice is paid."""
 
+import json
 import uuid
 from datetime import date, timedelta
 
@@ -112,8 +113,8 @@ async def practice_with_reminders(client, schedule: list[int] | None = None):
     )
     if schedule is not None:
         await sql(
-            "UPDATE organizations SET payment_reminder_schedule = :s WHERE id = :o",
-            s=schedule,
+            "UPDATE organizations SET payment_reminder_schedule = CAST(:s AS JSON) WHERE id = :o",
+            s=json.dumps(schedule),
             o=p.id,
         )
     return p
@@ -162,7 +163,7 @@ async def test_each_day_of_the_schedule_reminds_once_until_the_invoice_is_paid(c
 
     # A week later the 7-day step has come: the reminder (overdue wording) goes.
     await sql(
-        "UPDATE payment_reminders SET sent_on = :d, created_at = now() - interval '7 days' "
+        "UPDATE payment_reminders SET sent_on = :d, created_at = now() - INTERVAL 7 DAY "
         "WHERE organization_id = :o",
         d=now - timedelta(days=7),
         o=p.id,
@@ -199,7 +200,7 @@ async def test_a_manual_reminder_counts_for_the_day_it_covers(client):
         "INSERT INTO payment_reminders (id, organization_id, invoice_id, batch_id, template, "
         "source, status, sent_on, recipients, days_overdue, amount_due, sent_by, sent_at) "
         "SELECT UUID(), :o, :i, UUID(), 'client_payment_reminder', 'manual', "
-        "'sent', :d, ARRAY['billing@widgets.example'], 8, 100, :u, now()",
+        "'sent', :d, JSON_ARRAY('billing@widgets.example'), 8, 100, :u, now()",
         o=p.id,
         i=invoice["id"],
         d=now - timedelta(days=1),

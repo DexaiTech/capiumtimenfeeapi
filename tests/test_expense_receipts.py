@@ -162,8 +162,7 @@ async def test_an_upload_is_audited(client):
         "size_bytes": len(PDF),
     }
     [row] = await sql(
-        "SELECT ip_address::text AS ip, request_id FROM audit_logs "
-        "WHERE action = 'expense_receipt.added'"
+        "SELECT ip_address AS ip, request_id FROM audit_logs WHERE action = 'expense_receipt.added'"
     )
     assert row["ip"] and row["request_id"]
 

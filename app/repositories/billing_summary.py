@@ -10,6 +10,7 @@ from sqlalchemy import ColumnElement, Integer, and_, case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Disbursement, Job, TimeEntry
+from app.repositories.reports import nulls_last
 from app.repositories.time_entries import wip_time_clause
 from app.repositories.wip import eligible_disbursement_conditions
 
@@ -123,7 +124,7 @@ class BillingSummaryRepository:
                 wip_time_clause(require_approval),
             )
             .group_by(*keys)
-            .order_by(*keys)
+            .order_by(*nulls_last(*keys))  # NULL job last, as PostgreSQL sorted
         )
         return [
             ReadyPiece(row[0], row[1], row[2], int(row[3]), int(row[4]), int(row[5]))
